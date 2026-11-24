@@ -10,7 +10,9 @@ cards-spec against them byte for byte. So the two implementations must agree
 on:
 - the digest (design §1.5): SHA-256 of the normalized doc, compact JSON,
   keys in schema order, `"wait"` last; the envelope line around it;
-- the answer message (§3.3): line 1's summary and cuts, line 2's key order.
+- the answer message (§3.3): line 1's summary and cuts, line 2's key order;
+- the extension's success result (§1.5): the envelope, the options and
+  fields cut to the 1 KiB cap, the trailer (`fixtures/results.json`).
 
 The `doc` of each fixture is the C1 corpus's (normalization is not
 reimplemented here; cards-spec's output is checked against it directly).
@@ -28,6 +30,10 @@ CATALOG = 1
 ENVELOPE_MAX_BYTES = 256
 LINE_MAX = 200
 PIECE_MAX = 40
+RESULT_MAX_BYTES = 1024
+LABEL_MAX = 60
+LIVE = "The user may also just reply in text. Keep working meanwhile."
+WAIT = "You can't continue without it: end your turn now; the answer starts your next turn."
 
 DOC_KEYS = ["question", "detail", "options", "multi", "default", "fields"]
 OPTION_KEYS = ["label", "hint", "note"]
@@ -97,6 +103,36 @@ def sanitize_single(s):
         else:
             out.append(c)
     return "".join(out)
+
+
+def result(card, doc, wait):
+    """§1.5: the envelope, then the options (numbered, the default marked)
+    and the fields, as many as fit in 1024 bytes beside the fixed trailer;
+    when the next one wouldn't fit, `  …and N more`."""
+    size = lambda s: len(s.encode())
+    head = envelope(card, doc, wait)
+    tail = [f'Its answer will come as a user message starting "[card {card}]", values as JSON on the next line.',
+            WAIT if wait else LIVE]
+    default = doc.get("default")
+    chosen = [default] if isinstance(default, str) else (default or [])
+    items = [f"  {i + 1}. {cut(o['label'], LABEL_MAX)}{' (suggested)' if o['label'] in chosen else ''}"
+             for i, o in enumerate(doc.get("options", []))]
+    items += [f"  {f['id']}: {cut(f['label'], LABEL_MAX)}{' (optional)' if f['optional'] else ''}"
+              for f in doc.get("fields", [])]
+    more = lambda n: f"  …and {n} more"
+    room = RESULT_MAX_BYTES - size(head) - sum(1 + size(line) for line in tail)
+    lines = [head]
+    for i, item in enumerate(items):
+        after = len(items) - i - 1
+        need = 1 + size(item) + (1 + size(more(after)) if after else 0)
+        if need > room:
+            lines.append(more(len(items) - i))
+            break
+        room -= 1 + size(item)
+        lines.append(item)
+    text = "\n".join(lines + tail)
+    assert size(text) <= RESULT_MAX_BYTES, size(text)
+    return text
 
 
 def cut(s, n):
@@ -193,15 +229,27 @@ def fill_round_trips(f):
         case["text"] = message(case["card"], doc, case["kind"], case["values"])
 
 
+def fill_results(f):
+    for case in f["cases"]:
+        if "fixture" in case:
+            v = json.loads((FIX / "valid" / f"{case['fixture']}.json").read_text())
+            card, doc, wait = v["card"], v["doc"], v["wait"]
+        else:
+            card, doc, wait = case["card"], case["doc"], case["wait"]
+        case["result"] = result(card, doc, wait)
+
+
 def main():
     check = sys.argv[1:] == ["--check"]
     stale = []
-    files = sorted((FIX / "valid").glob("*.json")) + [FIX / "messages" / "round_trips.json"]
+    files = sorted((FIX / "valid").glob("*.json")) + [FIX / "messages" / "round_trips.json", FIX / "results.json"]
     for path in files:
         before = path.read_text()
         f = json.loads(before)
         if path.parent.name == "valid":
             fill_valid(path.stem, f)
+        elif path.name == "results.json":
+            fill_results(f)
         else:
             fill_round_trips(f)
         after = dump(f)

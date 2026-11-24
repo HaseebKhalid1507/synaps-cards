@@ -69,6 +69,16 @@ last-wins), as are lone surrogates, numbers out of `f64` range and nesting past 
 - `look_alikes.json`: texts that are not a card's answer (`parses: null`: ordinary text), or that read as one and then validate
   against `fixture`'s doc to `reply`, or fail with `error`.
 
+## `results.json`
+
+The extension's success results (design §1.5), one per case: a `valid/` fixture's card (`fixture`), or the case's own
+`card`, `input` (normalized to `doc`) and `wait`. `scripts/oracle.py` writes each `result`, and `cards-ext` must build
+exactly it. A result is at most 1024 bytes of UTF-8: line 1 is the envelope (at most 256 bytes, only its question cut),
+then the options, numbered, the default marked `(suggested)`, then the fields as `id: Label`, an optional one marked
+`(optional)`; when the next one wouldn't fit beside the trailer, the list ends `  …and N more`. The trailer is two fixed
+lines, always whole; with `wait`, the second tells the agent to end its turn. The worst cases put every string at its
+bound in a 4-byte script.
+
 ## `casefold.json`
 
 The key labels are compared by, for "labels must differ (ignoring case)" and for matching `default` to a label: Unicode full case
