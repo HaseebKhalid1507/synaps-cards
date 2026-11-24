@@ -79,6 +79,13 @@ then the options, numbered, the default marked `(suggested)`, then the fields as
 lines, always whole; with `wait`, the second tells the agent to end its turn. The worst cases put every string at its
 bound in a 4-byte script.
 
+## `fold/smoke.json`
+
+A real host's history, as the daemon sends it: `get_messages` after the answer's turn in `scripts/smoke.py` (SynapsCLI `dev`
+`0a71ea0d`, a scripted model; `source` names the run). It holds three bound cards, an invalid call, a close of an id no card has,
+a rate refusal, a worker's call, and the answer message to the first card. `crates/cards-spec/src/fold/tests.rs` folds it. Its
+ids are that run's, so it is copied, not regenerated.
+
 ## `casefold.json`
 
 The key labels are compared by, for "labels must differ (ignoring case)" and for matching `default` to a label: Unicode full case
