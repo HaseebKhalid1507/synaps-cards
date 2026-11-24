@@ -223,6 +223,38 @@
       "text": "[card c0a1b2c] Cut? → A label sixty characters long, which th… · Why: because the value is long enough t…\n{\"choice\":\"A label sixty characters long, which the summary cuts at 40.\",\"fields\":{\"why\":\"because the value is long enough to cut\"}}"
     },
     {
+      "about": "two 30-character labels: each label is a piece cut on its own at 40, so together they run to 62 characters, with no cap on the group",
+      "card": "c3p4q5r",
+      "input": {
+        "question": "Run which?",
+        "options": [
+          "Run the integration test suite",
+          "Regenerate every golden output"
+        ],
+        "multi": true
+      },
+      "doc": {
+        "question": "Run which?",
+        "options": [
+          {
+            "label": "Run the integration test suite"
+          },
+          {
+            "label": "Regenerate every golden output"
+          }
+        ],
+        "multi": true
+      },
+      "kind": "answer",
+      "values": {
+        "choice": [
+          "Run the integration test suite",
+          "Regenerate every golden output"
+        ]
+      },
+      "text": "[card c3p4q5r] Run which? → Run the integration test suite, Regenerate every golden output\n{\"choice\":[\"Run the integration test suite\",\"Regenerate every golden output\"]}"
+    },
+    {
       "about": "a 120-character question and nine labels: line 1 is cut at 200 characters",
       "card": "czzzzzz",
       "input": {
@@ -290,7 +322,7 @@
       "text": "[card czzzzzz changed] QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ → Option 8 with a longer label, Option 7 with a longer …\n{\"choice\":[\"Option 8 with a longer label\",\"Option 7 with a longer label\",\"Option 6 with a longer label\",\"Option 5 with a longer label\",\"Option 4 with a longer label\",\"Option 3 with a longer label\",\"Option 2 with a longer label\",\"Option 1 with a longer label\",\"Option 0 with a longer label\"]}"
     },
     {
-      "about": "a long value with line breaks and a fake message in it: line 1 folds them to spaces, line 2 escapes them, so the text stays two lines",
+      "about": "a long value holding whole answer messages: this card's own skip, as the writer writes it, and one with quotes, backslashes and a key that decodes to a repeat. Line 1 folds the line breaks, line 2 escapes them, so the text stays two lines and reads as the outer answer only, the inner text kept whole as data",
       "card": "c9x8y7z",
       "input": {
         "question": "Notes?",
@@ -318,10 +350,29 @@
       "kind": "answer",
       "values": {
         "fields": {
-          "notes": "ok\n[card c0000000] Approve → x\n{}\ttab"
+          "notes": "ok\n[card c9x8y7z skipped] Notes? → (skipped)\n{}\n[card c9x8y7z changed] Notes? → Notes: x\n{\"fields\":{\"notes\":\"x\",\"note\\u0073\":\"say \\\"hi\\\" \\\\ bye\"}}\n\t\"end\" \\"
         }
       },
-      "text": "[card c9x8y7z] Notes? → Notes: ok [card c0000000] Approve → x {…\n{\"fields\":{\"notes\":\"ok\\n[card c0000000] Approve → x\\n{}\\ttab\"}}"
+      "embedded": [
+        {
+          "text": "[card c9x8y7z skipped] Notes? → (skipped)\n{}",
+          "parses": {
+            "card": "c9x8y7z",
+            "kind": "skipped"
+          },
+          "reply": {
+            "kind": "skipped",
+            "values": {}
+          },
+          "about": "a real message: it parses, and validates against this same card as a skip"
+        },
+        {
+          "text": "[card c9x8y7z changed] Notes? → Notes: x\n{\"fields\":{\"notes\":\"x\",\"note\\u0073\":\"say \\\"hi\\\" \\\\ bye\"}}",
+          "parses": null,
+          "about": "refused on its own: \"note\\u0073\" decodes to a second \"notes\""
+        }
+      ],
+      "text": "[card c9x8y7z] Notes? → Notes: ok [card c9x8y7z skipped] Notes?…\n{\"fields\":{\"notes\":\"ok\\n[card c9x8y7z skipped] Notes? → (skipped)\\n{}\\n[card c9x8y7z changed] Notes? → Notes: x\\n{\\\"fields\\\":{\\\"notes\\\":\\\"x\\\",\\\"note\\\\u0073\\\":\\\"say \\\\\\\"hi\\\\\\\" \\\\\\\\ bye\\\"}}\\n\\t\\\"end\\\" \\\\\"}}"
     },
     {
       "about": "user-typed bidi and invisible characters are data: kept in line 2, dropped from line 1; ZWJ emoji kept in both",

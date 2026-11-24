@@ -62,7 +62,10 @@ last-wins), as are lone surrogates, numbers out of `f64` range and nesting past 
 ## `messages/`
 
 - `round_trips.json`: answer messages, each built from its case's `input` (normalized to `doc`), `kind` and `values`. The first four
-  are §3.3's examples. An implementation must build exactly `text` and read it back as the same reply.
+  are §3.3's examples. An implementation must build exactly `text` and read it back as the same reply. A case's `embedded` lists
+  whole messages written inside its values: each is there verbatim and, read on its own, `parses` as recorded (and validates against
+  the case's doc to `reply`) or is refused (`null`), while `text` still reads only as the outer reply. Summaries cut each piece
+  (a label, `Label: value`) at 40 characters on its own; a group of labels, joined with `, `, has no cap of its own.
 - `look_alikes.json`: texts that are not a card's answer (`parses: null`: ordinary text), or that read as one and then validate
   against `fixture`'s doc to `reply`, or fail with `error`.
 

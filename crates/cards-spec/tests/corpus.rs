@@ -113,7 +113,7 @@ fn the_corpus_is_whole() {
         read("messages/round_trips.json")["cases"].as_array().unwrap().len(),
         read("messages/look_alikes.json")["cases"].as_array().unwrap().len(),
     );
-    assert_eq!((valid.len(), invalid.len(), read_dir("raw").len(), messages), (16, 34, 12, (10, 31)));
+    assert_eq!((valid.len(), invalid.len(), read_dir("raw").len(), messages), (16, 34, 12, (11, 31)));
 }
 
 #[test]
@@ -251,6 +251,33 @@ fn message_round_trips() {
         assert_eq!(serde_json::to_value(&doc).unwrap(), c["doc"], "{what}: the case's doc");
         let r = reply(&doc, &c["kind"], &c["values"]);
         round_trip(&id(&c["card"]), &doc, &r, c["text"].as_str().unwrap(), what);
+        // Shady #2 P3: whole messages inside a value. Each is in the value
+        // verbatim and reads on its own as recorded (a real one is a real
+        // answer to this card); the round trip above read only the outer one.
+        for e in c.get("embedded").and_then(Value::as_array).into_iter().flatten() {
+            let inner = e["text"].as_str().unwrap();
+            assert!(has_text(&c["values"], inner), "{what}: {inner:?} is in a value");
+            match (message::parse(inner), &e["parses"]) {
+                (None, Value::Null) => {}
+                (Some(p), want) if *want != Value::Null => {
+                    assert_eq!(json!({"card": p.card.as_str(), "kind": kind_name(p.kind)}), *want, "{what}: {inner:?}");
+                    let real = reply(&doc, &e["reply"]["kind"], &e["reply"]["values"]);
+                    assert_eq!(p.validate(&doc).unwrap(), real, "{what}: {inner:?} answers this card");
+                    assert_ne!(real, r, "{what}: the inner reply is not the outer one");
+                }
+                (got, want) => panic!("{what}: {inner:?} parses as {got:?}, want {want}"),
+            }
+        }
+    }
+}
+
+/// Whether a string anywhere in `v` contains `s`.
+fn has_text(v: &Value, s: &str) -> bool {
+    match v {
+        Value::String(t) => t.contains(s),
+        Value::Array(a) => a.iter().any(|v| has_text(v, s)),
+        Value::Object(o) => o.values().any(|v| has_text(v, s)),
+        _ => false,
     }
 }
 
