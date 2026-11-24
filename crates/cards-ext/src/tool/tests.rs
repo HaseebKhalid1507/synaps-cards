@@ -265,21 +265,15 @@ fn three_a_minute_and_six_in_ten() {
 }
 
 /// Ids from a script of draws; drawing past its end fails the test.
-fn scripted(draws: &[u64]) -> Ids {
-    let mut draws = draws.to_vec().into_iter();
+fn scripted<const N: usize>(draws: [u64; N]) -> Ids {
+    let mut draws = draws.into_iter();
     Ids::drawing(move || draws.next().expect("drew past the script"))
 }
 
 #[test]
 fn an_id_is_c_and_its_draws_six_lowest_base_36_digits() {
-    let pairs = [
-        (0, "caaaaaa"),
-        (35, "c9aaaaa"),
-        (36, "cabaaaa"),
-        (36u64.pow(6) - 1, "c999999"),
-        (36u64.pow(6), "caaaaaa"),
-        (u64::MAX, "cp2q2eg"),
-    ];
+    let pairs =
+        [(0, "caaaaaa"), (35, "c9aaaaa"), (36, "cabaaaa"), (36u64.pow(6) - 1, "c999999"), (36u64.pow(6), "caaaaaa"), (u64::MAX, "cp2q2eg")];
     for (v, id) in pairs {
         assert_eq!(Ids::id_of(v).as_str(), id, "{v}");
     }
@@ -292,7 +286,7 @@ fn an_id_is_c_and_its_draws_six_lowest_base_36_digits() {
 /// both name `chaaaaa`, so the second id is 8's.
 #[test]
 fn a_repeated_id_draws_again() {
-    let mut ids = scripted(&[7, 7, 36u64.pow(6) + 7, 8, 0]);
+    let mut ids = scripted([7, 7, 36u64.pow(6) + 7, 8, 0]);
     assert_eq!(ids.mint().as_str(), "chaaaaa");
     assert_eq!(ids.mint().as_str(), "ciaaaaa");
     assert_eq!(ids.mint().as_str(), "caaaaaa");
