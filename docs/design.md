@@ -750,7 +750,7 @@ synaps-cards/                       (also the plugin root: clone as ~/.synaps-cl
 
 ## 10. Decisions for Haseeb
 
-1. **Repo visibility.** The desk's CI needs `cards-spec`, and a private git dependency needs a deploy key. **Recommendation: make synaps-cards public.** It holds no secrets.
+1. **Repo visibility.** The desk's CI needs `cards-spec`, and a private git dependency needs a deploy key. **Decided: synaps-cards is public** (Haseeb, after S3 merged). It holds no secrets. The desk takes `cards-spec` as a git dependency pinned by a full `rev`, with no deploy key.
 2. **Naming.** The plugin is `cards`, so the model sees `cards_ui`, short and plain. **Recommendation: yes.** Haseeb's install should clone into `~/.synaps-cli/plugins/cards`, and add `ext.cards:ui` to `tools.always_loaded` if disclosure is on.
 3. **TUI widget.** v1 is plain text only. A live HUD needs `privacy.llm_content`, to clear it on answer. **Recommendation: plain text.** Revisit only if TUI users ask.
 4. **"Always do this."** An auto-answer would send a user message without a user action. **Recommendation: not in v1.** D4 preselects only, and a real "Always" needs its own consent design.
