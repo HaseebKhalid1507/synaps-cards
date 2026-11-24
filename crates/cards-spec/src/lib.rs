@@ -7,6 +7,10 @@
 //!   [`Envelope`] line (§1.5).
 //! - [`answer`]: [`parse_answer`] (§1.4's answer shapes).
 //! - [`message`]: the answer message, built and parsed (§3.3).
+//! - [`fold`]: every card's state, a pure fold over the session's history
+//!   (§2.3).
+//! - [`memo`]: the desk's answers in flight until the history shows them,
+//!   as pure transitions (§3.5).
 //! - [`sanitize`]: the one sanitizer for every string a card renders, the
 //!   refusals, and [`sanitize::fold_key`] (case folding pinned to the
 //!   corpus's Unicode, never the toolchain's).
@@ -31,6 +35,8 @@ pub mod answer;
 mod casefold;
 pub mod digest;
 pub mod doc;
+pub mod fold;
+pub mod memo;
 pub mod message;
 pub mod sanitize;
 pub mod types;

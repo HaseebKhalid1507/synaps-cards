@@ -54,6 +54,16 @@
 | D2 | One PR spans two failure domains | D2 | **D2a**: delivery, routing, reconciliation, mouse and form answers. **D2b**: keyboard, navigation and focus (§9.3) |
 | — | The 1 KiB result promise had no byte rule; the digest's wording; the guard was an actor-id check | | §1.5 gets a UTF-8 byte cap and a truncation order, and the digest is "a 64-bit checksum, not an identity". §3.5 uses `input_gate()` plus the binding check |
 
+### Amended by S3's review (synaps-cards #4)
+
+| # | Shady found | Was | Now |
+|---|---|---|---|
+| P1 | A settled view showing our copy in the slot left an unconfirmed entry unconfirmed, and Resend sent it again | Rule 3 for checking entries only; the click checked the gate | Rule 3 moves an unconfirmed entry too, and the click runs the settle rules on its own settled view before it sends (§3.5) |
+| P2 | A held answer whose slot the next turn's steer replaced stayed held for good | Held left only on the fold or `Dequeued` | An `Idle` while held has the next settled view check the slot. Still ours: held. Not ours: the settle rule, with `Idle`'s cause (§3.5) |
+| P2 | An earlier card whose id was bound again stayed answerable, and answered the later card | Latest id wins, in the map only | The earlier card is **replaced**: it keeps its receipt and takes no answer (§2.3). An entry records its card's binding, and a new binding drops it (§3.5) |
+| P2 | Another tool's call reusing a pending card's tool id let that call's result bind the card | Latest **card** call | A tool id belongs to its latest call of any tool, in a history and live alike (§2.2) |
+| — | The S3 PR's seven decisions where §3.5 was silent | the PR body | §2.2, §2.3 and §3.5, "Where the table was silent" |
+
 ---
 
 ## 0. What carries over, what's dropped
@@ -246,7 +256,7 @@
 
 ### 2.2 Recognising a card
 
-1. **The tool call.** A `tool_use` named `cards_ui`, or `cards:ui` (the runtime form), is a card candidate. Another name, including a collision suffix such as `cards_ui_2`, is drawn as an ordinary tool row: the fail-safe.
+1. **The tool call.** A `tool_use` named `cards_ui`, or `cards:ui` (the runtime form), is a card candidate. Another name, including a collision suffix such as `cards_ui_2`, is drawn as an ordinary tool row: the fail-safe. A tool id belongs to its **latest call, of any tool**: a provider may use one again. A card or a close still waiting for its result when a later call takes its id never gets one (the card is plain), so another tool's output can't bind it.
 2. **The input.** It goes through `cards_spec::parse_input`, the same function the extension ran, and is normalized. If it is invalid, or comes from a newer catalog this build doesn't know, the call is drawn as an ordinary tool row, and the user can still answer in text.
 3. **The result.** Line 1 must parse as the envelope (§1.5), name a version this build knows, and carry the digest of step 2's normalized doc and `wait` (§1.5). That binds the id to the exact doc drawn, in the mode it was asked in. Anything else is a plain row:
    - **a mismatch:** a hook rewrote the input before the tool ran (`CLI:ae/runtime/stream.rs:2350-2390`), while the transcript keeps the model's original call. The extension validated one card, and the desk would draw another;
@@ -258,7 +268,7 @@
 ### 2.3 State on attach: a pure fold over history (`cards_spec::fold`)
 
 The fold's input is source-agnostic, so it works over Full history, live events, or a test fixture. It takes a sequence of three kinds of event:
-- `Call{tool_id, name, input}`, from an assistant `tool_use` block;
+- `Call{tool_id, name, input}`, from every assistant `tool_use` block, of any tool, because a call takes its tool id over (§2.2). Only a card call's input is read;
 - `Result{tool_id, text}`, from a `tool_result` block's text;
 - `User{text}`, from **a genuine outer user message only**:
   - `role: "user"`, its content with the trailing extension blocks removed by the host's own rule: only when `_synaps_hooked` counts them and each is a saved block, else all of it is the user's (`CLI:crates/agent-core/src/core/extension_context.rs:213-261`; `protocol.md:838-860`);
@@ -272,7 +282,8 @@ The fold's input is source-agnostic, so it works over Full history, live events,
 | `answered{values, rev, at}` | The latest **valid** answer message to that id that comes after the card (§3.3). `rev` counts the answers. Latest wins, always: A, B, A reads as A, as the model reads it. Nothing is de-duplicated. |
 | `skipped` | The latest answer is a skip. |
 | `closed` | A later `cards_ui {close: id}` call whose result reads `Card <id> closed (cards/1).` An answer already given keeps its receipt. |
-| `plain` | The result didn't bind (§2.2). It is drawn as a tool row. |
+| `plain` | The result didn't bind (§2.2), or a later call took its tool id before it came. It is drawn as a tool row. |
+| `replaced` | A later card was bound to its id. Ids are unique while the extension runs, not across a restart (§1.5), so the latest binding is the card the id names: answers to the id are checked against its doc and are its own, as the model reads them. The earlier card keeps its receipt and takes no answer: a click on it would answer another question. |
 | *(absent)* | The call is no longer in the visible history (compaction, `/new`, rollover): the card is gone. |
 
 There is no clock-based expiry. A card is moot when the agent closes it, the user skips it, or the history drops it.
@@ -383,29 +394,29 @@ The surviving answer lands in the compacted history as plain text, and the card 
 - The text joins the Live's `InFlight` with a target, which is either a pane's composer or the card `(session_id, card_id)`. Every give-back path returns a card entry to its card, never to a composer: a refusal, a detach, and a left attachment's echo, refusal or end (`DESK:sd/model.rs:1387-1400`). An echo confirms it, as it does now (`model.rs:1862-1866`).
 
 **The memo** is a pure state machine in `cards_spec::memo` (S3). D2a feeds it events.
-- **The entry.** It records `{session_id, card_id, text, values, seen, cause}`. `seen` is the card's answers in the fold at the moment of sending: their texts, in order. It is a list rather than a count, so a rollback can be recognised (rule 4).
+- **The entry.** It records `{session_id, card_id, binding, text, values, seen, cause}`. `binding` is the card that was pressed: its call's tool id and its doc's digest, with the id. Once the id names another card (replaced, §2.3) the entry no longer answers it. `seen` is the card's answers in the fold at the moment of sending: their texts, in order. It is a list rather than a count, so a rollback can be recognised (rule 4).
 - **One answer per card in flight.** While a card's entry is sending, queued, held or checking, another press does nothing.
 - **Bounds.** It lives in the desk process, keyed by session, with at most 32 entries per session. Admission never fails. A new entry evicts the oldest entry that is "in the chat" first, then the oldest unconfirmed one, then the oldest of any state. An evicted card shows the fold's state, as it would on any other desk, with no Resend.
 - **Matching** is by exact text. Two identical answers count as one, which is harmless because they say the same thing.
-- **What drops an entry.** The card closes or leaves the fold, a **superseding** answer appears, or the entry is evicted. A superseding answer is one later than ours in the fold, or, with ours absent, an answer that isn't in `seen` (rules 2 and 4). Our own answer appearing never drops the entry; it moves it to "in the chat", so the values survive a daemon crash before the save.
+- **What drops an entry.** The card closes, is replaced or leaves the fold, a **superseding** answer appears, or the entry is evicted. A superseding answer is one later than ours in the fold, or, with ours absent, an answer that isn't in `seen` (rules 2 and 4). Our own answer appearing never drops the entry; it moves it to "in the chat", so the values survive a daemon crash before the save.
 
 | State | Entered on | The card shows | Leaves on |
 |---|---|---|---|
 | sending | The press | The values, "Sending…" | An echo (`TurnStarted`, `Steered`): queued. `Refused`, `NotAttached` or a reload `Error`: not sent. No echo within 10 s, or a "steering queue full" notice: checking |
 | queued | The echo, or rule 3 while streaming | "Queued · the agent reads it at its next step" | `SteeringDelivered` with our text, or the fold: in the chat. `Dequeued` with our text, a `DriverRevoked` that lists it, `Idle`, `Attached`: checking |
-| held | Rule 3 while idle (d5, or a failed compaction) | "Held · it goes in after the agent's next turn" | The fold: in the chat. `Dequeued`: checking. No Resend, because the held copy would follow it |
+| held | Rule 3 while idle (d5, or a failed compaction) | "Held · it goes in after the agent's next turn" | The fold: in the chat. `Dequeued`, `Attached`: checking. After an `Idle`, the next settled view: Q still ours keeps it held; otherwise checking, settled at once with `Idle` as the trigger. No Resend, because the held copy would follow it |
 | checking | `Idle`, `Attached` (every reconnect bumps the epoch, `DESK:sd/model.rs:98-104`), `Dequeued`, `DriverRevoked`, a notice, the 10 s timeout | The values, "Checking…" | The settle rule, on the first settled view. With no settled view in 10 s: unconfirmed, "Couldn't check whether it arrived". A late echo or `SteeringDelivered` still moves it on (a parked session can take seconds to wake) |
 | in the chat | `SteeringDelivered` with our text, or rule 2 | The receipt | A superseding answer, a close or gone: dropped. A later settled history without it (a crash before the save): checking |
-| unconfirmed | The settle rule | The values, one line of cause, and **Resend** if the gate below holds | Resend: sending. The fold shows ours: in the chat. Superseded: dropped |
+| unconfirmed | The settle rule | The values, one line of cause, and **Resend** if the gate below holds | Resend: sending. On a settled view, rules 1–4: closed, replaced or gone: dropped; ours in F: in the chat; Q ours: queued or held; superseded: dropped. Rules 5 and 6 don't run again, so the cause stays |
 | not sent | `Refused`, `NotAttached`, a reload `Error` | "Not sent: <reason> · Retry" | Retry: sending |
-| dropped | A close, gone, superseded, evicted | The fold's state, with no Resend | — |
+| dropped | A close, replaced, gone, superseded, evicted | The fold's state, with no Resend | — |
 
 **The notice is a hint, not a receipt.** A "steering queue full" notice names no input and goes to every client. So it moves each of that Live's entries in sending to checking, and does nothing more.
 
 **The settle rule** runs only on a **settled view**: the history the desk holds matches the latest `Conversation` digest (`messages_len` and `messages_hash`, the check at `DESK:sc/history.rs:150`). After a mismatch, the client asks for the history again and applies the reply when it comes (`sc/client.rs:2291-2301`, `:2240-2253`). Until then the view is unsettled, so an `Idle` that arrives first (d4) can't produce a false Resend. D2a exposes the condition as `Live::history_settled()`. Let F be the card's answers in that history, and Q the digest's `queued_message`. The first rule that matches decides:
-1. The card is closed or absent from the history: **dropped**.
+1. The card is closed, replaced, or absent from the history: **dropped**. Closed and replaced drop on any view; absent only on a settled one.
 2. Ours is in F after the `seen` prefix: **in the chat**, unless an answer follows ours, in which case it is **dropped** as superseded.
-3. Q is ours: **queued** if the session is streaming, **held** if it is idle.
+3. Q is ours: **queued** if the session is streaming, **held** if it is idle. This holds for an unconfirmed entry too: whatever made the desk unsure, the slot shows it on its way.
 4. F is not a prefix of `seen`, so an answer we didn't know about is there: **dropped** as superseded. A **shorter** F is still a prefix. That is a rollback below what we had seen. For example, the card was saved with no answers, A was in the chat but never saved, B went out with `seen = [A]`, and the daemon crashed back to no answers. That falls through to rule 6 and offers Resend.
 5. Our echo was a driver echo (`Steered{delivered: false}` while idle and not compacting), and no `DriverRevoked` has arrived since: **unconfirmed**, "It may still be in the driver's queue".
 6. Otherwise **unconfirmed**, with the cause of what triggered the check:
@@ -418,12 +429,23 @@ The surviving answer lands in the compacted history as plain text, and the card 
 | `Attached` | "The connection dropped or the daemon restarted. It may not have arrived" |
 | `Idle` | "It didn't reach the chat. Another message may have replaced it" |
 
+**Held, after an `Idle`.** A held copy waits in the slot, outside any turn's steer channel. The next turn carries it over when it ends normally, and in that case no `Idle` comes: the host empties the slot, sends a `Conversation`, and then appends the copy (`actor.rs:4119-4125`, `:4180-4184`). So a settled view without ours means nothing until an `Idle` has come. After one, the next settled view decides. Q is still ours (another failed turn, d5): held. Q is something else or nothing: another message replaced the slot (d3 in a later turn), or nothing is left to carry it, so the entry settles by rules 4–6 with `Idle`'s cause. There is no timer: a held entry that never sees a settled view stays held. One gap remains: an `Idle` whose settled view comes only after a later turn has emptied the slot to carry ours shows unconfirmed until ours lands a moment later (rule 2).
+
+**Where the table was silent** (S3's review settled these):
+- `Attached` while sending or held moves the entry to checking, as it does a queued one: a reconnect may have lost either.
+- A late echo moves only a checking entry. An unconfirmed one moves only on a settled view (rules 2 and 3).
+- "Bound and open" in the Resend gate means the same binding, still answerable: open, answered or skipped, so a changed answer can be resent.
+- Q being ours outranks an answer we didn't know about on every settled view (rule 3 before rule 4). Rules 1 and 2 still come first.
+- In the chat clears the driver flag: once in the history it has left the driver's FIFO, and a later loss is the reconnect's.
+- A result binds on its text alone, never on a stored error flag, because the live `ToolResult` has none (§2.1).
+- A reused id names its latest card (§2.3), and a reused tool id its latest call (§2.2). An entry for the earlier card is dropped, and no press, Retry or Resend sends to the later one on its behalf.
+
 **Resend.**
 - **The gate.** Resend appears only in the unconfirmed state, and only while all of these hold:
   - the card is still bound and open;
   - F is a prefix of `seen`: no newer answer has been observed in the reconciled history;
   - `input_gate()` is `Ok`.
-- **The click.** The gate is checked again on the click, against a settled view, not only when the button is painted. If the view isn't settled, the click shows "Checking…" and sends nothing.
+- **The click.** The click runs the settle rules on a settled view, then checks the gate again, not only when the button is painted. If the view isn't settled, the click shows "Checking…" and sends nothing. If Q is ours, the entry is queued or held and nothing is sent: the copy in the slot would follow a resend.
 - **What it does.** Resend is a human action. It sends the same text by the same rules, on the same attachment. To an idle session it starts a turn, and the footer says so (§4). Under the button, one quiet line: "If it did arrive, the agent reads it twice."
 - **The v1 limit.** The gate is local evidence, not a server-side compare-and-set:
   - It can't see an answer that is queued, in transit, or being sent by another desk. If newer answer B is still unseen and A is resent, the result is B then A: A wins in the fold, and the model reads it last.
@@ -704,7 +726,7 @@ synaps-cards/                       (also the plugin root: clone as ~/.synaps-cl
 | **S0** (this) | `docs/design.md` v1.2 | It fixes the contract. | — | ~730 lines of doc | — |
 | **S1** `cards-spec` doc | `types`, `sanitize`, `doc` (`parse_input`, `revalidate`), `digest` and the envelope (§1.5), `answer` (`parse_answer`), and `message` (build and parse §3.3). Ports #75's `sanitize.rs`, `doc.rs` and `answer.rs`, minus the contract, ids and capsule. | The desk can depend on it, and both sides validate and hash identically. | The ported fixture corpus, `message` round trips, golden digests, and byte-identical output with and without `preserve_order` | ~1.7k src, ~1.1k tests, fixtures copied | low: a port |
 | **S2** `cards-ext` and the plugin | The stdio loop, `initialize` with the tool, `tool.call` → `parse_input` → id, digest and result text (§1.5), worker refusal, the rate counter, `shutdown`, the eager manifest and the setup script | **Agents can ask cards now.** TUI and older desk users see the text and answer by typing. | Framing tests (split and joined frames), golden results per fixture, the worker path, rate limits, and a smoke run in a real daemon, installed by §1.1's three commands | ~600 src, ~450 tests | low. Watch the description's token cost. |
-| **S3** `cards-spec` fold and memo | `fold` (§2.3) over `Call`/`Result`/`User`, and the memo (§3.5) as pure transitions: the states, the settle rule over a settled view, `seen` prefixes, eviction, and the Resend gate. Infrastructure: no user-facing feature on its own. | D1, D2a and D2b build on it. It replays against real journals. | Fold: every state; A, B, A; input rewritten (digest mismatch); result rewritten keeping line 1 (binds, the documented limit); an error, a cut result, an unknown version; look-alikes in tool results, events, summaries, quoted JSON, arrays and malformed `_synaps_hooked`. Memo: Cancel before the drain; `Idle` before the settled view (no Resend until it settles); reattach with and without the answer; `queued_message`-only reattach; held after an Error and after a failed compaction; a slot replaced at the terminal edge; FIFO overflow by notice and by timeout; `DriverRevoked` listing ours; a driver echo across a reattach (rule 5); a daemon-only crash after the answer was in the chat; a rollback below `seen` (Resend offered); our own first sighting keeps the entry while a superseding answer drops it; no Resend once the first copy is in the chat; two desks A, then B, then reattach; eviction at 32; the gate checked again on the click; compaction or `/new` mid-queue | ~800 src, ~1.2k tests | medium: the grammar and state edges |
+| **S3** `cards-spec` fold and memo | `fold` (§2.3) over `Call`/`Result`/`User`, and the memo (§3.5) as pure transitions: the states, the settle rule over a settled view, `seen` prefixes, eviction, and the Resend gate. Infrastructure: no user-facing feature on its own. | D1, D2a and D2b build on it. It replays against real journals. | Fold: every state; A, B, A; input rewritten (digest mismatch); result rewritten keeping line 1 (binds, the documented limit); an error, a cut result, an unknown version; look-alikes in tool results, events, summaries, quoted JSON, arrays and malformed `_synaps_hooked`. Memo: Cancel before the drain; `Idle` before the settled view (no Resend until it settles); reattach with and without the answer; `queued_message`-only reattach; held after an Error and after a failed compaction; a slot replaced at the terminal edge; FIFO overflow by notice and by timeout; `DriverRevoked` listing ours; a driver echo across a reattach (rule 5); a daemon-only crash after the answer was in the chat; a rollback below `seen` (Resend offered); our own first sighting keeps the entry while a superseding answer drops it; no Resend once the first copy is in the chat; two desks A, then B, then reattach; eviction at 32; the gate checked again on the click; compaction or `/new` mid-queue. From S3's review: a settled Q after the check timed out, and Q at the click; held, then the slot replaced in the next turn, and the held copy that survives; a card id bound again (a press on the earlier row, its entry queued, unconfirmed and not sent); a tool id taken over by another tool, live and in a history | ~800 src, ~1.2k tests | medium: the grammar and state edges |
 | **S4** description tuning | A small eval script: N real tasks, measuring when agents call `cards_ui` and when they shouldn't, the extra end-turn round of `wait`, then tuning §1.5 | It keeps agents from spamming cards. | The eval's report | ~200 + notes | low |
 
 ### 9.3 synaps-desk PRs
