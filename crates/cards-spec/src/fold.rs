@@ -3,23 +3,31 @@
 //!
 //! It reads three kinds of [`Event`], from a Full history ([`events`]),
 //! from live events, or from a test, one at a time ([`Fold::apply`]):
-//! - a `Call` named `cards_ui` or `cards:ui` (§2.2 step 1). An input
-//!   [`parse_input`] accepts is a card, or a close; any other is a plain row;
-//! - its `Result`. Line 1 must be this catalog's envelope with the digest of
-//!   the call's doc and `wait` (§2.2 step 3), or the card is plain. A close's
-//!   result must read `Card <id> closed (cards/1).`;
+//! - every `Call`, of any tool: a call takes its tool id over (§2.2). One
+//!   named `cards_ui` or `cards:ui` (§2.2 step 1) is a card if
+//!   [`parse_input`] accepts its input as one, a close if as a close, and a
+//!   plain row otherwise;
+//! - its `Result`, which belongs to the tool id's latest call. Line 1 must be
+//!   this catalog's envelope with the digest of the call's doc and `wait`
+//!   (§2.2 step 3), or the card is plain. A close's result must read
+//!   `Card <id> closed (cards/1).`;
 //! - a genuine `User` message. It is an answer only if all of it is an answer
 //!   message (§3.3) naming a card bound earlier, with values that pass
 //!   [`parse_answer`](crate::parse_answer) for that card's doc. The latest
 //!   answer wins and every one counts (`rev`); nothing is de-duplicated.
 //!
 //! A close ends a card: answers after it are ordinary text, and the one
-//! before it keeps its receipt. A result binds on its text alone, never on a
+//! before it keeps its receipt. Ids may be used again (§1.5: unique while
+//! the extension runs, not across a restart). A card id bound again names
+//! its latest card, and the earlier one is [`State::Replaced`]: it keeps
+//! its receipt and takes no more answers. A tool id called again belongs to
+//! its latest call, of whatever tool: an earlier call still waiting for its
+//! result never gets one. A result binds on its text alone, never on a
 //! stored error flag, because the live `ToolResult` has none (§2.1): the
 //! live and the attach paths must agree.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::Value;
 
@@ -33,7 +41,9 @@ pub const NAMES: [&str; 2] = ["cards_ui", "cards:ui"];
 /// One thing the fold reads (§2.3).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    /// An assistant `tool_use` block.
+    /// An assistant `tool_use` block, of any tool: the fold must see every
+    /// call, because a call takes its tool id over. Only a card call's
+    /// `input` is read; [`events`] gives other tools' as `Null`.
     Call { tool_id: String, name: String, input: Value },
     /// A `tool_result` block's text.
     Result { tool_id: String, text: String },
@@ -56,6 +66,10 @@ pub enum State {
     Skipped,
     /// A later close bound to it. An answer given before keeps its receipt.
     Closed,
+    /// A later card was bound to its id (an id used again across an
+    /// extension restart, §1.5). Answers to the id are that card's. Its own
+    /// keep their receipt, and it takes no more.
+    Replaced,
     /// Drawn as an ordinary tool row: its input or its result didn't bind.
     Plain,
 }
@@ -103,7 +117,8 @@ impl Card {
         Some(Receipt { reply: &last.reply, rev: self.answers.len(), at: last.at })
     }
 
-    /// Whether an answer may be sent to it: bound, and not closed.
+    /// Whether an answer may be sent to it: bound, the card its id names,
+    /// and not closed.
     pub fn answerable(&self) -> bool {
         matches!(self.state, State::Open | State::Answered | State::Skipped)
     }
@@ -131,7 +146,8 @@ enum Slot {
 pub struct Fold {
     cards: Vec<Card>,
     closes: Vec<Close>,
-    /// A tool id's latest call: a provider may use an id again.
+    /// A tool id's latest card call. A provider may use an id again; another
+    /// tool's call removes it.
     calls: HashMap<String, Slot>,
     /// An id's latest bound card.
     bound: HashMap<CardId, usize>,
@@ -160,6 +176,14 @@ impl Fold {
     }
 
     fn call(&mut self, tool_id: &str, name: &str, input: &Value, at: usize) {
+        // This call owns the tool id now: an earlier one still waiting for
+        // its result never gets it. A card is plain; a close is no longer
+        // anyone's ([`Fold::close`] names the latest call).
+        if let Some(Slot::Card(i)) = self.calls.remove(tool_id)
+            && self.cards[i].state == State::Pending
+        {
+            self.cards[i].state = State::Plain;
+        }
         if !NAMES.contains(&name) {
             return;
         }
@@ -201,7 +225,11 @@ impl Fold {
                         let id = envelope.card().clone();
                         card.id = Some(id.clone());
                         card.state = State::Open;
-                        self.bound.insert(id, i);
+                        if let Some(old) = self.bound.insert(id, i)
+                            && self.cards[old].answerable()
+                        {
+                            self.cards[old].state = State::Replaced;
+                        }
                     }
                     _ => card.state = State::Plain,
                 }
@@ -272,9 +300,11 @@ impl Fold {
 }
 
 /// The fold's events in a session's history as the daemon sends it
-/// (`api_messages`, Full; §2.1): the card calls of assistant messages, their
-/// results, and each user message whose content, once the host's
-/// extension blocks are removed, is one string.
+/// (`api_messages`, Full; §2.1): every call in an assistant message (another
+/// tool's with a `Null` input), the results of card calls, and each user
+/// message whose content, once the host's extension blocks are removed, is
+/// one string. A result belongs to its tool id's latest call, as in the
+/// fold: one after another tool's call took the id over is left out.
 ///
 /// That removal is the host's own ([`user_content`]). A message's other
 /// shapes are never the user's text: a `tool_result` container, a block
@@ -284,23 +314,24 @@ impl Fold {
 /// fold reads it as ordinary text.
 pub fn events(messages: &[Value]) -> Vec<Event> {
     let mut out = Vec::new();
-    let mut calls: HashSet<&str> = HashSet::new();
+    // Each tool id's latest call is a card call.
+    let mut calls: HashMap<&str, bool> = HashMap::new();
     for m in messages {
         let blocks = m["content"].as_array().map(Vec::as_slice).unwrap_or_default();
         match m["role"].as_str() {
             Some("assistant") => {
                 for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
-                    if let (Some(id), Some(name)) = (b["id"].as_str(), b["name"].as_str())
-                        && NAMES.contains(&name)
-                    {
-                        calls.insert(id);
-                        out.push(Event::Call { tool_id: id.into(), name: name.into(), input: b["input"].clone() });
-                    }
+                    let Some(id) = b["id"].as_str() else { continue };
+                    let name = b["name"].as_str().unwrap_or_default();
+                    let card = NAMES.contains(&name);
+                    calls.insert(id, card);
+                    let input = if card { b["input"].clone() } else { Value::Null };
+                    out.push(Event::Call { tool_id: id.into(), name: name.into(), input });
                 }
             }
             Some("user") => {
                 for b in blocks.iter().filter(|b| b["type"] == "tool_result") {
-                    if let Some(id) = b["tool_use_id"].as_str().filter(|id| calls.contains(id))
+                    if let Some(id) = b["tool_use_id"].as_str().filter(|id| calls.get(id) == Some(&true))
                         && let Some(text) = result_text(&b["content"])
                     {
                         out.push(Event::Result { tool_id: id.into(), text });

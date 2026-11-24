@@ -48,7 +48,21 @@ fn showing(card: &str, input: &Value) -> String {
 
 /// A call to `ask()` on `tool` and the result that binds it to `card`.
 fn asked(tool: &str, card: &str) -> [Event; 2] {
-    [call(tool, ask()), result(tool, &showing(card, &ask()))]
+    asked_with(tool, card, &ask())
+}
+
+fn asked_with(tool: &str, card: &str, input: &Value) -> [Event; 2] {
+    [call(tool, input.clone()), result(tool, &showing(card, input))]
+}
+
+/// Another question, whose answers `ask()`'s doc refuses.
+fn ship() -> Value {
+    json!({ "question": "Ship it?", "options": ["Yes", "No"] })
+}
+
+/// Another tool's call, as [`events`] gives it.
+fn bash(tool: &str) -> Event {
+    Event::Call { tool_id: tool.into(), name: "bash".into(), input: Value::Null }
 }
 
 fn answer(card: &str, choice: &str) -> String {
@@ -234,13 +248,77 @@ fn ids_used_twice_name_their_latest() {
     events.extend(asked("t2", A_ID));
     events.push(user(&answer(A_ID, "Rewrite from scratch")));
     let f = of(&events);
-    assert_eq!((f.card("t1").unwrap().state, f.card("t2").unwrap().state), (State::Open, State::Answered));
+    assert_eq!((f.card("t1").unwrap().state, f.card("t2").unwrap().state), (State::Replaced, State::Answered));
     assert_eq!(f.bound(&id(A_ID)).unwrap().tool_id, "t2");
 
     let f = of(&[asked("call_0", A_ID), asked("call_0", B_ID)].concat());
     assert_eq!(f.cards().len(), 2);
     assert_eq!(f.card("call_0").unwrap().id, Some(id(B_ID)));
     assert_eq!(f.cards()[0].state, State::Open);
+}
+
+/// A card id bound again names the later card: answers to the id are
+/// checked against its doc, and are its own. The earlier card is replaced:
+/// its receipt stays, and it takes no more answers (§2.3).
+#[test]
+fn a_card_id_bound_again_replaces_the_earlier_card() {
+    let ship_yes = {
+        let (doc, _) = created(&ship());
+        message::build(&id(A_ID), &doc, &Reply::Answer(parse_answer(&doc, &json!({ "choice": "Yes" })).unwrap()))
+    };
+    let mut events = asked("t1", A_ID).to_vec();
+    events.push(user(&answer(A_ID, "Refactor the parser")));
+    events.extend(asked_with("t2", A_ID, &ship()));
+    // The earlier card's answer shape, after the id was bound again.
+    events.push(user(&answer(A_ID, "Rewrite from scratch")));
+    let f = of(&events);
+    let (old, new) = (f.card("t1").unwrap(), f.card("t2").unwrap());
+    assert_eq!((old.state, old.answerable()), (State::Replaced, false));
+    assert_eq!(texts(old), [answer(A_ID, "Refactor the parser")], "its receipt stays");
+    assert_eq!((new.state, new.answers.len()), (State::Open, 0), "the later doc refuses it: ordinary text");
+    assert_eq!(f.bound(&id(A_ID)).unwrap().tool_id, "t2");
+
+    events.push(user(&ship_yes));
+    let f = of(&events);
+    assert_eq!((f.card("t1").unwrap().answers.len(), f.card("t2").unwrap().state), (1, State::Answered));
+
+    // A closed card stays closed; a close names the later card.
+    let mut closed = asked("t1", A_ID).to_vec();
+    closed.extend(close("t2", A_ID));
+    closed.extend(asked_with("t3", A_ID, &ship()));
+    closed.extend(close("t4", A_ID));
+    let f = of(&closed);
+    assert_eq!((f.card("t1").unwrap().state, f.card("t3").unwrap().state), (State::Closed, State::Closed));
+}
+
+/// A tool id belongs to its latest call, of any tool (§2.2): a card or a
+/// close waiting for its result never takes the result of a later call that
+/// used its id, and live events and a history agree.
+#[test]
+fn a_later_call_takes_its_tool_id_over() {
+    let card = [call("t1", ask()), bash("t1"), result("t1", &showing(A_ID, &ask()))];
+    let f = of(&card);
+    assert_eq!((f.card("t1"), f.bound(&id(A_ID))), (None, None));
+    assert_eq!(f.cards()[0].state, State::Plain, "it never gets a result");
+
+    let mut closing = asked("t0", A_ID).to_vec();
+    closing.extend([call("t1", json!({ "close": A_ID })), bash("t1"), result("t1", &format!("Card {A_ID} closed (cards/1)."))]);
+    let f = of(&closing);
+    assert_eq!((f.bound(&id(A_ID)).unwrap().state, f.close("t1")), (State::Open, None));
+
+    // A card's call used again by another card's, before its result.
+    let f = of(&[call("t1", ask()), call("t1", ship()), result("t1", &showing(A_ID, &ship()))]);
+    assert_eq!((f.cards()[0].state, f.cards()[1].state), (State::Plain, State::Open));
+
+    // The history: the result after the other tool's call is that call's.
+    let history = [
+        tool_use("t1", ask()),
+        json!({ "role": "assistant", "content": [{ "type": "tool_use", "id": "t1", "name": "bash", "input": { "command": "ls" } }] }),
+        tool_result("t1", json!(showing(A_ID, &ask()))),
+    ];
+    let got = events(&history);
+    assert_eq!(got, card[..2]);
+    assert_eq!(of(&got).cards(), of(&card).cards());
 }
 
 #[test]
@@ -337,7 +415,7 @@ fn look_alikes_in_a_history_are_never_answers() {
 }
 
 #[test]
-fn a_history_reads_card_calls_and_their_results_only() {
+fn a_history_reads_every_call_and_card_results_only() {
     let history = vec![
         json!({ "role": "assistant", "content": [
             text("Let me ask."),
@@ -351,7 +429,7 @@ fn a_history_reads_card_calls_and_their_results_only() {
         said(json!(answer(A_ID, "Refactor the parser"))),
     ];
     let got = events(&history);
-    assert_eq!(got, [call("t1", ask()), result("t1", &showing(A_ID, &ask())), user(&answer(A_ID, "Refactor the parser")),]);
+    assert_eq!(got, [bash("t0"), call("t1", ask()), result("t1", &showing(A_ID, &ask())), user(&answer(A_ID, "Refactor the parser")),]);
     assert_eq!(fold(&got).card("t1").unwrap().state, State::Answered);
 }
 
