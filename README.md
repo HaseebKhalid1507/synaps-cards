@@ -26,4 +26,4 @@ python3 scripts/oracle.py --check
 
 ## License
 
-MIT (see `LICENSE`). Parts are ported from SynapsCLI under the Apache License 2.0; see `NOTICE`.
+MIT (see `LICENSE`). Parts are ported from SynapsCLI under the Apache License 2.0, and the case-folding table is generated from Unicode data under the Unicode License v3 (`LICENSE-UNICODE`); see `NOTICE`.
