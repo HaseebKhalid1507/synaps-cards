@@ -244,7 +244,8 @@ def main():
     shutil.move(plugin / "target/release/cards-ext", real)
     wire = work / "wire.bin"
     wrapper = plugin / "target/release/cards-ext"
-    wrapper.write_text(f"#!/bin/sh\ntee -a '{wire}' | '{real}'\n")
+    tee = shutil.which("tee") or "/usr/bin/tee"  # absolute: the host may start it with a reduced PATH
+    wrapper.write_text(f"#!/bin/sh\n'{tee}' -a '{wire}' | '{real}'\n")
     wrapper.chmod(0o755)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
