@@ -108,8 +108,11 @@ impl Envelope {
     }
 
     /// The envelope on a result's first line, if it has one. A line cut
-    /// short, over [`ENVELOPE_MAX_BYTES`], or with anything around it, has
-    /// none. The catalog is read whatever it is; [`Envelope::binds`] says
+    /// before its question, so that its id, catalog or digest is missing
+    /// or damaged, has none; so has one over [`ENVELOPE_MAX_BYTES`] or with
+    /// anything around it. The question is display only: one cut or
+    /// rewritten after its first character still parses and binds (Shady
+    /// #2). The catalog is read whatever it is; [`Envelope::binds`] says
     /// whether this build knows it.
     pub fn parse(result: &str) -> Option<Self> {
         let line = result.split('\n').next().unwrap_or_default();
