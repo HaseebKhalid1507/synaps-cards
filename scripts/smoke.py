@@ -272,6 +272,9 @@ def main():
             answer = oracle.message(cards[0], A1["doc"], "answer", {"choice": "Refactor the parser"})
             send({"type": "follow_up", "id": "p2", "message": answer})
             until(q, lambda e: e.get("type") == "response" and e.get("id") == "p2", 120, events)
+            # The history once the answer's turn is done: the fold's real-host fixture (S3).
+            send({"type": "get_messages", "id": "m2"})
+            report["history_after"] = until(q, lambda e: e.get("type") == "response" and e.get("id") == "m2", 60, events)
         report["answer"] = answer
         send({"type": "shutdown"})
         proc.wait(timeout=30)
@@ -347,6 +350,8 @@ def judge(report, wire):
     answer = report.get("answer")
     got = [m for r in Model.seen for m in r.get("messages", []) if m.get("role") == "user" and m.get("content") == answer]
     check(answer and got, "the answer message reached the model, two lines as sent", repr(answer))
+    stored = [m for m in report.get("history_after", {}).get("messages", []) if m.get("role") == "user" and m.get("content") == answer]
+    check(answer and len(stored) == 1, "history: the answer is stored once, as the user's own string message", repr(stored)[:300])
     # The frames the host really sent the extension.
     sent = frames(wire.read_bytes()) if wire.exists() else []
     init = next((f for f in sent if f.get("method") == "initialize"), None)
