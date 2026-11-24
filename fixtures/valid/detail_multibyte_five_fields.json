@@ -1,0 +1,108 @@
+{
+  "about": "Ported from C1's capsule-bound fixture (the capsule went with the core): a detail of 3-byte characters, options with hints, and five fields.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "q",
+    "detail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "options": [
+      "a",
+      {
+        "label": "b",
+        "hint": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+      }
+    ],
+    "fields": [
+      {
+        "id": "f0",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      },
+      {
+        "id": "f1",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      },
+      {
+        "id": "f2",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      },
+      {
+        "id": "f3",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      },
+      {
+        "id": "f4",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL"
+      }
+    ]
+  },
+  "doc": {
+    "question": "q",
+    "detail": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "options": [
+      {
+        "label": "a"
+      },
+      {
+        "label": "b",
+        "hint": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+      }
+    ],
+    "multi": false,
+    "fields": [
+      {
+        "id": "f0",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "type": "text",
+        "value": "",
+        "optional": false
+      },
+      {
+        "id": "f1",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "type": "text",
+        "value": "",
+        "optional": false
+      },
+      {
+        "id": "f2",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "type": "text",
+        "value": "",
+        "optional": false
+      },
+      {
+        "id": "f3",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "type": "text",
+        "value": "",
+        "optional": false
+      },
+      {
+        "id": "f4",
+        "label": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "type": "text",
+        "value": "",
+        "optional": false
+      }
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": "b",
+        "fields": {
+          "f0": "v",
+          "f1": "v",
+          "f2": "v",
+          "f3": "v",
+          "f4": "v"
+        }
+      },
+      "message": "[card c4f9x2a] q → b · LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… · LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… · LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… · LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL… · LLLL…\n{\"choice\":\"b\",\"fields\":{\"f0\":\"v\",\"f1\":\"v\",\"f2\":\"v\",\"f3\":\"v\",\"f4\":\"v\"}}"
+    }
+  ],
+  "digest": "d2f6e8605f503bba",
+  "envelope": "Card c4f9x2a is showing (cards/1 #d2f6e8605f503bba): q"
+}

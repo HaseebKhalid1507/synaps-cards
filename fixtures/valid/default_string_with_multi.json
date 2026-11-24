@@ -1,0 +1,47 @@
+{
+  "about": "v3.2 #4: a string default with multi becomes [label]; it matches ignoring case (full case folding) and is stored in the label's spelling.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Which checks?",
+    "options": [
+      "Lint",
+      "Test",
+      "Straße"
+    ],
+    "multi": true,
+    "default": "STRASSE"
+  },
+  "doc": {
+    "question": "Which checks?",
+    "options": [
+      {
+        "label": "Lint"
+      },
+      {
+        "label": "Test"
+      },
+      {
+        "label": "Straße"
+      }
+    ],
+    "multi": true,
+    "default": [
+      "Straße"
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": [
+          "Lint"
+        ]
+      },
+      "message": "[card c4f9x2a] Which checks? → Lint\n{\"choice\":[\"Lint\"]}"
+    }
+  ],
+  "digest": "ecb4cbeb15dadad4",
+  "envelope": "Card c4f9x2a is showing (cards/1 #ecb4cbeb15dadad4): Which checks?"
+}

@@ -1,0 +1,7 @@
+{
+  "about": "close with a malformed id (an uppercase letter)",
+  "input": {
+    "close": "c4F9x2a"
+  },
+  "error": "close: must be the id of a card you created, like c4f9x2a"
+}

@@ -1,0 +1,87 @@
+{
+  "about": "Multi-select: the default is a list; the answer may be empty, (none) in the summary.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Which checks should run?",
+    "options": [
+      {
+        "label": "lint",
+        "hint": "clippy -D warnings"
+      },
+      {
+        "label": "test"
+      },
+      {
+        "label": "fmt",
+        "hint": "rustfmt --check"
+      }
+    ],
+    "multi": true,
+    "default": [
+      "lint",
+      "test"
+    ]
+  },
+  "doc": {
+    "question": "Which checks should run?",
+    "options": [
+      {
+        "label": "lint",
+        "hint": "clippy -D warnings"
+      },
+      {
+        "label": "test"
+      },
+      {
+        "label": "fmt",
+        "hint": "rustfmt --check"
+      }
+    ],
+    "multi": true,
+    "default": [
+      "lint",
+      "test"
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": [
+          "fmt",
+          "lint"
+        ]
+      },
+      "message": "[card c4f9x2a] Which checks should run? → fmt, lint\n{\"choice\":[\"fmt\",\"lint\"]}"
+    },
+    {
+      "about": "none chosen",
+      "kind": "answer",
+      "values": {
+        "choice": []
+      },
+      "message": "[card c4f9x2a] Which checks should run? → (none)\n{\"choice\":[]}"
+    }
+  ],
+  "bad_answers": [
+    {
+      "values": {
+        "choice": "lint"
+      },
+      "error": "choice: must be a list of option labels"
+    },
+    {
+      "values": {
+        "choice": [
+          "lint",
+          "lint"
+        ]
+      },
+      "error": "choice[1]: listed twice"
+    }
+  ],
+  "digest": "bc33a200cef1de5e",
+  "envelope": "Card c4f9x2a is showing (cards/1 #bc33a200cef1de5e): Which checks should run?"
+}

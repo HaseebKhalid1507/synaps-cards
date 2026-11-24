@@ -1,0 +1,70 @@
+{
+  "about": "Appendix A4: choice plus one field (form mode).",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Which test runner?",
+    "options": [
+      "vitest",
+      "jest",
+      "node:test"
+    ],
+    "default": "vitest",
+    "fields": [
+      {
+        "id": "watch",
+        "label": "Enable watch mode",
+        "type": "check",
+        "value": true
+      }
+    ]
+  },
+  "doc": {
+    "question": "Which test runner?",
+    "options": [
+      {
+        "label": "vitest"
+      },
+      {
+        "label": "jest"
+      },
+      {
+        "label": "node:test"
+      }
+    ],
+    "multi": false,
+    "default": "vitest",
+    "fields": [
+      {
+        "id": "watch",
+        "label": "Enable watch mode",
+        "type": "check",
+        "value": true,
+        "optional": false
+      }
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": "vitest",
+        "fields": {
+          "watch": true
+        }
+      },
+      "message": "[card c4f9x2a] Which test runner? → vitest · Enable watch mode: yes\n{\"choice\":\"vitest\",\"fields\":{\"watch\":true}}"
+    }
+  ],
+  "bad_answers": [
+    {
+      "values": {
+        "choice": "vitest"
+      },
+      "error": "fields: required: every field, by id"
+    }
+  ],
+  "digest": "a3e43f968dc285a3",
+  "envelope": "Card c4f9x2a is showing (cards/1 #a3e43f968dc285a3): Which test runner?"
+}

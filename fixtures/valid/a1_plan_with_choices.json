@@ -1,0 +1,77 @@
+{
+  "about": "Appendix A1: plan with choices (quick, live). The user picks the first option, changes it, then skips.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Which approach?",
+    "detail": "The parser has three call sites; a rewrite touches all of them.",
+    "options": [
+      "Refactor the parser",
+      "Rewrite from scratch",
+      "Leave it"
+    ],
+    "default": "Refactor the parser"
+  },
+  "doc": {
+    "question": "Which approach?",
+    "detail": "The parser has three call sites; a rewrite touches all of them.",
+    "options": [
+      {
+        "label": "Refactor the parser"
+      },
+      {
+        "label": "Rewrite from scratch"
+      },
+      {
+        "label": "Leave it"
+      }
+    ],
+    "multi": false,
+    "default": "Refactor the parser"
+  },
+  "wait": false,
+  "mode": "quick",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": "Refactor the parser"
+      },
+      "message": "[card c4f9x2a] Which approach? → Refactor the parser\n{\"choice\":\"Refactor the parser\"}"
+    },
+    {
+      "about": "a change",
+      "kind": "changed",
+      "values": {
+        "choice": "Rewrite from scratch"
+      },
+      "message": "[card c4f9x2a changed] Which approach? → Rewrite from scratch\n{\"choice\":\"Rewrite from scratch\"}"
+    },
+    {
+      "about": "a skip",
+      "kind": "skipped",
+      "values": {},
+      "message": "[card c4f9x2a skipped] Which approach? → (skipped)\n{}"
+    }
+  ],
+  "bad_answers": [
+    {
+      "values": {
+        "choice": "refactor the parser"
+      },
+      "error": "choice: not one of the option labels"
+    },
+    {
+      "values": {
+        "choice": "Leave it",
+        "note": "x"
+      },
+      "error": "note: the chosen option takes no note"
+    },
+    {
+      "values": {},
+      "error": "choice: required"
+    }
+  ],
+  "digest": "e5bd75450420caeb",
+  "envelope": "Card c4f9x2a is showing (cards/1 #e5bd75450420caeb): Which approach?"
+}

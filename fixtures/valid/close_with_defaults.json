@@ -1,0 +1,10 @@
+{
+  "about": "v3.2 #5: beside close, wait:false and multi:false are schema defaults and count as absent.",
+  "input": {
+    "close": "c4f9x2a",
+    "wait": false,
+    "multi": false
+  },
+  "close": "c4f9x2a",
+  "envelope": "Card c4f9x2a closed (cards/1)."
+}

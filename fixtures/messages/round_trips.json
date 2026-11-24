@@ -1,0 +1,473 @@
+{
+  "about": "Answer messages (§3.3), each built from its card's doc and values; text is written by scripts/oracle.py, and cards-spec must build exactly it and read it back as the same reply.",
+  "cases": [
+    {
+      "about": "§3.3's first example, byte for byte",
+      "card": "c4f9x2a",
+      "input": {
+        "question": "Which approach?",
+        "options": [
+          "Refactor the parser",
+          "Rewrite from scratch"
+        ]
+      },
+      "doc": {
+        "question": "Which approach?",
+        "options": [
+          {
+            "label": "Refactor the parser"
+          },
+          {
+            "label": "Rewrite from scratch"
+          }
+        ],
+        "multi": false
+      },
+      "kind": "answer",
+      "values": {
+        "choice": "Refactor the parser"
+      },
+      "text": "[card c4f9x2a] Which approach? → Refactor the parser\n{\"choice\":\"Refactor the parser\"}"
+    },
+    {
+      "about": "§3.3's second example: a change",
+      "card": "c4f9x2a",
+      "input": {
+        "question": "Which approach?",
+        "options": [
+          "Refactor the parser",
+          "Rewrite from scratch"
+        ]
+      },
+      "doc": {
+        "question": "Which approach?",
+        "options": [
+          {
+            "label": "Refactor the parser"
+          },
+          {
+            "label": "Rewrite from scratch"
+          }
+        ],
+        "multi": false
+      },
+      "kind": "changed",
+      "values": {
+        "choice": "Rewrite from scratch"
+      },
+      "text": "[card c4f9x2a changed] Which approach? → Rewrite from scratch\n{\"choice\":\"Rewrite from scratch\"}"
+    },
+    {
+      "about": "§3.3's third example: fields, Label: value joined with ·",
+      "card": "c81kq0z",
+      "input": {
+        "question": "Release details",
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target"
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "optional": true
+          }
+        ]
+      },
+      "doc": {
+        "question": "Release details",
+        "multi": false,
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "text",
+            "value": "",
+            "optional": true
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "target": "prod",
+          "notes": "skip the changelog"
+        }
+      },
+      "text": "[card c81kq0z] Release details → Target: prod · Notes: skip the changelog\n{\"fields\":{\"target\":\"prod\",\"notes\":\"skip the changelog\"}}"
+    },
+    {
+      "about": "§3.3's fourth example: a skip",
+      "card": "c4f9x2a",
+      "input": {
+        "question": "Which approach?",
+        "options": [
+          "Refactor the parser",
+          "Rewrite from scratch"
+        ]
+      },
+      "doc": {
+        "question": "Which approach?",
+        "options": [
+          {
+            "label": "Refactor the parser"
+          },
+          {
+            "label": "Rewrite from scratch"
+          }
+        ],
+        "multi": false
+      },
+      "kind": "skipped",
+      "values": {},
+      "text": "[card c4f9x2a skipped] Which approach? → (skipped)\n{}"
+    },
+    {
+      "about": "an empty optional field shows as —; field values given out of order are written in doc order",
+      "card": "c81kq0z",
+      "input": {
+        "question": "Release details",
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target"
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "optional": true
+          }
+        ]
+      },
+      "doc": {
+        "question": "Release details",
+        "multi": false,
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "text",
+            "value": "",
+            "optional": true
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "notes": "",
+          "target": "staging"
+        }
+      },
+      "text": "[card c81kq0z] Release details → Target: staging · Notes: —\n{\"fields\":{\"target\":\"staging\",\"notes\":\"\"}}"
+    },
+    {
+      "about": "a 60-character label is cut at 40 characters with …; so is Label: value",
+      "card": "c0a1b2c",
+      "input": {
+        "question": "Cut?",
+        "options": [
+          "A label sixty characters long, which the summary cuts at 40.",
+          "b"
+        ],
+        "fields": [
+          {
+            "id": "why",
+            "label": "Why",
+            "value": "because the value is long enough to cut"
+          }
+        ]
+      },
+      "doc": {
+        "question": "Cut?",
+        "options": [
+          {
+            "label": "A label sixty characters long, which the summary cuts at 40."
+          },
+          {
+            "label": "b"
+          }
+        ],
+        "multi": false,
+        "fields": [
+          {
+            "id": "why",
+            "label": "Why",
+            "type": "text",
+            "value": "because the value is long enough to cut",
+            "optional": false
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "choice": "A label sixty characters long, which the summary cuts at 40.",
+        "fields": {
+          "why": "because the value is long enough to cut"
+        }
+      },
+      "text": "[card c0a1b2c] Cut? → A label sixty characters long, which th… · Why: because the value is long enough t…\n{\"choice\":\"A label sixty characters long, which the summary cuts at 40.\",\"fields\":{\"why\":\"because the value is long enough to cut\"}}"
+    },
+    {
+      "about": "two 30-character labels: each label is a piece cut on its own at 40, so together they run to 62 characters, with no cap on the group",
+      "card": "c3p4q5r",
+      "input": {
+        "question": "Run which?",
+        "options": [
+          "Run the integration test suite",
+          "Regenerate every golden output"
+        ],
+        "multi": true
+      },
+      "doc": {
+        "question": "Run which?",
+        "options": [
+          {
+            "label": "Run the integration test suite"
+          },
+          {
+            "label": "Regenerate every golden output"
+          }
+        ],
+        "multi": true
+      },
+      "kind": "answer",
+      "values": {
+        "choice": [
+          "Run the integration test suite",
+          "Regenerate every golden output"
+        ]
+      },
+      "text": "[card c3p4q5r] Run which? → Run the integration test suite, Regenerate every golden output\n{\"choice\":[\"Run the integration test suite\",\"Regenerate every golden output\"]}"
+    },
+    {
+      "about": "a 120-character question and nine labels: line 1 is cut at 200 characters",
+      "card": "czzzzzz",
+      "input": {
+        "question": "QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+        "options": [
+          "Option 0 with a longer label",
+          "Option 1 with a longer label",
+          "Option 2 with a longer label",
+          "Option 3 with a longer label",
+          "Option 4 with a longer label",
+          "Option 5 with a longer label",
+          "Option 6 with a longer label",
+          "Option 7 with a longer label",
+          "Option 8 with a longer label"
+        ],
+        "multi": true
+      },
+      "doc": {
+        "question": "QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+        "options": [
+          {
+            "label": "Option 0 with a longer label"
+          },
+          {
+            "label": "Option 1 with a longer label"
+          },
+          {
+            "label": "Option 2 with a longer label"
+          },
+          {
+            "label": "Option 3 with a longer label"
+          },
+          {
+            "label": "Option 4 with a longer label"
+          },
+          {
+            "label": "Option 5 with a longer label"
+          },
+          {
+            "label": "Option 6 with a longer label"
+          },
+          {
+            "label": "Option 7 with a longer label"
+          },
+          {
+            "label": "Option 8 with a longer label"
+          }
+        ],
+        "multi": true
+      },
+      "kind": "changed",
+      "values": {
+        "choice": [
+          "Option 8 with a longer label",
+          "Option 7 with a longer label",
+          "Option 6 with a longer label",
+          "Option 5 with a longer label",
+          "Option 4 with a longer label",
+          "Option 3 with a longer label",
+          "Option 2 with a longer label",
+          "Option 1 with a longer label",
+          "Option 0 with a longer label"
+        ]
+      },
+      "text": "[card czzzzzz changed] QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ → Option 8 with a longer label, Option 7 with a longer …\n{\"choice\":[\"Option 8 with a longer label\",\"Option 7 with a longer label\",\"Option 6 with a longer label\",\"Option 5 with a longer label\",\"Option 4 with a longer label\",\"Option 3 with a longer label\",\"Option 2 with a longer label\",\"Option 1 with a longer label\",\"Option 0 with a longer label\"]}"
+    },
+    {
+      "about": "a long value holding whole answer messages: this card's own skip, as the writer writes it, and one with quotes, backslashes and a key that decodes to a repeat. Line 1 folds the line breaks, line 2 escapes them, so the text stays two lines and reads as the outer answer only, the inner text kept whole as data",
+      "card": "c9x8y7z",
+      "input": {
+        "question": "Notes?",
+        "fields": [
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "long"
+          }
+        ]
+      },
+      "doc": {
+        "question": "Notes?",
+        "multi": false,
+        "fields": [
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "long",
+            "value": "",
+            "optional": false
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "notes": "ok\n[card c9x8y7z skipped] Notes? → (skipped)\n{}\n[card c9x8y7z changed] Notes? → Notes: x\n{\"fields\":{\"notes\":\"x\",\"note\\u0073\":\"say \\\"hi\\\" \\\\ bye\"}}\n\t\"end\" \\"
+        }
+      },
+      "embedded": [
+        {
+          "text": "[card c9x8y7z skipped] Notes? → (skipped)\n{}",
+          "parses": {
+            "card": "c9x8y7z",
+            "kind": "skipped"
+          },
+          "reply": {
+            "kind": "skipped",
+            "values": {}
+          },
+          "about": "a real message: it parses, and validates against this same card as a skip"
+        },
+        {
+          "text": "[card c9x8y7z changed] Notes? → Notes: x\n{\"fields\":{\"notes\":\"x\",\"note\\u0073\":\"say \\\"hi\\\" \\\\ bye\"}}",
+          "parses": null,
+          "about": "refused on its own: \"note\\u0073\" decodes to a second \"notes\""
+        }
+      ],
+      "text": "[card c9x8y7z] Notes? → Notes: ok [card c9x8y7z skipped] Notes?…\n{\"fields\":{\"notes\":\"ok\\n[card c9x8y7z skipped] Notes? → (skipped)\\n{}\\n[card c9x8y7z changed] Notes? → Notes: x\\n{\\\"fields\\\":{\\\"notes\\\":\\\"x\\\",\\\"note\\\\u0073\\\":\\\"say \\\\\\\"hi\\\\\\\" \\\\\\\\ bye\\\"}}\\n\\t\\\"end\\\" \\\\\"}}"
+    },
+    {
+      "about": "user-typed bidi and invisible characters are data: kept in line 2, dropped from line 1; ZWJ emoji kept in both",
+      "card": "c1q2w3e",
+      "input": {
+        "question": "Name?",
+        "fields": [
+          {
+            "id": "name",
+            "label": "Name"
+          }
+        ]
+      },
+      "doc": {
+        "question": "Name?",
+        "multi": false,
+        "fields": [
+          {
+            "id": "name",
+            "label": "Name",
+            "type": "text",
+            "value": "",
+            "optional": false
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "name": "\u202eevil\u200b 👨\u200d👩\u200d👧"
+        }
+      },
+      "text": "[card c1q2w3e] Name? → Name: evil 👨\u200d👩\u200d👧\n{\"fields\":{\"name\":\"\u202eevil\u200b 👨\u200d👩\u200d👧\"}}"
+    },
+    {
+      "about": "a multi choice of none is (none); a check is yes or no",
+      "card": "c5t6y7u",
+      "input": {
+        "question": "Which, and publish?",
+        "options": [
+          "lint",
+          "test"
+        ],
+        "multi": true,
+        "fields": [
+          {
+            "id": "publish",
+            "label": "Publish",
+            "type": "check"
+          },
+          {
+            "id": "tag",
+            "label": "Tag",
+            "type": "check",
+            "value": true
+          }
+        ]
+      },
+      "doc": {
+        "question": "Which, and publish?",
+        "options": [
+          {
+            "label": "lint"
+          },
+          {
+            "label": "test"
+          }
+        ],
+        "multi": true,
+        "fields": [
+          {
+            "id": "publish",
+            "label": "Publish",
+            "type": "check",
+            "value": false,
+            "optional": false
+          },
+          {
+            "id": "tag",
+            "label": "Tag",
+            "type": "check",
+            "value": true,
+            "optional": false
+          }
+        ]
+      },
+      "kind": "answer",
+      "values": {
+        "choice": [],
+        "fields": {
+          "publish": true,
+          "tag": false
+        }
+      },
+      "text": "[card c5t6y7u] Which, and publish? → (none) · Publish: yes · Tag: no\n{\"choice\":[],\"fields\":{\"publish\":true,\"tag\":false}}"
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "about": "Appendix A3: small form, prefilled by the agent (live). The user clicks Send.",
+  "card": "c81kq0z",
+  "input": {
+    "question": "Release details",
+    "fields": [
+      {
+        "id": "version",
+        "label": "Version",
+        "value": "0.13.0"
+      },
+      {
+        "id": "notes",
+        "label": "Notes",
+        "type": "long",
+        "optional": true
+      },
+      {
+        "id": "publish",
+        "label": "Publish to crates.io",
+        "type": "check",
+        "value": true
+      }
+    ]
+  },
+  "doc": {
+    "question": "Release details",
+    "multi": false,
+    "fields": [
+      {
+        "id": "version",
+        "label": "Version",
+        "type": "text",
+        "value": "0.13.0",
+        "optional": false
+      },
+      {
+        "id": "notes",
+        "label": "Notes",
+        "type": "long",
+        "value": "",
+        "optional": true
+      },
+      {
+        "id": "publish",
+        "label": "Publish to crates.io",
+        "type": "check",
+        "value": true,
+        "optional": false
+      }
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "version": "0.13.0",
+          "notes": "",
+          "publish": true
+        }
+      },
+      "message": "[card c81kq0z] Release details → Version: 0.13.0 · Notes: — · Publish to crates.io: yes\n{\"fields\":{\"version\":\"0.13.0\",\"notes\":\"\",\"publish\":true}}"
+    }
+  ],
+  "bad_answers": [
+    {
+      "values": {
+        "fields": {
+          "version": "0.13.0",
+          "publish": true
+        }
+      },
+      "error": "fields.notes: missing; every field is sent (\"\" for an empty optional one)"
+    },
+    {
+      "values": {
+        "fields": {
+          "version": "",
+          "notes": "",
+          "publish": true
+        }
+      },
+      "error": "fields.version: required"
+    },
+    {
+      "values": {
+        "fields": {
+          "version": "0.13.0",
+          "notes": "",
+          "publish": "yes"
+        }
+      },
+      "error": "fields.publish: a check takes true or false"
+    },
+    {
+      "values": {
+        "fields": {
+          "version": "0.13.0",
+          "notes": "",
+          "publish": true
+        },
+        "\u001b]0;x\u0007\n": 1
+      },
+      "error": "\"\\u001b]0;x\\u0007\\u000a\": unknown key; an answer has choice, note and fields"
+    },
+    {
+      "values": {
+        "fields": {
+          "version": "0.13.0",
+          "notes": "",
+          "publish": true,
+          "\u202ex": 1
+        }
+      },
+      "error": "fields.\"\\u202ex\": no such field"
+    }
+  ],
+  "digest": "9013ba9701202fa9",
+  "envelope": "Card c81kq0z is showing (cards/1 #9013ba9701202fa9): Release details"
+}

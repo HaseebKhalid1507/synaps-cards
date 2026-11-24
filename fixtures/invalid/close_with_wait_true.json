@@ -1,0 +1,8 @@
+{
+  "about": "v3.2 #5: only a key at its schema default may stay beside close",
+  "input": {
+    "close": "c4f9x2a",
+    "wait": true
+  },
+  "error": "close: give it alone, with no other parameter (got wait)"
+}
