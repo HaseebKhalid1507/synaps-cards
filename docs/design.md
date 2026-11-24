@@ -197,12 +197,12 @@
   3. The options fill what is left. Each label is cut to 60 characters. When the next option wouldn't fit, the list ends `  …and N more`. Field names follow under the same rule.
 
   S2 tests the cap on worst-case fixtures, such as nine 60-character labels in a 4-byte script. A result cut later, by a transformer or the spill, still binds if line 1 is whole, and a result whose line 1 doesn't parse is a plain row.
-- **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no state, so it can't say whether the card was open.
+- **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no card state, so it can't say whether the card was open.
 - **Refusal:** a JSON-RPC error, which the host stores as plain text with no envelope, so the desk shows a plain row (`protocol.md:296-298`; `CLI:ae/runtime/stream.rs:2392-2403`):
   - a validation line;
   - `cards_ui: only the main chat can show cards` when `session_id` is `null`, as it is for workers (`protocol.md:232`);
   - `cards_ui: 6 cards in the last 10 minutes; ask in plain text` (§5.5).
-- **Ids** are `c` plus 6 random `[a-z0-9]`, unique per session in practice. Nothing relies on them being secret (§5.2).
+- **Ids** are `c` plus 6 random `[a-z0-9]`. The extension never mints one twice while it runs: a draw that names an id it already minted draws again. One process serves every chat, so a session's ids are unique for the process's life, and across a restart (§1.6) unique in practice (36^6 ids). Nothing relies on them being secret (§5.2).
 
 **Description** (the v3.4 draft, adjusted; P4 tunes it):
 
@@ -217,7 +217,7 @@
 | Cancel | The tool already returned, so the card stays open, and answering it starts a new turn, as typing would. An answer steered in but not yet read is withdrawn (`Dequeued`, `CLI:ae/session/actor.rs:3629-3632`). The card checks the refreshed history, then offers Resend (§3.5). |
 | Compaction, `/new`, a context rollover | The card's call leaves the visible history, so the fold drops the card ("gone", §2.3). An answer already given stays in the summary's source. Answering is off while a compaction runs (§3.4). |
 | Daemon reload or crash | The card is in the journal once saved (§4). An answer refused during the drain (`Error("daemon reloading…")`, `daemon-mode.md:1079-1080`) or unconfirmed at the drop settles after the reconnect (§3.5): Resend, if the history the desk reconnected to lacks it. Nothing is re-sent on its own. |
-| Extension crash | Eager (v1): the host respawns it and retries the call once (`process.rs:1993-2010`); the retry mints a fresh id, and only its reply reaches the host. Leased (if a later manifest adds `deferred`): no retry, the call fails. The tool is stateless and has no side effects, so both are safe. After 3 failed restarts the tool fails (`protocol.md:1105`), and the agent asks in text. |
+| Extension crash | Eager (v1): the host respawns it and retries the call once (`process.rs:1993-2010`); the retry mints a fresh id, and only its reply reaches the host. Leased (if a later manifest adds `deferred`): no retry, the call fails. The tool keeps no card state and has no side effects, so both are safe. After 3 failed restarts the tool fails (`protocol.md:1105`), and the agent asks in text. |
 | Extension reload or uninstall | New calls fail. Existing cards still answer, because answers don't touch the extension. |
 
 ---
@@ -444,7 +444,7 @@ The surviving answer lands in the compacted history as plain text, and the card 
 
 ## 4. Durability (Q4)
 
-**The extension stores nothing.** Its only state is an in-memory, per-`session_id` rate counter (§5.5), which a restart resets: acceptable for a spam brake. The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
+**The extension stores nothing.** Its only state is in memory, and a restart resets it: the per-chat rate counter (§5.5), acceptable for a spam brake, and the ids it has minted (§1.5). The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
 
 **The session journal is the only store.** The card is the stored `tool_use` plus its `tool_result`, and the answer is a stored user message.
 

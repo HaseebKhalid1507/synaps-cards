@@ -2,10 +2,10 @@
 //! calls, validate with cards-spec, mint an id, and return at once with the
 //! result text (§1.5). Nothing waits for the answer, which comes later as a
 //! user message and never through here. The only state is the rate counter
-//! (§5.5).
+//! (§5.5) and the ids minted so far (§1.5).
 
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -184,27 +184,51 @@ impl Rate {
     }
 }
 
-/// Card ids (§1.5): `c` and 6 of `[a-z0-9]`, unique per session in
-/// practice. Not secret (§5.2), so std's randomly keyed hasher is enough.
+/// Card ids (§1.5): `c` and 6 of `[a-z0-9]`, never the same twice while
+/// the extension runs: a draw that names an id already minted draws again.
+/// One process serves every chat, so a session's ids are unique for the
+/// process's life; a restart starts a fresh set, and across one they are
+/// unique in practice (36^6 ids). Not secret (§5.2), so the default draw,
+/// std's randomly keyed hasher over a counter and the clock, is enough.
+/// The set grows by one id per card, which §5.5 caps at 36 an hour a chat.
 pub struct Ids {
-    keys: RandomState,
-    n: u64,
+    draw: Box<dyn FnMut() -> u64>,
+    minted: HashSet<CardId>,
 }
 
 impl Default for Ids {
     fn default() -> Self {
-        Ids { keys: RandomState::new(), n: 0 }
+        let keys = RandomState::new();
+        let mut n = 0u64;
+        Ids::drawing(move || {
+            let mut h = keys.build_hasher();
+            h.write_u64(n);
+            h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+            n += 1;
+            h.finish()
+        })
     }
 }
 
 impl Ids {
+    /// Ids from `draw`'s values, each read as [`Ids::id_of`] reads it.
+    pub fn drawing(draw: impl FnMut() -> u64 + 'static) -> Self {
+        Ids { draw: Box::new(draw), minted: HashSet::new() }
+    }
+
     pub fn mint(&mut self) -> CardId {
+        loop {
+            let id = Self::id_of((self.draw)());
+            if self.minted.insert(id.clone()) {
+                return id;
+            }
+        }
+    }
+
+    /// `c`, then `v`'s 6 lowest base-36 digits, lowest first, `a`–`z` for
+    /// 0–25 and `0`–`9` for 26–35.
+    pub fn id_of(mut v: u64) -> CardId {
         const DIGITS: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-        let mut h = self.keys.build_hasher();
-        h.write_u64(self.n);
-        h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-        self.n += 1;
-        let mut v = h.finish();
         let mut id = String::from("c");
         for _ in 0..6 {
             id.push(char::from(DIGITS[(v % 36) as usize]));

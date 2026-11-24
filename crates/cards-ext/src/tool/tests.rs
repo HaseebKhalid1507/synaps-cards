@@ -264,14 +264,46 @@ fn three_a_minute_and_six_in_ten() {
     assert!(cards.call(&other_chat, t0 + secs(30)).is_ok());
 }
 
+/// Ids from a script of draws; drawing past its end fails the test.
+fn scripted(draws: &[u64]) -> Ids {
+    let mut draws = draws.to_vec().into_iter();
+    Ids::drawing(move || draws.next().expect("drew past the script"))
+}
+
 #[test]
-fn ids_are_well_formed_and_do_not_repeat() {
+fn an_id_is_c_and_its_draws_six_lowest_base_36_digits() {
+    let pairs = [
+        (0, "caaaaaa"),
+        (35, "c9aaaaa"),
+        (36, "cabaaaa"),
+        (36u64.pow(6) - 1, "c999999"),
+        (36u64.pow(6), "caaaaaa"),
+        (u64::MAX, "cp2q2eg"),
+    ];
+    for (v, id) in pairs {
+        assert_eq!(Ids::id_of(v).as_str(), id, "{v}");
+    }
+    // Each digit value has its own character, and the 36 are [a-z0-9].
+    let firsts: String = (0..36).map(|v| Ids::id_of(v).as_str().chars().nth(1).unwrap()).collect();
+    assert_eq!(firsts, "abcdefghijklmnopqrstuvwxyz0123456789");
+}
+
+/// A draw that names an id already minted draws again (§1.5): 7 and 36^6 + 7
+/// both name `chaaaaa`, so the second id is 8's.
+#[test]
+fn a_repeated_id_draws_again() {
+    let mut ids = scripted(&[7, 7, 36u64.pow(6) + 7, 8, 0]);
+    assert_eq!(ids.mint().as_str(), "chaaaaa");
+    assert_eq!(ids.mint().as_str(), "ciaaaaa");
+    assert_eq!(ids.mint().as_str(), "caaaaaa");
+}
+
+/// The default draw: well-formed ids, never repeated, whatever it draws.
+#[test]
+fn the_default_ids_are_well_formed_and_do_not_repeat() {
     let mut ids = Ids::default();
     let minted: Vec<CardId> = (0..5000).map(|_| ids.mint()).collect();
     let distinct: std::collections::HashSet<&CardId> = minted.iter().collect();
     assert_eq!(distinct.len(), minted.len());
     assert!(minted.iter().all(|id| CardId::parse(id.as_str()).as_ref() == Some(id)));
-    // Every digit shows up: the hash isn't stuck on part of the alphabet.
-    let used: std::collections::HashSet<char> = minted.iter().flat_map(|id| id.as_str()[1..].chars().collect::<Vec<_>>()).collect();
-    assert_eq!(used.len(), 36);
 }
