@@ -28,8 +28,25 @@ fn doc() -> CardDoc {
 
 /// A card bound to `card` on tool call `tool`.
 fn bound(tool: &str, card: &str) -> [F; 2] {
-    let line = Envelope::showing(id(card), &doc(), false).to_string();
-    [F::Call { tool_id: tool.into(), name: "cards_ui".into(), input: ask() }, F::Result { tool_id: tool.into(), text: line }]
+    bound_with(tool, card, &ask())
+}
+
+/// A card asking `input`, bound to `card` on tool call `tool`.
+fn bound_with(tool: &str, card: &str, input: &Value) -> [F; 2] {
+    let Input::Create { doc, wait } = parse_input(input).unwrap() else { unreachable!() };
+    let line = Envelope::showing(id(card), &doc, wait).to_string();
+    [F::Call { tool_id: tool.into(), name: "cards_ui".into(), input: input.clone() }, F::Result { tool_id: tool.into(), text: line }]
+}
+
+/// Another question, whose answers `ask()`'s doc refuses.
+fn ship() -> Value {
+    json!({ "question": "Ship it?", "options": ["Yes", "No"] })
+}
+
+/// An answer choosing `input`'s first option.
+fn first(input: &Value) -> Reply {
+    let Input::Create { doc, .. } = parse_input(input).unwrap() else { unreachable!() };
+    Reply::Answer(parse_answer(&doc, &json!({ "choice": input["options"][0] })).unwrap())
 }
 
 fn answer(choice: &str) -> Reply {
@@ -104,6 +121,21 @@ impl Desk {
     fn resend(&mut self, settled: bool) -> Resend {
         let f = self.fold();
         self.memo.resend(&id(ID), &View { fold: &f, settled, queued: None, streaming: false }, self.now)
+    }
+
+    /// A click against a settled view with this slot.
+    fn resend_on(&mut self, queued: Option<&str>, streaming: bool) -> Resend {
+        let f = self.fold();
+        self.memo.resend(&id(ID), &View { fold: &f, settled: true, queued, streaming }, self.now)
+    }
+
+    /// Pressed, echoed, `Idle`, and a settled view without it: unconfirmed.
+    fn unconfirmed(&mut self) -> String {
+        let t = self.queued(false);
+        self.on(Event::Idle);
+        self.settles();
+        assert_eq!(self.state(), Some(State::Unconfirmed));
+        t
     }
 
     /// Pressed, and echoed as a steer while streaming: queued.
@@ -510,6 +542,162 @@ fn a_check_that_finds_an_answer_we_never_saw_drops_it() {
         d.lands(&text(ID, &answer("Leave it")));
         d.settles();
         assert_eq!((d.state(), d.may_resend()), (None, false), "{trigger:?}");
+    }
+}
+
+/// Rule 3 holds for an unconfirmed entry too (§3.5): the echo and the
+/// history were late, the check timed out, and then a settled view shows
+/// ours in the slot. It is on its way, not lost: no Resend, and the click
+/// sends nothing.
+#[test]
+fn a_settled_view_with_ours_queued_after_the_check_timed_out() {
+    for (streaming, want) in [(false, State::Held), (true, State::Queued)] {
+        let mut d = Desk::new();
+        let t = d.press(answer("Leave it")).unwrap();
+        d.after(10);
+        d.after(10);
+        assert_eq!((d.state(), d.cause().as_deref()), (Some(State::Unconfirmed), Some("Couldn't check whether it arrived")));
+        assert!(d.may_resend());
+        d.view(true, Some(&t), streaming);
+        assert_eq!((d.state(), d.may_resend()), (Some(want), false), "streaming {streaming}");
+        assert_eq!(d.resend_on(Some(&t), streaming), Resend::No);
+        assert_eq!(d.press(answer("Rewrite from scratch")), None, "still in flight");
+        d.lands(&t);
+        d.settles();
+        assert_eq!(d.state(), Some(State::InChat), "it went in");
+    }
+}
+
+/// The click runs the settle rules on its own settled view (§3.5): ours in
+/// the slot since the button was painted, and nothing is sent. Rules 1 and
+/// 2 still come before rule 3: a closed card, or ours in the chat with an
+/// answer after it, drops the entry.
+#[test]
+fn a_resend_click_on_a_view_with_ours_queued_sends_nothing() {
+    for (streaming, want) in [(true, State::Queued), (false, State::Held)] {
+        let mut d = Desk::new();
+        let t = d.unconfirmed();
+        assert!(d.may_resend(), "painted");
+        assert_eq!(d.resend_on(Some(&t), streaming), Resend::No, "streaming {streaming}");
+        assert_eq!((d.state(), d.may_resend()), (Some(want), false));
+    }
+
+    let mut d = Desk::new();
+    let t = d.unconfirmed();
+    d.lands(&t);
+    d.lands(&text(ID, &change("Leave it")));
+    assert_eq!((d.resend_on(Some(&t), false), d.state()), (Resend::No, None), "rule 2");
+
+    let mut d = Desk::new();
+    let t = d.unconfirmed();
+    d.history.push(F::Call { tool_id: "t2".into(), name: "cards_ui".into(), input: json!({ "close": ID }) });
+    d.history.push(F::Result { tool_id: "t2".into(), text: format!("Card {ID} closed (cards/1).") });
+    assert_eq!((d.resend_on(Some(&t), false), d.state()), (Resend::No, None), "rule 1");
+}
+
+/// d5, then d3 in the next turn (§3.4): held after an error; the user's
+/// next turn starts with ours still in the slot; another steer replaces the
+/// slot during it, so ours is in no turn's steer channel; the turn ends. The
+/// `Idle`'s settled view shows the slot without it: it settles as `Idle`
+/// does, with Resend. The turn may end normally (the replacement went in)
+/// or fail (the replacement is held now).
+#[test]
+fn held_then_the_slot_replaced_in_the_next_turn() {
+    const OTHER: &str = "and also run the tests";
+    for failed in [false, true] {
+        let mut d = Desk::new();
+        let t = d.queued(false);
+        d.on(Event::Idle);
+        d.view(true, Some(&t), false);
+        assert_eq!(d.state(), Some(State::Held));
+        d.on(Event::Echo { text: "next", driver: false });
+        d.lands("next");
+        d.view(true, Some(&t), true);
+        d.on(Event::Echo { text: OTHER, driver: false });
+        d.view(true, Some(OTHER), true);
+        assert_eq!(d.state(), Some(State::Held), "the turn runs: nothing settles before its Idle");
+        if !failed {
+            d.lands(OTHER);
+        }
+        d.on(Event::Idle);
+        d.view(true, failed.then_some(OTHER), false);
+        assert_eq!(
+            (d.state(), d.cause().as_deref()),
+            (Some(State::Unconfirmed), Some("It didn't reach the chat. Another message may have replaced it")),
+            "failed {failed}"
+        );
+        assert_eq!(d.resend(true), Resend::Send(t));
+    }
+}
+
+/// The controls (§3.5, held): an `Idle` whose settled view still shows ours
+/// in the slot keeps it held, with no Resend and no timeout. A settled view
+/// without it and no `Idle` is the next turn taking it: the host empties the
+/// slot and sends a `Conversation` before it appends it (SynapsCLI
+/// `0a71ea0d` `actor.rs:4119-4125`, `:4180-4184`), so it stays held. Then
+/// it goes in.
+#[test]
+fn held_survives_an_idle_that_still_shows_it_and_lands_later() {
+    let mut d = Desk::new();
+    let t = d.queued(false);
+    d.on(Event::Idle);
+    d.view(true, Some(&t), false);
+    d.on(Event::Idle);
+    d.view(false, None, false);
+    assert_eq!(d.state(), Some(State::Held), "a stale view proves nothing");
+    d.view(true, Some(&t), false);
+    d.after(30);
+    assert_eq!((d.state(), d.may_resend()), (Some(State::Held), false), "the next turn failed too: still held");
+    d.view(true, None, false);
+    assert_eq!(d.state(), Some(State::Held), "no Idle: the slot was taken to go in");
+    d.lands(&t);
+    d.settles();
+    assert_eq!(d.state(), Some(State::InChat));
+}
+
+/// A card id bound again (an extension restart, §1.5) names the later card
+/// (§2.3). The earlier card takes no press. An entry that answers it is
+/// dropped on the view that shows the later binding, settled or not, when
+/// the later card is another question, or the same one on another call;
+/// it doesn't hold the later card's press back; and no Retry or Resend
+/// sends its text to the later card.
+#[test]
+fn a_card_id_bound_again_drops_the_earlier_cards_entry() {
+    let mut d = Desk::new();
+    d.history.extend(bound_with("t2", ID, &ship()));
+    let f = d.fold();
+    let (old, new) = (f.card("t1").unwrap(), f.card("t2").unwrap());
+    assert_eq!(d.memo.press(old, answer("Leave it"), d.now), None, "the earlier row");
+    assert!(d.memo.press(new, first(&ship()), d.now).is_some(), "the later one");
+
+    let cases = [
+        ("another question", "t2", ship()),
+        ("the same question on another call", "t2", ask()),
+        ("another question on the same call id", "t1", ship()),
+    ];
+    for (what, tool, again) in cases {
+        let mut q = Desk::new();
+        q.queued(false);
+        q.history.extend(bound_with(tool, ID, &again));
+        let f = q.fold();
+        let later = f.bound(&id(ID)).unwrap();
+        assert!(q.memo.clone().press(later, first(&again), q.now).is_some(), "the later card's press: {what}");
+        q.view(false, None, true);
+        assert_eq!(q.state(), None, "queued: {what}");
+
+        let mut u = Desk::new();
+        u.unconfirmed();
+        assert!(u.may_resend());
+        u.history.extend(bound_with(tool, ID, &again));
+        assert!(!u.may_resend(), "unconfirmed: {what}");
+        assert_eq!((u.resend(true), u.state()), (Resend::No, None));
+
+        let mut n = Desk::new();
+        n.press(answer("Leave it")).unwrap();
+        n.on(Event::Refused { reason: "r" });
+        n.history.extend(bound_with(tool, ID, &again));
+        let f = n.fold();
+        assert_eq!(n.memo.retry(&id(ID), &f, n.now), None, "not sent: {what}");
     }
 }
 

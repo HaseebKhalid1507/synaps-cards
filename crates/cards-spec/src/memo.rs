@@ -9,13 +9,24 @@
 //! [`Entry`]. Nothing here sends: [`Memo::press`], [`Memo::retry`] and
 //! [`Memo::resend`] return the text, and the desk sends it.
 //!
-//! Where §3.5's table is silent, this module decides:
+//! §3.5 states every transition, including these, which S3's review
+//! settled:
 //! - **`Attached` while sending or held** moves the entry to checking, as
 //!   it does a queued one. An answer unconfirmed at a drop settles after
 //!   the reconnect (§1.6). A held slot may not survive a daemon restart,
 //!   and if it did, rule 3 finds it again.
-//! - **A late echo** moves only a checking entry, as the table says. An
-//!   unconfirmed one waits for the fold.
+//! - **A late echo** moves only a checking entry. An unconfirmed one isn't
+//!   moved by an echo, but by a settled view: the fold (rule 2), or a
+//!   `queued_message` that is ours (rule 3).
+//! - **Rule 3 holds for an unconfirmed entry too**, and a Resend click runs
+//!   the settle rules on its settled view before it sends: when the slot
+//!   holds ours, nothing is sent.
+//! - **An `Idle` while held** has the next settled view check it. Ours
+//!   still in the slot stays held; a slot that another message replaced, or
+//!   that nothing carries any more, settles as `Idle` does.
+//! - **The binding.** An entry answers one card: its id, its call's tool id
+//!   and its doc's digest. Once the id names another card (replaced,
+//!   §2.3), the entry is dropped, and no press, Retry or Resend sends to it.
 //! - **"Bound and open"** in the Resend gate means a card that may still
 //!   be answered (open, answered or skipped), so a change can be resent.
 //! - **A queued `queued_message` beats a superseding answer** on every
@@ -23,9 +34,9 @@
 
 use std::time::{Duration, Instant};
 
-use crate::CardId;
 use crate::fold::{Card, Fold, State as Folded};
 use crate::message::{self, Reply};
+use crate::{CardId, Digest, digest};
 
 /// Entries per session (§3.5, "Bounds").
 pub const CAP: usize = 32;
@@ -93,6 +104,10 @@ impl Cause {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub card: CardId,
+    /// The card's binding with `card`: its call and its doc
+    /// ([`Entry::answers`]).
+    tool_id: String,
+    digest: Digest,
     /// The message sent, exactly: events and the fold match it by text.
     pub text: String,
     /// The values, which the card shows until the fold has them.
@@ -108,6 +123,8 @@ pub struct Entry {
     driver: bool,
     /// A `DriverRevoked` came after that echo.
     revoked: bool,
+    /// Held, and an `Idle` came: the next settled view checks the slot.
+    recheck: bool,
     /// When it entered its state: the timers run from here.
     since: Instant,
 }
@@ -118,10 +135,21 @@ impl Entry {
         matches!(self.state, State::Sending | State::Queued | State::Held | State::Checking)
     }
 
+    /// Whether this entry answers `card`: its id still names the card that
+    /// was pressed, the same call and doc. A card bound again to the id
+    /// since (replaced, §2.3) is another card. One with the same tool id and
+    /// doc would be the same question, so they count as one.
+    pub fn answers(&self, card: &Card) -> bool {
+        card.id.as_ref() == Some(&self.card)
+            && card.tool_id == self.tool_id
+            && card.doc.as_ref().is_some_and(|doc| digest(doc, card.wait) == self.digest)
+    }
+
     fn to(&mut self, state: State, now: Instant) {
         self.state = state;
         self.cause = None;
         self.since = now;
+        self.recheck = false;
         // In the chat, it has left any driver's queue: rule 5 no longer
         // applies if a crash loses it.
         if state == State::InChat {
@@ -155,11 +183,12 @@ impl Entry {
     /// Follow the fold; `false` drops the entry.
     fn follow(&mut self, view: &View<'_>, now: Instant) -> bool {
         // Rule 1. Only a settled view says a card is gone: a stale one may
-        // just not have it yet.
+        // just not have it yet. Closed, or replaced (its id names another
+        // card now), it is dropped on any view.
         let Some(card) = view.fold.bound(&self.card) else {
             return !view.settled;
         };
-        if card.state == Folded::Closed {
+        if card.state == Folded::Closed || !self.answers(card) {
             return false;
         }
         // Rule 2: ours past the seen prefix is in the chat, unless an
@@ -180,12 +209,21 @@ impl Entry {
             // before the save).
             self.check(Trigger::Attached, now);
         }
-        if self.state == State::Checking && view.settled {
-            // Rule 3.
-            if ours_queued {
-                self.to(if view.streaming { State::Queued } else { State::Held }, now);
-                return true;
+        // Held, and an `Idle` came since: the slot no longer holding ours
+        // means another message replaced it, or nothing carries it now.
+        if self.state == State::Held && self.recheck && view.settled {
+            self.recheck = false;
+            if !ours_queued {
+                self.check(Trigger::Idle, now);
             }
+        }
+        // Rule 3, for an unconfirmed entry too: the view shows ours in the
+        // slot, so it is on its way, not lost.
+        if matches!(self.state, State::Checking | State::Unconfirmed) && ours_queued {
+            self.to(if view.streaming { State::Queued } else { State::Held }, now);
+            return true;
+        }
+        if self.state == State::Checking && view.settled {
             // Rule 4: an answer we didn't know about.
             if k < f.len() {
                 return false;
@@ -204,7 +242,7 @@ impl Entry {
     /// and its answers are a prefix of `seen`. The desk adds
     /// `input_gate()`.
     fn gate(&self, fold: &Fold) -> bool {
-        let Some(card) = fold.bound(&self.card).filter(|c| c.answerable()) else {
+        let Some(card) = fold.bound(&self.card).filter(|c| c.answerable() && self.answers(c)) else {
             return false;
         };
         let (f, k) = self.split(card);
@@ -279,7 +317,8 @@ impl Memo {
     }
 
     /// A press on `card` with `reply`: the text to send, or `None` when the
-    /// card can't be answered or an answer to it is still in flight. A new
+    /// card can't be answered (a replaced card can't) or an answer to it is
+    /// still in flight. A new
     /// entry replaces the card's last one (a change of answer); past
     /// [`CAP`] it evicts the oldest entry in the chat, else the oldest
     /// unconfirmed one, else the oldest.
@@ -287,7 +326,7 @@ impl Memo {
         let (Some(id), Some(doc)) = (card.id.as_ref(), card.doc.as_ref()) else {
             return None;
         };
-        if !card.answerable() || self.get(id).is_some_and(Entry::in_flight) {
+        if !card.answerable() || self.get(id).is_some_and(|e| e.in_flight() && e.answers(card)) {
             return None;
         }
         let text = message::build(id, doc, &reply);
@@ -299,6 +338,8 @@ impl Memo {
         }
         self.entries.push(Entry {
             card: id.clone(),
+            tool_id: card.tool_id.clone(),
+            digest: digest(doc, card.wait),
             text: text.clone(),
             reply,
             seen: card.answers.iter().map(|a| a.text.clone()).collect(),
@@ -307,6 +348,7 @@ impl Memo {
             trigger: Trigger::Timeout,
             driver: false,
             revoked: false,
+            recheck: false,
             since: now,
         });
         Some(text)
@@ -314,10 +356,10 @@ impl Memo {
 
     /// Retry a card not sent, while it may still be answered: the same text.
     pub fn retry(&mut self, card: &CardId, fold: &Fold, now: Instant) -> Option<String> {
-        if !fold.bound(card).is_some_and(Card::answerable) {
+        let e = self.get_mut(card).filter(|e| e.state == State::NotSent)?;
+        if !fold.bound(card).is_some_and(|c| c.answerable() && e.answers(c)) {
             return None;
         }
-        let e = self.get_mut(card).filter(|e| e.state == State::NotSent)?;
         Some(e.send(now))
     }
 
@@ -327,17 +369,24 @@ impl Memo {
         self.get(card).is_some_and(|e| e.gate(fold))
     }
 
-    /// A Resend click: the gate again, against a settled view.
+    /// A Resend click, against a settled view: the settle rules on that
+    /// view first, then the gate again. A view that shows ours in the slot
+    /// (rule 3) moves it to queued or held, and nothing is sent.
     pub fn resend(&mut self, card: &CardId, view: &View<'_>, now: Instant) -> Resend {
-        let Some(e) = self.get_mut(card).filter(|e| e.state == State::Unconfirmed) else {
+        let Some(i) = self.entries.iter().position(|e| e.card == *card && e.state == State::Unconfirmed) else {
             return Resend::No;
         };
+        let e = &mut self.entries[i];
         if !view.settled {
             let trigger = e.trigger;
             e.check(trigger, now);
             return Resend::Checking;
         }
-        if !e.gate(view.fold) {
+        if !e.follow(view, now) {
+            self.entries.remove(i);
+            return Resend::No;
+        }
+        if e.state != State::Unconfirmed || !e.gate(view.fold) {
             return Resend::No;
         }
         Resend::Send(e.send(now))
@@ -372,7 +421,10 @@ impl Memo {
                     }
                 }
             }
-            Event::Idle => each(&[Queued], None, &mut |e| e.check(Trigger::Idle, now)),
+            Event::Idle => {
+                each(&[Queued], None, &mut |e| e.check(Trigger::Idle, now));
+                each(&[Held], None, &mut |e| e.recheck = true);
+            }
             Event::Attached => each(&[Sending, Queued, Held, Checking], None, &mut |e| e.check(Trigger::Attached, now)),
             Event::Notice => each(&[Sending], None, &mut |e| e.check(Trigger::Notice, now)),
         }
