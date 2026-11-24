@@ -190,7 +190,7 @@
   ```
 
   With `wait: true`, the last line instead reads: `You can't continue without it: end your turn now; the answer starts your next turn.`
-- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it: keys in schema order, `\n` line endings, defaults materialized, string options as `{label}`. It is the doc the extension validated, after any hook rewrote the input (§2.2). It is a 64-bit checksum against accidental divergence, not an identity or a signature (§5.2).
+- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it, **with the call's `wait` last**: keys in schema order, `\n` line endings, defaults materialized (`wait` too, `false` when absent), string options as `{label}`. `wait` is the call's mode, not part of the doc, but it changes what the desk draws (NEEDS YOU) and what the result tells the agent, so a hook that flips it must not bind. It is the doc the extension validated, after any hook rewrote the input (§2.2). It is a 64-bit checksum against accidental divergence, not an identity or a signature (§5.2).
 - **Size.** A result is at most 1024 bytes of UTF-8, below the result bounds and the default spill threshold (`tool_output_spill_bytes`, `CLI:ae/runtime/tool_spill.rs:71-95`). `cards_ext` builds it in this order and cuts only at character boundaries:
   1. Line 1, the envelope, is at most 256 bytes. Only the question in it is cut, ending in `…`, and the id, version and digest are never cut.
   2. The trailer, the "Its answer will come…" lines, is fixed text of under 200 bytes, and is always kept.
@@ -244,7 +244,7 @@
 
 1. **The tool call.** A `tool_use` named `cards_ui`, or `cards:ui` (the runtime form), is a card candidate. Another name, including a collision suffix such as `cards_ui_2`, is drawn as an ordinary tool row: the fail-safe.
 2. **The input.** It goes through `cards_spec::parse_input`, the same function the extension ran, and is normalized. If it is invalid, or comes from a newer catalog this build doesn't know, the call is drawn as an ordinary tool row, and the user can still answer in text.
-3. **The result.** Line 1 must parse as the envelope (§1.5), name a version this build knows, and carry the digest of step 2's normalized doc. That binds the id to the exact doc drawn. Anything else is a plain row:
+3. **The result.** Line 1 must parse as the envelope (§1.5), name a version this build knows, and carry the digest of step 2's normalized doc and `wait` (§1.5). That binds the id to the exact doc drawn, in the mode it was asked in. Anything else is a plain row:
    - **a mismatch:** a hook rewrote the input before the tool ran (`CLI:ae/runtime/stream.rs:2350-2390`), while the transcript keeps the model's original call. The extension validated one card, and the desk would draw another;
    - **an error:** the host stores it as text with no envelope, and the live `ToolResult` has no error flag (`stream.rs:2392-2403`; `CLI:ae/session/wire.rs:983`);
    - **a cut or virtualised line 1**, or an unknown version.
@@ -328,7 +328,7 @@ There is no clock-based expiry. A card is moot when the agent closes it, the use
 **Format:**
 - **Line 1, for people.** The pattern is `^\[card (c[a-z0-9]{6})( changed| skipped)?\] `. After it come the question and a summary: labels joined with `, `, then `Label: value` for each field, each cut at 40 characters with `…`. The line is at most 200 characters, and each piece is sanitized.
 - **Line 2, for machines.** The values as compact JSON. The spec's own writer emits the keys in doc order, so the bytes are the same with or without `preserve_order`.
-- **Size.** The message is at most 8 KiB plus 200 bytes, far under any steering bound.
+- **Size.** Line 1 is at most 200 *characters* (so at most 800 bytes of UTF-8), and line 2 at most 8 KiB: with the newline between them, the message is at most 8 KiB + 801 bytes, far under any steering bound.
 
 **Parsing (the fold):**
 - A user text (§2.3) counts as an answer only if it is exactly two lines: line 1 matches in full, line 2 is one JSON object that passes `parse_answer(doc, values)`, and the id names a card bound earlier in the history. Anything else is ordinary text.
@@ -506,7 +506,7 @@ Resend itself is checked on local evidence only (§3.5). It can repeat an answer
 ### 5.2 Provenance and sanitizing
 
 - **Chrome.** The desk draws it: "◇ The agent asks", the session, and the card frame. Agent strings never appear in the chrome. Cards never use the authorize card's warning colours or icon.
-- **Sanitizing.** `cards_spec::sanitize` is #75's `sanitize.rs`. It refuses, with a teaching line, any control, bidi or invisible character in an agent string. It sanitizes the summary line again on the way out.
+- **Sanitizing.** `cards_spec::sanitize` is #75's `sanitize.rs`. In an agent string it refuses, with a teaching line, any C0/C1 control (other than `\n`, `\t` and a line-ending `\r`) and any bidi embedding, override or isolate. It drops the other invisible characters (zero-width space, word joiner, BOM, soft hyphen, variation selectors, …), but **keeps ZWJ and ZWNJ** (U+200D, U+200C), which join emoji and shape scripts. It sanitizes the summary line again on the way out.
 - **Detail** is markdown-lite: bold, italic, inline code and lists. A link shows as plain text.
 - **Ids are not credentials.** Authority comes from the daemon's input rules (§3.2). A guessed id lets you do only what typing already lets you do.
 - **Names aren't identities.** A tool name, a plugin name and the envelope don't authenticate anything.
