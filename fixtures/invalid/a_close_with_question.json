@@ -1,0 +1,8 @@
+{
+  "about": "Appendix A: close combined with question",
+  "input": {
+    "close": "c4f9x2a",
+    "question": "Which approach?"
+  },
+  "error": "close: give it alone, with no other parameter (got question)"
+}

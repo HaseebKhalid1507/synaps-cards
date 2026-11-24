@@ -1,0 +1,71 @@
+{
+  "about": "v3.2 #1: \\r\\n and a lone \\r are line endings in agent-written strings: \\n before any check, then folded to a space in single-line fields. Never refused. In answer values a \\r is refused: clients normalize before they send.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Ship\r\nit?",
+    "detail": "one\r\ntwo\rthree",
+    "options": [
+      "a\rb",
+      "c"
+    ],
+    "fields": [
+      {
+        "id": "x",
+        "label": "L",
+        "type": "long",
+        "placeholder": "x\ry",
+        "value": "p\r\nq"
+      }
+    ]
+  },
+  "doc": {
+    "question": "Ship it?",
+    "detail": "one\ntwo\nthree",
+    "options": [
+      {
+        "label": "a b"
+      },
+      {
+        "label": "c"
+      }
+    ],
+    "multi": false,
+    "fields": [
+      {
+        "id": "x",
+        "label": "L",
+        "type": "long",
+        "value": "p\nq",
+        "placeholder": "x y",
+        "optional": false
+      }
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": "a b",
+        "fields": {
+          "x": "one\nline"
+        }
+      },
+      "message": "[card c4f9x2a] Ship it? → a b · L: one line\n{\"choice\":\"a b\",\"fields\":{\"x\":\"one\\nline\"}}"
+    }
+  ],
+  "bad_answers": [
+    {
+      "values": {
+        "choice": "c",
+        "fields": {
+          "x": "a\r\nb"
+        }
+      },
+      "error": "fields.x: holds U+000D (a control character)"
+    }
+  ],
+  "digest": "a5b99fa767e09415",
+  "envelope": "Card c4f9x2a is showing (cards/1 #a5b99fa767e09415): Ship it?"
+}

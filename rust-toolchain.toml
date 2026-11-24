@@ -1,0 +1,6 @@
+# The toolchain synaps-desk pins. Card folding doesn't depend on it: the
+# case-folding table is generated into cards-spec at the corpus's Unicode.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

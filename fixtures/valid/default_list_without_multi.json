@@ -1,0 +1,40 @@
+{
+  "about": "v3.2 #4: a one-item list default without multi becomes the label, matched ignoring case.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Proceed?",
+    "options": [
+      "Yes",
+      "No"
+    ],
+    "default": [
+      "YES"
+    ]
+  },
+  "doc": {
+    "question": "Proceed?",
+    "options": [
+      {
+        "label": "Yes"
+      },
+      {
+        "label": "No"
+      }
+    ],
+    "multi": false,
+    "default": "Yes"
+  },
+  "wait": false,
+  "mode": "quick",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "choice": "No"
+      },
+      "message": "[card c4f9x2a] Proceed? → No\n{\"choice\":\"No\"}"
+    }
+  ],
+  "digest": "cddf2abe31133947",
+  "envelope": "Card c4f9x2a is showing (cards/1 #cddf2abe31133947): Proceed?"
+}

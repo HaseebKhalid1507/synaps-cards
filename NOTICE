@@ -1,0 +1,22 @@
+synaps-cards
+Copyright (c) 2026 Haseeb Khalid
+
+This project is licensed under the MIT License (see LICENSE).
+
+Parts of it are ported from SynapsCLI (https://github.com/HaseebKhalid1507/SynapsCLI),
+which is licensed under the Apache License, Version 2.0 (see LICENSE-APACHE), by way of
+synaps-desk (https://github.com/HaseebKhalid1507/synaps-desk), whose #75 mirrored them:
+
+- crates/cards-spec/src/{types,sanitize,doc,answer}.rs and their tests
+                         the card model: SynapsCLI's agent-engine `ui` module (C1, 6e895d27),
+                         as synaps-desk's crates/synaps-client/src/surface/ (3f61cff)
+- fixtures/{valid,invalid,raw}/, fixtures/sanitize.json
+                         the card corpus: SynapsCLI's
+                         crates/agent-engine/tests/fixtures/ui/ (6e895d27)
+
+Those portions remain under the Apache License, Version 2.0. The modifications are
+distributed under the MIT License.
+
+crates/cards-spec/src/casefold.rs and fixtures/casefold.json are generated from the
+Unicode Character Database (CaseFolding.txt, Unicode 16.0.0), Copyright © Unicode, Inc.,
+under the Unicode License v3 (https://www.unicode.org/license.txt).

@@ -1,0 +1,61 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (rust-toolchain.toml)
+        shell: bash
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy (workspace, all targets, -D warnings)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Clippy (cards-spec with preserve_order, -D warnings)
+        run: cargo clippy -p cards-spec --all-targets --locked --features preserve_order -- -D warnings
+      # Twice: serde_json's maps sorted (a crate that uses cards-spec alone),
+      # then in insertion order (synaps-desk's build, where gpui turns on
+      # `preserve_order`). Every byte cards-spec writes must be the same in
+      # both; `keys_are_read_in_sorted_order_in_both_builds` checks which
+      # lane it is in. The counts are printed so the log shows they ran.
+      - name: Test (serde_json maps sorted)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee tests.log
+          passed=$(grep -E '^test result: ok' tests.log | awk '{s += $4} END {print s + 0}')
+          echo "workspace: $passed tests passed"
+          grep -qE '^test valid_fixtures \.\.\. ok' tests.log && grep -qE '^test casefold_fixture \.\.\. ok' tests.log
+          test "$passed" -gt 0
+      - name: Test (serde_json maps in insertion order, as in synaps-desk)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p cards-spec --locked --features preserve_order 2>&1 | tee tests-preserve-order.log
+          passed=$(grep -E '^test result: ok' tests-preserve-order.log | awk '{s += $4} END {print s + 0}')
+          echo "cards-spec, preserve_order: $passed tests passed"
+          grep -qE '^test tests::keys_are_read_in_sorted_order_in_both_builds \.\.\. ok' tests-preserve-order.log
+          test "$passed" -gt 0
+      - name: Goldens (scripts/oracle.py, the second implementation)
+        if: runner.os == 'Linux'
+        run: python3 scripts/oracle.py --check

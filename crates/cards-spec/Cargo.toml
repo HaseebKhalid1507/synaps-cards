@@ -1,0 +1,18 @@
+[package]
+name = "cards-spec"
+description = "The agent-card spec shared by the cards extension and synaps-desk: the doc schema, validation, the digest, the answer format."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[features]
+# Only for CI's second test lane: serde_json's maps keep insertion order, as
+# they do in synaps-desk's build (gpui turns it on). Every byte this crate
+# writes (the digest's preimage, an answer message) is the same either way.
+preserve_order = ["serde_json/preserve_order"]

@@ -1,0 +1,56 @@
+{
+  "about": "Ported from C1's late-answer fixture (there is no late delivery without the core): a form whose optional field is left empty, — in the summary.",
+  "card": "c4f9x2a",
+  "input": {
+    "question": "Release target?",
+    "detail": "Tag v0.13.0\nand push the crate",
+    "fields": [
+      {
+        "id": "target",
+        "label": "Release target"
+      },
+      {
+        "id": "notes",
+        "label": "Notes",
+        "optional": true
+      }
+    ]
+  },
+  "doc": {
+    "question": "Release target?",
+    "detail": "Tag v0.13.0\nand push the crate",
+    "multi": false,
+    "fields": [
+      {
+        "id": "target",
+        "label": "Release target",
+        "type": "text",
+        "value": "",
+        "optional": false
+      },
+      {
+        "id": "notes",
+        "label": "Notes",
+        "type": "text",
+        "value": "",
+        "optional": true
+      }
+    ]
+  },
+  "wait": false,
+  "mode": "form",
+  "answers": [
+    {
+      "kind": "answer",
+      "values": {
+        "fields": {
+          "target": "prod",
+          "notes": ""
+        }
+      },
+      "message": "[card c4f9x2a] Release target? → Release target: prod · Notes: —\n{\"fields\":{\"target\":\"prod\",\"notes\":\"\"}}"
+    }
+  ],
+  "digest": "ead6724284c391dc",
+  "envelope": "Card c4f9x2a is showing (cards/1 #ead6724284c391dc): Release target?"
+}
