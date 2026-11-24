@@ -112,25 +112,31 @@ pub fn char_len(s: &str) -> usize {
 }
 
 /// `s` cut to at most `max` characters on a character boundary, ending in
-/// `…` when it was cut.
+/// `…` when it was cut. Never longer than `max`: cut to 0, it is empty.
 pub fn cut_chars(s: &str, max: usize) -> String {
     if char_len(s) <= max {
         return s.to_string();
     }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    if max == 0 {
+        return String::new();
+    }
+    let mut out: String = s.chars().take(max - 1).collect();
     out.push('…');
     out
 }
 
 /// `s` cut to at most `max` bytes of UTF-8 on a character boundary, ending
-/// in `…` when it was cut (the `…` counted).
+/// in `…` when it was cut (the `…` counted). Never longer than `max`: below
+/// 3 bytes, where the `…` can't fit, a cut `s` is the longest prefix that
+/// fits, with no `…` (Shady #2 P2).
 pub fn cut_bytes(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
     }
-    let room = max.saturating_sub('…'.len_utf8());
+    let mark = '…'.len_utf8();
+    let room = if max >= mark { max - mark } else { max };
     let end = s.char_indices().map(|(i, c)| i + c.len_utf8()).take_while(|&end| end <= room).last().unwrap_or(0);
-    format!("{}…", &s[..end])
+    if max >= mark { format!("{}…", &s[..end]) } else { s[..end].to_string() }
 }
 
 /// The key labels are compared by: Unicode full case folding

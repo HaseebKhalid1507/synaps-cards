@@ -100,7 +100,8 @@ def sanitize_single(s):
 
 
 def cut(s, n):
-    return s if len(s) <= n else s[: n - 1] + "…"
+    """At most n characters, ending in … when cut; cut to 0, empty."""
+    return s if len(s) <= n else (s[: n - 1] + "…" if n else "")
 
 
 # ── The answer message (§3.3) ────────────────────────────────────────────

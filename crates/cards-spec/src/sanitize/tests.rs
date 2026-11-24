@@ -34,6 +34,48 @@ fn cuts() {
     assert!(cut_bytes(&"\u{10330}".repeat(100), 203).len() <= 203);
 }
 
+/// Shady #2 P2-1: a budget smaller than the `…` (3 bytes, 1 character) never
+/// grows the result: it is the longest prefix that fits, with no `…`.
+#[test]
+fn cuts_never_exceed_a_budget_smaller_than_the_ellipsis() {
+    for (s, max, want) in [
+        ("abcdef", 0, ""),
+        ("abcdef", 1, "a"),
+        ("abcdef", 2, "ab"),
+        ("abcdef", 3, "…"),
+        ("abcdef", 4, "a…"),
+        ("abc", 3, "abc"),
+        ("ab", 2, "ab"),
+        ("", 0, ""),
+        ("é", 1, ""),
+        ("éa", 2, "é"),
+        ("\u{10330}x", 2, ""),
+        ("\u{10330}x", 3, "…"),
+        ("\u{10330}x", 5, "\u{10330}x"),
+    ] {
+        assert_eq!(cut_bytes(s, max), want, "cut_bytes({s:?}, {max})");
+    }
+    for (s, max, want) in [("x", 0, ""), ("", 0, ""), ("xy", 1, "…"), ("x", 1, "x"), ("é\u{10330}", 1, "…")] {
+        assert_eq!(cut_chars(s, max), want, "cut_chars({s:?}, {max})");
+    }
+    // Every budget, every boundary: within it, a prefix, and `…` only when cut.
+    for s in ["", "a", "abcdef", "aé\u{10330}b\u{10330}", "€€€", "\u{10330}\u{10330}\u{10330}"] {
+        for max in 0..=s.len() + 2 {
+            let out = cut_bytes(s, max);
+            let body = out.strip_suffix('…').filter(|_| out != s).unwrap_or(&out);
+            assert!(out.len() <= max, "cut_bytes({s:?}, {max}) = {out:?}");
+            assert!(s.starts_with(body), "cut_bytes({s:?}, {max}) = {out:?}");
+            assert_eq!(out == s, s.len() <= max, "cut_bytes({s:?}, {max}) = {out:?}");
+            assert_eq!(out != s && out.ends_with('…'), s.len() > max && max >= 3, "cut_bytes({s:?}, {max}) = {out:?}");
+        }
+        for max in 0..=char_len(s) + 2 {
+            let out = cut_chars(s, max);
+            assert!(char_len(&out) <= max, "cut_chars({s:?}, {max}) = {out:?}");
+            assert_eq!(out == s, char_len(s) <= max, "cut_chars({s:?}, {max}) = {out:?}");
+        }
+    }
+}
+
 #[test]
 fn full_case_folding() {
     assert_eq!(fold_key("Straße"), "strasse");
