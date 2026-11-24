@@ -1,6 +1,6 @@
-# synaps-cards: agent cards as an extension around Synaps (design v1.1)
+# synaps-cards: agent cards as an extension around Synaps (design v1.2)
 
-**Author:** Zero · **Status:** design only, no code. It replaces `agent-ui/architecture.md` v3.4, whose core stack (SynapsCLI #439, #440, #444, #446) is dead. **Hard rule:** zero changes to SynapsCLI; everything below uses only what `dev` already ships. v1.1 answers Shady's review of v1 (`agent-ui/review-synaps-cards-design-shady.md`; PR #1 review `6032148226`).
+**Author:** Zero · **Status:** design only, no code. It replaces `agent-ui/architecture.md` v3.4, whose core stack (SynapsCLI #439, #440, #444, #446) is dead. **Hard rule:** zero changes to SynapsCLI; everything below uses only what `dev` already ships. v1.1 answers Shady's review of v1 (`agent-ui/review-synaps-cards-design-shady.md`; PR #1 review `6032148226`). v1.2 answers round 2 (review `6032348822`): the delivery outcomes as a state machine, the limits of Resend, and D2 split in two.
 
 **Read at:**
 - SynapsCLI `origin/dev` `189a5a19`, cited as `CLI:`. `ae/` is `crates/agent-engine/src/`, and `docs/` is the CLI's docs.
@@ -18,7 +18,9 @@
   - an idle agent wakes on the answer, because a `Submit` starts a turn;
   - a busy agent reads it at its next round, or as its next turn if no round comes.
   - "Wait" is advice in the result: end your turn now.
-- **Delivery is best-effort, exactly as typed text.** The desk never re-sends on its own. When it can't confirm that an answer reached the chat (a drop, a Cancel, a lost save), the card says so, keeps the values, and offers **Resend**: one click, by a human (§3.5).
+- **Delivery is best-effort, exactly as typed text.** The desk never re-sends on its own. When it can't confirm that an answer reached the chat (a drop, a Cancel, a replaced steer, a full driver queue, a lost save), the card checks the refreshed history, says so, keeps the values, and offers **Resend**: one click, by a human (§3.5).
+  - That holds only while the desk still holds the values and the card is still in the history (§4).
+  - Resend checks local evidence, not a server-side compare-and-set: it can repeat an answer that arrived unseen, or land after a newer one it couldn't see. That is a stated v1 limit.
 - **History is the only store.** Card state is a pure fold over the session history: the call, its result, and the answer messages. The extension stores nothing.
 - **Two crates, one validator.** `cards-spec` holds the doc schema, validation, the digest, the answer grammar, the fold and the card memo, ported from #75's pure logic. The extension and the desk both depend on it.
 - **The TUI** gets a plain-text fallback: the tool panel shows the question with numbered options, and the user answers in words.
@@ -34,6 +36,23 @@
 | M2 | Queue, dequeue and compaction states are missing | Shown on echo, then wait for history | The full table (§3.4): `Dequeued`, `Idle` reconciliation, no answering during compaction, and the desk decodes `queued_message` | Answering during a compaction |
 | — | Eager vs leased retry | "The host retries" | v1 ships an eager manifest; a leased one never retries (§1.1, §1.6) | — |
 | — | Soft-wait cost, install, PR owners | | §1.2, §1.1, §9 | "Same request count" |
+
+### Changes from v1.1
+
+| # | Shady found (round 2) | v1.1 | v1.2 |
+|---|---|---|---|
+| R2-M1.1 | A full driver FIFO drops the answer with only a notice, so the memo sits in "sending" for good | "or a notice" | "Sending" has an exit. After 10 s with no echo, or on a "steering queue full" notice, it moves to "checking" and settles as unconfirmed. The notice is a hint, never a receipt (§3.5) |
+| R2-M1.2 | The driver's FIFO isn't the ordinary queue, and a busy `Steer` bypasses it | "Driver armed: FIFO" | Busy goes straight to the engine; idle goes to the FIFO (§3.2, §3.4 d7–d9). D2a decodes `DriverRevoked{undelivered_steering}`. An answer that went to the FIFO is uncertain on a reattach, and the card says so |
+| R2-M1.3 | A busy steer can be replaced at the terminal edge, or held after an Error or EOF | "`Steered{delivered:true}`, then the next turn" | Rows d2, d3 and d5 cover `delivered:false` at the edge, the one replaceable slot, and a new **held** state. These are typed text's limits, now stated |
+| R2-M1.4 | `Idle` arrives before the desk's history refresh | "Idle while queued, text absent: Resend" | A **checking** state. The settle rule runs only on a settled view (`history_settled()`, §3.5) |
+| R2-M1.c | The compaction escapes weren't exhaustive | two cases | three, including a compaction the desk hasn't heard of, where a second click replaces the first. #8 narrowed (§3.4, §8) |
+| R2-M2.1 | The memo cap had no eviction rule | 16, no policy | 32 per session, evicting the oldest "in the chat" entry first. The promise covers retained entries only (§3.5, §4) |
+| R2-M2.2 | "Anyone's newer answer" also dropped the memo on our own first sighting | answer count > `rev` | Only a **superseding** answer drops the entry; our own first sighting keeps it (§3.5) |
+| R2-M2.3 | A rollback below the recorded revision removed Resend | count == `rev` | `seen` is the list of answers as they were when sent, and any prefix of it allows Resend (§3.5) |
+| R2-M2.4 | Resend's gate is local evidence, not compare-and-set | "only when nothing newer reached the card" | "No newer answer observed in the reconciled history", checked again on the click. B then A, and duplicates, are stated v1 limits (§3.5, §4) |
+| R2-M2.5 | "A loss is visible" claimed too much | unconditional | §4 says when it holds and when it doesn't |
+| D2 | One PR spans two failure domains | D2 | **D2a**: delivery, routing, reconciliation, mouse and form answers. **D2b**: keyboard, navigation and focus (§9.3) |
+| — | The 1 KiB result promise had no byte rule; the digest's wording; the guard was an actor-id check | | §1.5 gets a UTF-8 byte cap and a truncation order, and the digest is "a 64-bit checksum, not an identity". §3.5 uses `input_gate()` plus the binding check |
 
 ---
 
@@ -171,8 +190,13 @@
   ```
 
   With `wait: true`, the last line instead reads: `You can't continue without it: end your turn now; the answer starts your next turn.`
-- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it: keys in schema order, `\n` line endings, defaults materialized, string options as `{label}`. It is the doc the extension validated, after any hook rewrote the input (§2.2).
-- **Size.** A result stays under 1 KiB, below the result bounds and the default spill threshold (`tool_output_spill_bytes`, `CLI:ae/runtime/tool_spill.rs:71-95`). The envelope is line 1, so a result cut at its tail still binds. A result whose line 1 doesn't parse is a plain row.
+- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it: keys in schema order, `\n` line endings, defaults materialized, string options as `{label}`. It is the doc the extension validated, after any hook rewrote the input (§2.2). It is a 64-bit checksum against accidental divergence, not an identity or a signature (§5.2).
+- **Size.** A result is at most 1024 bytes of UTF-8, below the result bounds and the default spill threshold (`tool_output_spill_bytes`, `CLI:ae/runtime/tool_spill.rs:71-95`). `cards_ext` builds it in this order and cuts only at character boundaries:
+  1. Line 1, the envelope, is at most 256 bytes. Only the question in it is cut, ending in `…`, and the id, version and digest are never cut.
+  2. The trailer, the "Its answer will come…" lines, is fixed text of under 200 bytes, and is always kept.
+  3. The options fill what is left. Each label is cut to 60 characters. When the next option wouldn't fit, the list ends `  …and N more`. Field names follow under the same rule.
+
+  S2 tests the cap on worst-case fixtures, such as nine 60-character labels in a 4-byte script. A result cut later, by a transformer or the spill, still binds if line 1 is whole, and a result whose line 1 doesn't parse is a plain row.
 - **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no state, so it can't say whether the card was open.
 - **Refusal:** a JSON-RPC error, which the host stores as plain text with no envelope, so the desk shows a plain row (`protocol.md:296-298`; `CLI:ae/runtime/stream.rs:2392-2403`):
   - a validation line;
@@ -190,9 +214,9 @@
 
 | Event | Effect |
 |---|---|
-| Cancel | The tool already returned, so the card stays open, and answering it starts a new turn, as typing would. An answer steered in but not yet read is withdrawn (`Dequeued`, `CLI:ae/session/actor.rs:3629-3632`), and the card offers Resend (§3.5). |
+| Cancel | The tool already returned, so the card stays open, and answering it starts a new turn, as typing would. An answer steered in but not yet read is withdrawn (`Dequeued`, `CLI:ae/session/actor.rs:3629-3632`). The card checks the refreshed history, then offers Resend (§3.5). |
 | Compaction, `/new`, a context rollover | The card's call leaves the visible history, so the fold drops the card ("gone", §2.3). An answer already given stays in the summary's source. Answering is off while a compaction runs (§3.4). |
-| Daemon reload or crash | The card is in the journal once saved (§4). An answer refused during the drain (`Error("daemon reloading…")`, `daemon-mode.md:1079-1080`) or unconfirmed at the drop shows Resend after the reconnect. Nothing is re-sent on its own (§3.5). |
+| Daemon reload or crash | The card is in the journal once saved (§4). An answer refused during the drain (`Error("daemon reloading…")`, `daemon-mode.md:1079-1080`) or unconfirmed at the drop settles after the reconnect (§3.5): Resend, if the history the desk reconnected to lacks it. Nothing is re-sent on its own. |
 | Extension crash | Eager (v1): the host respawns it and retries the call once (`process.rs:1993-2010`); the retry mints a fresh id, and only its reply reaches the host. Leased (if a later manifest adds `deferred`): no retry, the call fails. The tool is stateless and has no side effects, so both are safe. After 3 failed restarts the tool fails (`protocol.md:1105`), and the agent asks in text. |
 | Extension reload or uninstall | New calls fail. Existing cards still answer, because answers don't touch the extension. |
 
@@ -213,7 +237,7 @@
 - **The display tail.** `CLI:ae/session/display.rs:17-23` defines the items. Tool-use input is kept in full (`:111-116`). Event payloads and non-string user content are skipped (`:83-94`). The tail is capped at `tail_items` with an `omitted` count.
 - **The desk runs Full.** That is `Identity`'s default (`DESK:sc/conn.rs:59-60,73-74`), and no desktop code calls `with_history`. So it has the input and the result, live and on attach.
 - **One desk gap.** `synaps-client` cuts a tool's `input` to a 4 KiB preview (`DESK:sc/transcript.rs:63,1223`; live at `:1516`), but a card input may be up to 8 KiB. D1 keeps the full input for `cards_ui` calls; the spec's 8 KiB bound limits it. This is a desk-only change.
-- **One more desk gap.** The desk's typed `ConversationSnapshot` doesn't decode `queued_message` (`DESK:sc/protocol.rs:1356-1379`; the daemon sends it, `CLI:ae/session/types.rs:1722`). D2 adds the field.
+- **One more desk gap.** The typed `ConversationSnapshot` that the attach carries doesn't decode `queued_message` (`DESK:sc/protocol.rs:1356-1379`; the daemon sends it, `CLI:ae/session/types.rs:1722`). The live `ConversationDigest` already does (`DESK:sc/protocol.rs:1384-1396`). D2a adds the field to the snapshot.
 - **Digest clients** (the TUI, and any future Digest desk) can't see the result. They show the call as a plain tool panel (§6.2). See "Would need core" #5.
 
 ### 2.2 Recognising a card
@@ -283,7 +307,7 @@ There is no clock-based expiry. A card is moot when the agent closes it, the use
 | `client_input = shared` | Mirror and Takeover clients. Observe clients can't. The answerer becomes the active client, as typing does (`actor.rs:1519-1530`). |
 | `client_input = exclusive` | The input owner only. Other desks show the card read-only, with "answer from <owner> · /takeover". |
 | Owned session | The owner only |
-| Driver armed | Into the driver's steering FIFO, like any input: 16 messages or 256 KiB, and dropped with a notice past that (`actor.rs:3288-3329`) |
+| Driver armed | As typed text, on two paths. **Busy:** a `Steer` goes straight to the engine like any steer, never through the driver's FIFO (`actor.rs:5441-5446` calls `steer`, `:3396-3409`). **Idle:** a `Submit` goes into the FIFO, which holds 16 messages or 256 KiB. Past that it is dropped, and the only sign is a broadcast `SystemNotice` (`:3307-3331`). |
 
 ### 3.3 The answer message (built and parsed by `cards_spec::message`)
 
@@ -318,58 +342,102 @@ It is self-describing even after the call has been compacted away. It never name
 
 ### 3.4 Delivery
 
-A card sends what the composer sends: `Steer` while the session is busy, `Submit` when it is idle (`DESK:sd/app.rs:4640-4641`; the actor treats a `Steer` to an idle session as a `Submit`, `actor.rs:5441-5447`).
+A card sends what the composer sends: `Steer` while the session is busy, `Submit` when it is idle (`DESK:sd/app.rs:4640-4641`; the actor treats a `Steer` to an idle session as a `Submit`, `actor.rs:5441-5447`). From there an answer takes typed text's paths exactly, including the places where typed text is lost today. The rows are the outcomes the memo must settle (§3.5).
 
-| Session state | What the daemon does | What the desk sees |
-|---|---|---|
-| Idle | Starts a turn with the answer as its user message (`actor.rs:3350-3386`) | `TurnStarted{user_text}`, then the history |
-| Streaming | Puts it in the steer channel and the one `queued_message` slot (`actor.rs:3396-3409`). The engine injects it at the next round (`:3840-3843`). If the turn ends first, it becomes the next turn (`:4119-4120`, `:4168-4180`) | `Steered{delivered: true}`: accepted, not yet read. Then the history |
-| Cancelled before it was read | Withdrawn (`:3629-3632`; during a compaction, `:3510-3514`) | `Dequeued{text}` |
-| Compacting | One replaceable slot (`:3333-3340`): a second answer overwrites the first. On success it is appended to the compacted history and does **not** start a turn (`CLI:ae/runtime/compaction.rs:836-840`; `actor.rs:4374-4391`) | `Steered{delivered: false}`, then `CompactionApplied` |
-| Driver armed | Into the driver's FIFO, or dropped with only a `SystemNotice` when it is full (`:3288-3329`) | `Steered{delivered: false}`, or a notice |
-| Not the input owner, an observer, context blocked | Refused | `Refused{command, reason}` |
-| Reload drain or fence | Refused at the connection (`daemon-mode.md:1079-1080`) or by the actor (`types.rs:1247-1262`) | `Error`, then `Reloading`/`Bye` |
+| # | Session state | What the daemon does | What the desk sees |
+|---|---|---|---|
+| d1 | Idle | Starts a turn with the answer as its user message (`actor.rs:3350-3386`) | `TurnStarted{user_text}`, then the history |
+| d2 | Streaming | Puts it in the steer channel and the one `queued_message` slot (`actor.rs:3396-3409`). The engine injects it at its next round (`:3840-3843`). If the turn ends normally first, the slot becomes the next turn (`:4119-4120`, `:4168-4180`) | `Steered{delivered}`. `true` means only that the channel took it, not that it was read. It is `false` at the terminal edge, when the turn's stream has already closed. `SteeringDelivered{message}` follows once the engine injects it |
+| d3 | Streaming, with a later steer (anyone's) before the engine read ours | The slot holds only the newest steer. If the turn ends before the engine's next round, only that one carries over; ours is lost with no event (`:3409`, `:4119-4120`) | Another `Steered`, and no `SteeringDelivered` for ours |
+| d4 | Cancelled before it was read | Withdrawn (`:3629-3632`; during a compaction, `:3512-3513`) | `Dequeued{text}`, `Conversation`, `Idle` (`:3630-3632`, `:3703-3704`), but no `MessageHistory`: the cancel path keeps the final history to itself (`:3792-3794`). The desk asks for the history again (`DESK:sc/client.rs:2291-2301`), and it arrives later (`:2240-2253`) |
+| d5 | The turn fails, or its stream ends with no terminal event | The slot is **kept**, nothing sends it, and the session goes `Idle` (`:4136-4166`; `:5967-5995`). It goes in after the next turn ends, or a Cancel withdraws it | `Conversation{queued_message}` still ours, then `Idle` |
+| d6 | Compacting | One replaceable slot (`:3333-3340`). On success it is appended to the compacted history and does **not** start a turn (`CLI:ae/runtime/compaction.rs:836-840`; `actor.rs:4374-4391`). On failure it is kept, as in d5 (`:4310-4321`, `:4389-4391`) | `Steered{delivered: false}`, then `CompactionApplied{queued_restored}` or `CompactionFailed` |
+| d7 | Driver armed, idle | Into the driver's FIFO. The driver's next turn writes the FIFO into the history ahead of its own prompt (`CLI:ae/session/driver.rs:183-195`; `actor.rs:2228-2235`) | `Steered{delivered: false}`, and later the history |
+| d8 | Driver armed, idle, FIFO full | Dropped. The only sign is a broadcast `SystemNotice("steering queue full … message dropped")`, with no input id, no echo and no `Idle` (`:3311-3322`) | The notice |
+| d9 | Driver revoked with ours in its FIFO | `DriverRevoked{reason, undelivered_steering}` lists it, and nothing sends it (`:1640-1663`) | That event. The desk doesn't type it today (`DESK:sc/protocol.rs:1640-1798`); D2a adds it |
+| d10 | Not the input owner, an observer, context blocked | Refused | `Refused{command, reason}` |
+| d11 | Reload drain or fence | Refused at the connection (`daemon-mode.md:1079-1080`) or by the actor (`types.rs:1247-1262`) | `Error`, then `Reloading`/`Bye` |
 
-**No answering during a compaction.** The desk decodes `CompactionStarted`, `Applied`, `Failed` and `Cancelled` today, but keeps no state (`DESK:sc/protocol.rs:1704-1719`). D2 tracks it, and meanwhile a card reads "Compacting · answer when it's done". A successful compaction removes the card anyway. Two cases slip past:
+**`delivered: true` is not "read".** Rows d2, d3 and d5 are where typed text is lost or held today. Cards inherit those paths and don't fix them. The memo makes each outcome visible instead (§3.5).
+
+**No answering during a known compaction.** The desk decodes `CompactionStarted`, `Applied`, `Failed` and `Cancelled` today, but keeps no state (`DESK:sc/protocol.rs:1704-1719`). D2a tracks it, and meanwhile a card reads "Compacting · answer when it's done". A successful compaction removes the card anyway. Three cases slip past, and in each of them a second answer can replace the first:
 - a desk that attaches mid-compaction (the attach snapshot has no flag, `CLI:ae/session/types.rs:1761-1781`);
+- a compaction that started on the daemon before this desk got `CompactionStarted`: a click in that gap lands in the replaceable slot;
 - a steer that an auto-compaction at turn end carries over (`actor.rs:4168-4176`).
 
-Either answer lands in the compacted history as plain text, and the agent reads it at its next turn (Would need core #8).
+The surviving answer lands in the compacted history as plain text, and the card is gone, so the memo drops its entry (§3.5). An attach flag (Would need core #8) would close only the first case.
 
-**Drivers aren't special-cased.** A driver-armed session takes a card answer exactly as it takes typed text.
+**Drivers.** A card answer takes the driver's paths exactly as typed text: busy goes straight to the engine (d2), idle goes to the FIFO (d7–d9). The attach snapshot carries no driver state (`types.rs:1761-1781`), so after a reattach the desk can't see whether an answer is still in the FIFO. The memo treats that answer as uncertain and says so (§3.5, rule 5).
 
 ### 3.5 Sending, and the card memo (desk, in memory)
 
 **Where it goes.**
-- A card belongs to one `Live`: the store of its session's attachment, which every pane on that session shares (`DESK:sd/live.rs:36-38`). The card sends with `client.on(seq)`, where `seq` is that Live's `attachment()`. It sends only when `can_send()` holds (`live.rs:157-173`) and the Live's `active.session_id` is the card's session.
+- A card belongs to one `Live`: the store of its session's attachment, which every pane on that session shares (`DESK:sd/live.rs:36-38`). The card sends with `client.on(seq)`, where `seq` is that Live's `attachment()` (`live.rs:157-159`).
+- **The gate.** `Live::input_gate()` must be `Ok` (`live.rs:179-196`). It adds the exclusive-owner rule to `can_send()`, and its error string is the read-only line (§3.2). The daemon stays the authority.
+- **The binding.** The card must still be bound in the Live's current fold. Matching the actor id isn't enough: `active.session_id` is the actor's id (`DESK:sd/model.rs:1793-1801`), and it stays the same across `/new`, a resume or a compaction while the conversation changes (`CLI:ae/session/types.rs:476-480`).
 - Never `Client::submit`, which goes to the newest attachment (`DESK:sc/client.rs:990-995`). With `on(seq)`, a gone attachment is answered `NotAttached` and the command goes nowhere (`client.rs:846-857`, `:1093-1115`). The card then shows Not sent · Retry.
-- The text joins the Live's `InFlight` with a target, either a pane's composer or the card `(session_id, card_id)`. Every give-back path sends a card entry to its card, never to a composer: a refusal, a detach, and a left attachment's echo, refusal or end (`DESK:sd/model.rs:1387-1400`). An echo confirms it, as it does now (`model.rs:1862-1866`).
+- The text joins the Live's `InFlight` with a target, which is either a pane's composer or the card `(session_id, card_id)`. Every give-back path returns a card entry to its card, never to a composer: a refusal, a detach, and a left attachment's echo, refusal or end (`DESK:sd/model.rs:1387-1400`). An echo confirms it, as it does now (`model.rs:1862-1866`).
 
-**The memo.**
-- It records `{session_id, card_id, text, values, rev}`, where `rev` is the card's answer count when sent.
-- One answer per card can be out at a time, so a second press does nothing.
-- It lives in the desk process, keyed by session, with at most 16 per session.
-- It is dropped when the card closes or is gone, or when anyone's newer answer to it arrives.
+**The memo** is a pure state machine in `cards_spec::memo` (S3). D2a feeds it events.
+- **The entry.** It records `{session_id, card_id, text, values, seen, cause}`. `seen` is the card's answers in the fold at the moment of sending: their texts, in order. It is a list rather than a count, so a rollback can be recognised (rule 4).
+- **One answer per card in flight.** While a card's entry is sending, queued, held or checking, another press does nothing.
+- **Bounds.** It lives in the desk process, keyed by session, with at most 32 entries per session. Admission never fails. A new entry evicts the oldest entry that is "in the chat" first, then the oldest unconfirmed one, then the oldest of any state. An evicted card shows the fold's state, as it would on any other desk, with no Resend.
+- **Matching** is by exact text. Two identical answers count as one, which is harmless because they say the same thing.
+- **What drops an entry.** The card closes or leaves the fold, a **superseding** answer appears, or the entry is evicted. A superseding answer is one later than ours in the fold, or, with ours absent, an answer that isn't in `seen` (rules 2 and 4). Our own answer appearing never drops the entry; it moves it to "in the chat", so the values survive a daemon crash before the save.
 
-| State | Entered on | The card shows |
-|---|---|---|
-| sending | The send | The values, "Sending…" |
-| queued | The echo (`TurnStarted` or `Steered`), or `queued_message` equal to ours on a reattach | "Queued · the agent reads it at its next step" |
-| in the chat | The fold shows our text as the card's latest answer | The receipt |
-| not confirmed | (a) `Dequeued` with our text. (b) An `Attached` (every reconnect bumps the epoch, `DESK:sd/model.rs:98-104`) whose history has nothing newer than `rev` for the card, and whose `queued_message` isn't ours: the drop came first, or the daemon restarted without saving it, even if it was in the chat before. (c) `Idle` while queued, with our text absent | The values, one line of cause ("The agent was stopped before reading it", "The connection dropped or the daemon restarted; it may not have arrived", "It didn't reach the chat"), and **Resend** |
-| not sent | `Refused`, `NotAttached`, a reload `Error` | "Not sent: <reason> · Retry" |
-| dropped | The card closed or gone, or a newer answer | The fold's state. No resend is offered. |
+| State | Entered on | The card shows | Leaves on |
+|---|---|---|---|
+| sending | The press | The values, "Sending…" | An echo (`TurnStarted`, `Steered`): queued. `Refused`, `NotAttached` or a reload `Error`: not sent. No echo within 10 s, or a "steering queue full" notice: checking |
+| queued | The echo, or rule 3 while streaming | "Queued · the agent reads it at its next step" | `SteeringDelivered` with our text, or the fold: in the chat. `Dequeued` with our text, a `DriverRevoked` that lists it, `Idle`, `Attached`: checking |
+| held | Rule 3 while idle (d5, or a failed compaction) | "Held · it goes in after the agent's next turn" | The fold: in the chat. `Dequeued`: checking. No Resend, because the held copy would follow it |
+| checking | `Idle`, `Attached` (every reconnect bumps the epoch, `DESK:sd/model.rs:98-104`), `Dequeued`, `DriverRevoked`, a notice, the 10 s timeout | The values, "Checking…" | The settle rule, on the first settled view. With no settled view in 10 s: unconfirmed, "Couldn't check whether it arrived". A late echo or `SteeringDelivered` still moves it on (a parked session can take seconds to wake) |
+| in the chat | `SteeringDelivered` with our text, or rule 2 | The receipt | A superseding answer, a close or gone: dropped. A later settled history without it (a crash before the save): checking |
+| unconfirmed | The settle rule | The values, one line of cause, and **Resend** if the gate below holds | Resend: sending. The fold shows ours: in the chat. Superseded: dropped |
+| not sent | `Refused`, `NotAttached`, a reload `Error` | "Not sent: <reason> · Retry" | Retry: sending |
+| dropped | A close, gone, superseded, evicted | The fold's state, with no Resend | — |
 
-- **When Resend is offered.** Only when nothing newer reached the card (its count is still `rev`), and the card is still bound in the current history. A compacted, cleared or superseded card never offers one.
-- **What it does.** Resend is a human action. It sends the same text by the same rules, on the same attachment. If the first copy did arrive unseen, it repeats it: `queued_message` shows only the newest steer, so an older one can hide. Resending to an idle session starts a turn, and the footer says so (§4).
+**The notice is a hint, not a receipt.** A "steering queue full" notice names no input and goes to every client. So it moves each of that Live's entries in sending to checking, and does nothing more.
+
+**The settle rule** runs only on a **settled view**: the history the desk holds matches the latest `Conversation` digest (`messages_len` and `messages_hash`, the check at `DESK:sc/history.rs:150`). After a mismatch, the client asks for the history again and applies the reply when it comes (`sc/client.rs:2291-2301`, `:2240-2253`). Until then the view is unsettled, so an `Idle` that arrives first (d4) can't produce a false Resend. D2a exposes the condition as `Live::history_settled()`. Let F be the card's answers in that history, and Q the digest's `queued_message`. The first rule that matches decides:
+1. The card is closed or absent from the history: **dropped**.
+2. Ours is in F after the `seen` prefix: **in the chat**, unless an answer follows ours, in which case it is **dropped** as superseded.
+3. Q is ours: **queued** if the session is streaming, **held** if it is idle.
+4. F is not a prefix of `seen`, so an answer we didn't know about is there: **dropped** as superseded. A **shorter** F is still a prefix. That is a rollback below what we had seen. For example, the card was saved with no answers, A was in the chat but never saved, B went out with `seen = [A]`, and the daemon crashed back to no answers. That falls through to rule 6 and offers Resend.
+5. Our echo was a driver echo (`Steered{delivered: false}` while idle and not compacting), and no `DriverRevoked` has arrived since: **unconfirmed**, "It may still be in the driver's queue".
+6. Otherwise **unconfirmed**, with the cause of what triggered the check:
+
+| Trigger | Cause line |
+|---|---|
+| `Dequeued` | "The agent was stopped before reading it" |
+| `DriverRevoked` | "The driver stopped before reading it" |
+| The notice or the timeout | "No reply from the daemon. A driver's queue may be full" |
+| `Attached` | "The connection dropped or the daemon restarted. It may not have arrived" |
+| `Idle` | "It didn't reach the chat. Another message may have replaced it" |
+
+**Resend.**
+- **The gate.** Resend appears only in the unconfirmed state, and only while all of these hold:
+  - the card is still bound and open;
+  - F is a prefix of `seen`: no newer answer has been observed in the reconciled history;
+  - `input_gate()` is `Ok`.
+- **The click.** The gate is checked again on the click, against a settled view, not only when the button is painted. If the view isn't settled, the click shows "Checking…" and sends nothing.
+- **What it does.** Resend is a human action. It sends the same text by the same rules, on the same attachment. To an idle session it starts a turn, and the footer says so (§4). Under the button, one quiet line: "If it did arrive, the agent reads it twice."
+- **The v1 limit.** The gate is local evidence, not a server-side compare-and-set:
+  - It can't see an answer that is queued, in transit, or being sent by another desk. If newer answer B is still unseen and A is resent, the result is B then A: A wins in the fold, and the model reads it last.
+  - It can repeat an answer that did arrive unseen, such as one still in a driver's FIFO or one hidden behind a newer steer.
+  - Closing this needs a precondition on `Submit` (Would need core #6).
 - **Why nothing is automatic.** A `Submit` isn't idempotent, because an idle one starts a turn. An automatic resend could undo a Cancel (the steer was `Dequeued`), replay a stale choice over another desk's newer one, or wake the agent with no user action. A memo and a button cost one click on a rare path, and avoid all three.
-- **If the desk process dies,** the memo dies with it. If the answer reached the chat, the card shows as answered; if it didn't, the card is open again. Either way the transcript tells the truth.
+
+**What the memo can't see.** These limits are §4's qualification:
+- **An evicted entry:** the card is open again, with no values kept.
+- **A dead desk process:** the memo dies with it. On reopening, the desk shows the fold, and nothing more.
+- **A card that was never saved** before a daemon crash: it is gone, and there is nothing to answer.
+- **An open card after a restart** proves only that the answer is absent from the recovered history. A model turn may already have acted on it before the crash.
 
 ### 3.6 Several desks, split panes, changing an answer
 
 - **Same history.** Every desk folds the same history, so all of them show the same state.
 - **Split panes.** Two panes on one session share one `Live`, one `InFlight` and one memo, so they can't both send one card's answer. A pane that switches tabs leaves its entries with their Live, routed by session id (§3.5).
-- **Concurrent answers.** Two desks answering at once produce two user messages. The later one wins in the fold, and the model reads them in order, like a user correcting themselves. A desk whose answer lost the race drops its memo, so it never offers to send it again.
+- **Concurrent answers.** Two desks answering at once produce two user messages. The later one wins in the fold, and the model reads them in order, like a user correcting themselves. A desk that sees a superseding answer drops its entry, so it never offers to send it again. It can't see one still in flight, so it may offer a Resend that lands after it (the limit in §3.5).
 - **Change an answer.** It reopens the card with the old values, and the new answer is sent with `changed`. It is allowed while the card is in history and not closed.
 
 ---
@@ -385,16 +453,27 @@ Either answer lands in the compacted history as plain text, and the agent reads 
 | State | The desk's signal | What it means |
 |---|---|---|
 | Accepted | The echo: `TurnStarted` or `Steered` | The daemon has it in memory. |
-| In the chat | The history shows it | The model will read it, or has. |
+| In the chat | The history shows it, or `SteeringDelivered` names it | The model will read it, or has. |
 | Durable | **None on `dev`** | The daemon queues a save each round without waiting, and flushes before `Idle` within a budget. A failed or slow save still announces `Idle`, and is logged on the daemon only (`CLI:ae/session/actor.rs:1214-1273`). `Save` replies with nothing (`:5505-5507`). |
 
 So an answer is exactly as durable as a typed message, and the desk never says "saved".
 
-**A loss is visible, not silent.** If the daemon dies before saving, the reattached history lacks the answer, so the card is open again. If the card itself wasn't saved, it is gone with it. While the desk lives, the memo keeps the values and offers Resend (§3.5, case b).
+**When a loss is visible, and when it isn't.** A lost answer shows as Resend only while three things hold: the desk process lives, the memo still holds the entry (at most 32 per session, §3.5), and the card is still in the recovered history. Then every loss settles to unconfirmed once the history is checked:
+- a dropped connection or a Cancel;
+- a slot replaced at the terminal edge (d3);
+- a full driver FIFO, or a revoked driver (d8, d9);
+- a daemon crash that rolled the card's answers back below what the desk had seen (rule 4).
 
-**What v1.1 trades away, plainly:**
+Outside those conditions the card falls back to the fold. The fold tells the truth about the recovered history, and nothing more:
+- **after an eviction or a desk restart,** the card is simply open again, with no values kept;
+- **a card that was never saved** is gone with the crash;
+- **an open card after a restart** doesn't mean the agent never saw the answer. A turn may have acted on it before the crash.
+
+Resend itself is checked on local evidence only (§3.5). It can repeat an answer that arrived unseen, or land after a newer one it couldn't see.
+
+**What v1.2 trades away, plainly:**
 1. **No delivery guarantee beyond typed text's:** no durable receipt, no idempotency, no exactly-once (Would need core #6).
-2. **No automatic resend.** An unconfirmed answer costs one click (F17, F20).
+2. **No automatic resend.** An unconfirmed answer costs one click (F17, F20, F22), and only while the memo holds it.
 3. **Open cards don't survive compaction, `/new` or a rollover.** Answering is off during a compaction, and an answer carried into one waits for the next turn (§3.4).
 4. **A card or an answer can vanish in a daemon crash before its save,** as any message can.
 5. **No blocking.** `wait` is advice.
@@ -402,6 +481,8 @@ So an answer is exactly as durable as a typed message, and the desk never says "
 7. **No host mark on answers.** A typed look-alike counts as an answer. Only an input-holder can type one.
 8. **Consent isn't gated.** Answering after a Cancel starts a turn, exactly as typing does. There is no "Answer & resume" gate. The footer says "answering continues the agent" when it is idle.
 9. **Unbound cards are plain rows.** That happens in Digest mode, after a hook rewrote the input, or when the result didn't bind (§2.2). The user answers in text.
+10. **Resend is not a compare-and-set.** It can duplicate an answer, or follow a newer answer from another desk that it couldn't see (§3.5). Typed text has the same gap.
+11. **Typed text's queue losses carry over.** A steer replaced in the one slot at the terminal edge, a full driver FIFO, and a slot held after a failed turn all behave as they do for typed text (§3.4 d3, d5, d8). The card makes each one visible rather than fixing it.
 
 ---
 
@@ -412,7 +493,7 @@ So an answer is exactly as durable as a typed message, and the desk never says "
 - **Structurally:**
   - The desk's card code has one effect: a `Steer` or `Submit` of text that `cards_spec::message` built, on the card's attachment. It never calls `answer(prompt_id, …)`, and never touches the authorize card's state.
   - Only `SessionCommand::Answer` resolves a confirm and its allow-all (`CLI:ae/session/actor.rs:4495-4527`), so a submitted `yes`, `always` or JSON can't.
-  - D2 pins this with a test. With a confirm prompt pending, answering a card `"yes"`/`"always"`, with focus moving between them, leaves the prompt pending.
+  - D2a pins this for clicks, and D2b for keys. With a confirm prompt pending, answering a card `"yes"`/`"always"` leaves the prompt pending: by mouse, then by keyboard with focus moving between the card and the authorize card.
 - **The extension** has `tools.register` only. It can't block, modify or confirm a tool call, which needs `tools.intercept` (`protocol.md:1064-1072`). It sees no conversation.
 - **What it doesn't promise.** An answer has a typed message's authority, no more and no less.
   - Agent-written labels and defaults copied into it, and whatever the user types in a field, reach the model as text and can steer it.
@@ -549,19 +630,21 @@ A count runs from the moment the card appears until the agent is unblocked: the 
 | F14 | Answered on another desk | any | 0 | 0 | |
 | F15 | Change an answer | A | 2 | 3 | |
 | F16 | Refused (not owner, context blocked) | A | +1 (Retry) | +1 | rare |
-| F17 | Connection, reload or crash mid-send | any | 0 if confirmed, else +1 (Resend) | +1 | never automatic (§3.5) |
+| F17 | Connection, reload or crash mid-send | any | 0 if confirmed, else +1 (Resend) | +1 | never automatic; checked first (§3.5) |
 | F18 | TUI | — | — | typing + Enter | plain text |
 | F19 | Desk without input authority | A | +1 (`/takeover`) | +1 | |
-| F20 | Cancelled before the agent read it | A | +1 (Resend) | +1 | `Dequeued` (§3.4) |
+| F20 | Cancelled before the agent read it | A | +1 (Resend) | +1 | `Dequeued` (§3.4 d4) |
+| F21 | The turn failed with the answer queued | any | 0 | 0 | held: it goes in after the next turn (d5) |
+| F22 | Driver FIFO full, or driver revoked | any | +1 (Resend) | +1 | a Resend into a still-full FIFO drops again (d8, d9) |
 
 **Targets:**
 - ≤1 click for a quick card in view;
 - ≤2 keys anywhere in the window;
-- +1 (Resend or Retry) for any delivery the desk can't confirm, and never an automatic send.
+- +1 (Resend or Retry) for any delivery the desk can't confirm while the memo holds it, and never an automatic send.
 
 **Enforcement:**
 - The PR that owns a flow adds its test (§9.3): build the start state, play the inputs, and assert exactly one `Submit` or `Steer` with the expected text, on the card's attachment.
-- D2 also adds the negative tests from v3.4 §0.5, each of which must send nothing:
+- The negative tests from v3.4 §0.5 must each send nothing. D2a owns a click before the button is armed. D2b owns:
   - digits typed in a field;
   - IME composition;
   - key repeat;
@@ -579,9 +662,9 @@ A count runs from the moment the card appears until the agent is unblocked: the 
 | 3 | Blocking beyond 120 s without stalling the extension | Concurrent `tool.call` (the inbox already routes replies by id: `process.rs:575-576`), a `$/cancelRequest` on drop, and a per-tool timeout declared at registration | Not needed: wait means end-turn (§1.2) |
 | 4 | Telling a desk answer from typed text | `Submit.meta`, persisted as a `_synaps_*` sibling key the way `_synaps_hooked` is (`protocol.md:838-860`), and visible to clients. It marks the client; it wouldn't authenticate one or prove a person clicked. | The grammar plus input authority (§3.1) |
 | 5 | Card state for Digest clients | A `DisplayItem::ToolResult{tool_id, preview}` in `display_tail` | The desk stays Full. Digest clients get the plain panel. |
-| 6 | A durable receipt, and idempotent input | `Submit.input_id`, chosen by the client: persisted as a `_synaps_*` sibling key, de-duplicated by the actor, echoed on `Steered`/`Dequeued`, and confirmed by a `Persisted{input_ids}` event once the save lands | Best-effort, with a human Resend (§3.5, §4) |
+| 6 | A durable receipt, and idempotent input | `Submit.input_id`, chosen by the client: persisted as a `_synaps_*` sibling key, de-duplicated by the actor, echoed on `Steered`/`Dequeued`, and confirmed by a `Persisted{input_ids}` event once the save lands | Best-effort, with a human Resend (§3.5, §4). This is a sketch only: atomic persist-and-dedup, receipts for queued input, and an `expect` precondition (the card's answers as the client saw them, refused if stale: the compare-and-set that Resend lacks) need their own design |
 | 7 | Tool-result provenance | A host mark on the stored `tool_result` saying whether a hook changed the input or the output, visible to clients | The digest binding (§2.2). A hostile transformer can forge it. |
-| 8 | Compaction state on attach | `AttachSnapshot.compacting` | A desk that attaches mid-compaction may answer into it (§3.4) |
+| 8 | Compaction state on attach | `AttachSnapshot.compacting` | A desk that attaches mid-compaction may answer into it (§3.4). The flag closes only that blind spot. A compaction that starts between a click and the desk's `CompactionStarted` stays a race |
 
 None of these blocks v1. Revisit #1 first if F11 hurts in use, and #6 if unconfirmed answers turn out to be common.
 
@@ -614,10 +697,10 @@ synaps-cards/                       (also the plugin root: clone as ~/.synaps-cl
 
 | PR | Contents | Useful alone because | Tests | Size | Risk |
 |---|---|---|---|---|---|
-| **S0** (this) | `docs/design.md` v1.1 | It fixes the contract. | — | ~650 lines of doc | — |
+| **S0** (this) | `docs/design.md` v1.2 | It fixes the contract. | — | ~730 lines of doc | — |
 | **S1** `cards-spec` doc | `types`, `sanitize`, `doc` (`parse_input`, `revalidate`), `digest` and the envelope (§1.5), `answer` (`parse_answer`), and `message` (build and parse §3.3). Ports #75's `sanitize.rs`, `doc.rs` and `answer.rs`, minus the contract, ids and capsule. | The desk can depend on it, and both sides validate and hash identically. | The ported fixture corpus, `message` round trips, golden digests, and byte-identical output with and without `preserve_order` | ~1.7k src, ~1.1k tests, fixtures copied | low: a port |
 | **S2** `cards-ext` and the plugin | The stdio loop, `initialize` with the tool, `tool.call` → `parse_input` → id, digest and result text (§1.5), worker refusal, the rate counter, `shutdown`, the eager manifest and the setup script | **Agents can ask cards now.** TUI and older desk users see the text and answer by typing. | Framing tests (split and joined frames), golden results per fixture, the worker path, rate limits, and a smoke run in a real daemon, installed by §1.1's three commands | ~600 src, ~450 tests | low. Watch the description's token cost. |
-| **S3** `cards-spec` fold and memo | `fold` (§2.3) over `Call`/`Result`/`User`, and the memo (§3.5) as pure transitions. Infrastructure: no user-facing feature on its own. | D1 and D2 build on it. It replays against real journals. | Fold: every state; A, B, A; input rewritten (digest mismatch); result rewritten keeping line 1 (binds, the documented limit); an error, a cut result, an unknown version; look-alikes in tool results, events, summaries, quoted JSON, arrays and malformed `_synaps_hooked`. Memo: Cancel before the drain; reattach with and without the answer; `queued_message`-only reattach; a daemon-only crash after the answer was in the chat; no Resend once the first copy is in the chat; two desks A, then B, then reattach; compaction or `/new` mid-queue | ~650 src, ~900 tests | medium: the grammar and state edges |
+| **S3** `cards-spec` fold and memo | `fold` (§2.3) over `Call`/`Result`/`User`, and the memo (§3.5) as pure transitions: the states, the settle rule over a settled view, `seen` prefixes, eviction, and the Resend gate. Infrastructure: no user-facing feature on its own. | D1, D2a and D2b build on it. It replays against real journals. | Fold: every state; A, B, A; input rewritten (digest mismatch); result rewritten keeping line 1 (binds, the documented limit); an error, a cut result, an unknown version; look-alikes in tool results, events, summaries, quoted JSON, arrays and malformed `_synaps_hooked`. Memo: Cancel before the drain; `Idle` before the settled view (no Resend until it settles); reattach with and without the answer; `queued_message`-only reattach; held after an Error and after a failed compaction; a slot replaced at the terminal edge; FIFO overflow by notice and by timeout; `DriverRevoked` listing ours; a driver echo across a reattach (rule 5); a daemon-only crash after the answer was in the chat; a rollback below `seen` (Resend offered); our own first sighting keeps the entry while a superseding answer drops it; no Resend once the first copy is in the chat; two desks A, then B, then reattach; eviction at 32; the gate checked again on the click; compaction or `/new` mid-queue | ~800 src, ~1.2k tests | medium: the grammar and state edges |
 | **S4** description tuning | A small eval script: N real tasks, measuring when agents call `cards_ui` and when they shouldn't, the extra end-turn round of `wait`, then tuning §1.5 | It keeps agents from spamming cards. | The eval's report | ~200 + notes | low |
 
 ### 9.3 synaps-desk PRs
@@ -626,11 +709,12 @@ synaps-cards/                       (also the plugin root: clone as ~/.synaps-cl
 |---|---|---|---|---|---|
 | **D0** | Delete #75's dead core mirror: the `capabilities.surfaces` declaration, the `surface`/`surface_result` events, `Attached.surfaces`, `surface_action`, and `sc/surface/*`. Add the `cards-spec` dependency. Independent of #56. | It removes protocol code no daemon will ever speak. | The existing suite; the parity tests move to S1. | about −6.5k, +100 | low |
 | **D1** | Read-only cards: recognise and bind them (§2.2), keep the full input for `cards_ui`, fold the state, draw the card and its receipts. No interaction. | The transcript reads as cards. | Render tests per state, the fold over live and history paths, the binding cases, a fallback per §6.3, and F14 | ~1k + ~600 tests | low |
-| **D2** | Answering in the window: clicks, digits, Enter, Tab, Esc; the composer chip and Ctrl+J across this window's panes; sending on the card's attachment; `InFlight` targets; the memo's states; compaction tracking; decoding `queued_message`; refusal, Retry and Resend; read-only without authority | **One-click answers** | F1–F9, F13, F16, F17, F19, F20; the negative tests; the never-resolves-a-prompt test (§5.1); a card in pane A after B attaches; a tab switch with an answer out; a reconnect with both sessions open; two answers during a compaction; a Cancel before the drain | ~1.8k + ~1.3k tests | medium-high: delivery routing and reconciliation first, then keyboard precedence |
+| **D2a** | Answering by mouse, and the delivery adapter: option and Send clicks with pointer arming; `input_gate()` and the binding check; `client.on(seq)` on the card's Live; `InFlight` card targets on every give-back and left-attachment path; the memo fed from live events (echoes, `SteeringDelivered`, `Dequeued`, `Idle`, `Attached`, the notice, the 10 s timer); `Live::history_settled()`; decoding `queued_message` in the snapshot, `CompactionApplied.queued_restored` and `DriverRevoked`; compaction tracking; Retry, and Resend with its check on the click; read-only without authority | **Mouse and form answers work**, and every delivery outcome shows on the card | The mouse halves of F1–F7 and F9; F16, F17 and F19–F22; the never-resolves-a-prompt test for clicks. Adapter fixtures, as sequences of real events: a card in pane A after B attaches; a tab switch with an answer out; a reconnect with both sessions open; a daemon-only restart, including a rollback below `seen`; a Cancel before the drain, with `Idle` ahead of the refreshed history; two answers at the terminal edge; held after an Error; two answers during a compaction and in the unheard-compaction gap; FIFO overflow and revocation | ~1.2k + ~1k tests | medium-high: routing and reconciliation |
+| **D2b** | The keyboard layer: the composer chip; Ctrl+J across this window's panes, and its batches; digits, Enter, Tab, Space and Esc; focus back to the composer; the repeat, paint and IME exclusions. It calls D2a's send and adds no delivery path | **Keyboard-first answers** | F8, F13, and the keyboard halves of F1–F7 and F9; the §7 negative tests; the never-resolves-a-prompt test with focus moving between a card and the authorize card; Esc never denies a prompt | ~700 + ~500 tests | medium: key precedence against the composer and the authorize card |
 | **D3** | Cross-session presence: the tab dot, rail NEEDS YOU and ASKED for attached sessions, Ctrl+Shift+J, Ctrl+P Waiting, and the OS notification for wait cards | **Never miss a waiting card** | F10–F12 and the presence counters | ~500 | low |
 | **D4** | Change answer, Skip polish, and desk-local memory: preselect the last choice for the same question in the same cwd (highlight only) | Smart defaults | F15, and memory tests | ~400 | low |
 
-**Order:** S1 → S2 (cards are usable from here) → S3 → D0 → D1 → D2 → D3 → D4, with S4 any time after S2.
+**Order:** S1 → S2 (cards are usable from here) → S3 → D0 → D1 → D2a → D2b → D3 → D4, with S4 any time after S2. D3 builds on D2b's Ctrl+J order, and D2b uses D2a's send and nothing else of it.
 
 **SynapsCLI:** no PRs. Close #439, #440, #444 and #446 unmerged.
 
