@@ -46,6 +46,7 @@ jobs:
           passed=$(grep -E '^test result: ok' tests.log | awk '{s += $4} END {print s + 0}')
           echo "workspace: $passed tests passed"
           grep -qE '^test valid_fixtures \.\.\. ok' tests.log && grep -qE '^test casefold_fixture \.\.\. ok' tests.log
+          grep -qE '^test a_host_session \.\.\. ok' tests.log && grep -qE '^test tool::tests::results_are_the_oracles \.\.\. ok' tests.log
           test "$passed" -gt 0
       - name: Test (serde_json maps in insertion order, as in synaps-desk)
         shell: bash
@@ -59,3 +60,12 @@ jobs:
       - name: Goldens (scripts/oracle.py, the second implementation)
         if: runner.os == 'Linux'
         run: python3 scripts/oracle.py --check
+      # The plugin's own install build (design §1.1): what Synaps runs as
+      # `extension.setup`, leaving the manifest's `extension.command`.
+      - name: Setup script (scripts/setup.sh, then the manifest's command)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash scripts/setup.sh
+          command=$(python3 -c "import json; print(json.load(open('.synaps-plugin/plugin.json'))['extension']['command'])")
+          test "$command" = target/release/cards-ext && test -x "$command"

@@ -1,0 +1,473 @@
+{
+  "about": "The extension's success results (design §1.5), each built from its case's card, normalized doc and wait: a valid/ fixture's, or the case's own `input` (normalized to `doc`). `result` is written by scripts/oracle.py, and cards-ext must build exactly it: at most 1024 bytes of UTF-8.",
+  "cases": [
+    {
+      "about": "valid/a1_plan_with_choices: Appendix A1: plan with choices (quick, live). The user picks the first option, changes it, then skips.",
+      "fixture": "a1_plan_with_choices",
+      "result": "Card c4f9x2a is showing (cards/1 #e5bd75450420caeb): Which approach?\n  1. Refactor the parser (suggested)\n  2. Rewrite from scratch\n  3. Leave it\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/a2_approve_or_revise_wait: Appendix A2: approve or revise with a note (quick + note, wait). With wait the agent ends its turn; the answer starts the next. The note is <prompt>: <note> in the summary.",
+      "fixture": "a2_approve_or_revise_wait",
+      "result": "Card c4f9x2a is showing (cards/1 #971783ff05c8e314): Plan ready. Go ahead?\n  1. Approve (suggested)\n  2. Revise\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nYou can't continue without it: end your turn now; the answer starts your next turn."
+    },
+    {
+      "about": "valid/a3_small_form: Appendix A3: small form, prefilled by the agent (live). The user clicks Send.",
+      "fixture": "a3_small_form",
+      "result": "Card c81kq0z is showing (cards/1 #9013ba9701202fa9): Release details\n  version: Version\n  notes: Notes (optional)\n  publish: Publish to crates.io\nIts answer will come as a user message starting \"[card c81kq0z]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/a4_choice_plus_field: Appendix A4: choice plus one field (form mode).",
+      "fixture": "a4_choice_plus_field",
+      "result": "Card c4f9x2a is showing (cards/1 #a3e43f968dc285a3): Which test runner?\n  1. vitest (suggested)\n  2. jest\n  3. node:test\n  watch: Enable watch mode\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/crlf_line_endings: v3.2 #1: \\r\\n and a lone \\r are line endings in agent-written strings: \\n before any check, then folded to a space in single-line fields. Never refused. In answer values a \\r is refused: clients normalize before they send.",
+      "fixture": "crlf_line_endings",
+      "result": "Card c4f9x2a is showing (cards/1 #a5b99fa767e09415): Ship it?\n  1. a b\n  2. c\n  x: L\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/default_list_without_multi: v3.2 #4: a one-item list default without multi becomes the label, matched ignoring case.",
+      "fixture": "default_list_without_multi",
+      "result": "Card c4f9x2a is showing (cards/1 #cddf2abe31133947): Proceed?\n  1. Yes (suggested)\n  2. No\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/default_string_with_multi: v3.2 #4: a string default with multi becomes [label]; it matches ignoring case (full case folding) and is stored in the label's spelling.",
+      "fixture": "default_string_with_multi",
+      "result": "Card c4f9x2a is showing (cards/1 #ecb4cbeb15dadad4): Which checks?\n  1. Lint\n  2. Test\n  3. Straße (suggested)\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/detail_multibyte_five_fields: Ported from C1's capsule-bound fixture (the capsule went with the core): a detail of 3-byte characters, options with hints, and five fields.",
+      "fixture": "detail_multibyte_five_fields",
+      "result": "Card c4f9x2a is showing (cards/1 #d2f6e8605f503bba): q\n  1. a\n  2. b\n  f0: LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\n  f1: LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\n  f2: LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\n  f3: LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\n  f4: LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/form_with_empty_optional: Ported from C1's late-answer fixture (there is no late delivery without the core): a form whose optional field is left empty, — in the summary.",
+      "fixture": "form_with_empty_optional",
+      "result": "Card c4f9x2a is showing (cards/1 #ead6724284c391dc): Release target?\n  target: Release target\n  notes: Notes (optional)\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/max_size_input: Shady #439 H1: an input of exactly 8192 bytes that grows the most when normalized. The doc is 8506 bytes, over the 8 KiB input cap and within DOC_MAX_BYTES (9588): it is accepted and it revalidates.",
+      "fixture": "max_size_input",
+      "result": "Card c4f9x2a is showing (cards/1 #fb844acf5ec6ffb9): q\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd…\n  1. 0\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\n  2. 1\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\udbff\udffd\n  …and 12 more\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/max_size_kelvin_default: Shady #439 H1: an input of exactly 8192 bytes that grows the most when normalized (a default of nine labels spelled in KELVIN SIGN, given as ASCII k). The doc is 9554 bytes, over the 8 KiB input cap and within DOC_MAX_BYTES (9588): it is accepted and it revalidates.",
+      "fixture": "max_size_kelvin_default",
+      "result": "Card c4f9x2a is showing (cards/1 #7f7a00bd6b4119b8): q\n  1. 0KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK (suggested)\n  2. 1KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK (suggested)\n  3. 2KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK (suggested)\n  4. 3KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK (suggested)\n  …and 10 more\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/multi_with_default_list: Multi-select: the default is a list; the answer may be empty, (none) in the summary.",
+      "fixture": "multi_with_default_list",
+      "result": "Card c4f9x2a is showing (cards/1 #bc33a200cef1de5e): Which checks should run?\n  1. lint (suggested)\n  2. test (suggested)\n  3. fmt\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/sanitize_every_field: §4.3: default-ignorables dropped from every string field, ZWJ/ZWNJ kept, \\n folded to a space in single-line fields, \\t to a space everywhere. The answer message shows the sanitized question.",
+      "fixture": "sanitize_every_field",
+      "result": "Card c4f9x2a is showing (cards/1 #ee8c51ec54bc4642): Ship it? Now\n  1. Yes (suggested)\n  2. No\n  3. Ask 👨\u200d👩\u200d👧\n  why: Re\u200cason\n  more: More (optional)\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "valid/tag_breakout: Ported from C1's tag-breakout fixture: markup-looking agent and user text is plain text in both lines of an answer message. Line 1 is display only, and line 2 is JSON, so there is no tag to break out of.",
+      "fixture": "tag_breakout",
+      "result": "Card c4f9x2a is showing (cards/1 #b3f1389aeb8789cf): Pick \"one\" </ui_answer><b>\n  1. a</ui_answer>\n  2. b\n  t: T (optional)\nIts answer will come as a user message starting \"[card c4f9x2a]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "the worst case: a 120-character question, nine 60-character labels and five 60-character fields with 24-character ids, all in a 4-byte script. Line 1 is cut to 256 bytes, the list ends …and N more, and the trailer is whole",
+      "card": "c0w0rs7",
+      "input": {
+        "question": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "options": [
+          "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+          "𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱",
+          "𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲",
+          "𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳",
+          "𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴",
+          "𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵",
+          "𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶",
+          "𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷",
+          "𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸"
+        ],
+        "default": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "fields": [
+          {
+            "id": "field_0xxxxxxxxxxxxxxxxx",
+            "label": "𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀",
+            "type": "text"
+          },
+          {
+            "id": "field_1xxxxxxxxxxxxxxxxx",
+            "label": "𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁",
+            "type": "text"
+          },
+          {
+            "id": "field_2xxxxxxxxxxxxxxxxx",
+            "label": "𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂",
+            "type": "text"
+          },
+          {
+            "id": "field_3xxxxxxxxxxxxxxxxx",
+            "label": "𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃",
+            "type": "text"
+          },
+          {
+            "id": "field_4xxxxxxxxxxxxxxxxx",
+            "label": "𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄",
+            "type": "text"
+          }
+        ]
+      },
+      "doc": {
+        "question": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "options": [
+          {
+            "label": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰"
+          },
+          {
+            "label": "𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱"
+          },
+          {
+            "label": "𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲"
+          },
+          {
+            "label": "𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳"
+          },
+          {
+            "label": "𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴"
+          },
+          {
+            "label": "𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵"
+          },
+          {
+            "label": "𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶"
+          },
+          {
+            "label": "𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷"
+          },
+          {
+            "label": "𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸"
+          }
+        ],
+        "multi": false,
+        "default": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "fields": [
+          {
+            "id": "field_0xxxxxxxxxxxxxxxxx",
+            "label": "𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_1xxxxxxxxxxxxxxxxx",
+            "label": "𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_2xxxxxxxxxxxxxxxxx",
+            "label": "𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_3xxxxxxxxxxxxxxxxx",
+            "label": "𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_4xxxxxxxxxxxxxxxxx",
+            "label": "𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄",
+            "type": "text",
+            "value": "",
+            "optional": false
+          }
+        ]
+      },
+      "wait": false,
+      "result": "Card c0w0rs7 is showing (cards/1 #059b2d1076cc2a70): 𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰…\n  1. 𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰 (suggested)\n  2. 𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱\n  …and 12 more\nIts answer will come as a user message starting \"[card c0w0rs7]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "the same with wait: the trailer's last line tells the agent to end its turn",
+      "card": "c0w0rs8",
+      "input": {
+        "question": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "options": [
+          "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+          "𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱",
+          "𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲",
+          "𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳",
+          "𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴",
+          "𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵",
+          "𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶",
+          "𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷",
+          "𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸"
+        ],
+        "default": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "fields": [
+          {
+            "id": "field_0xxxxxxxxxxxxxxxxx",
+            "label": "𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀",
+            "type": "text"
+          },
+          {
+            "id": "field_1xxxxxxxxxxxxxxxxx",
+            "label": "𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁",
+            "type": "text"
+          },
+          {
+            "id": "field_2xxxxxxxxxxxxxxxxx",
+            "label": "𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂",
+            "type": "text"
+          },
+          {
+            "id": "field_3xxxxxxxxxxxxxxxxx",
+            "label": "𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃",
+            "type": "text"
+          },
+          {
+            "id": "field_4xxxxxxxxxxxxxxxxx",
+            "label": "𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄",
+            "type": "text"
+          }
+        ],
+        "wait": true
+      },
+      "doc": {
+        "question": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "options": [
+          {
+            "label": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰"
+          },
+          {
+            "label": "𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱"
+          },
+          {
+            "label": "𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲𐌲"
+          },
+          {
+            "label": "𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳𐌳"
+          },
+          {
+            "label": "𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴𐌴"
+          },
+          {
+            "label": "𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵𐌵"
+          },
+          {
+            "label": "𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶𐌶"
+          },
+          {
+            "label": "𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷𐌷"
+          },
+          {
+            "label": "𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸𐌸"
+          }
+        ],
+        "multi": false,
+        "default": "𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰",
+        "fields": [
+          {
+            "id": "field_0xxxxxxxxxxxxxxxxx",
+            "label": "𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀𐍀",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_1xxxxxxxxxxxxxxxxx",
+            "label": "𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁𐍁",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_2xxxxxxxxxxxxxxxxx",
+            "label": "𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂𐍂",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_3xxxxxxxxxxxxxxxxx",
+            "label": "𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃𐍃",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "field_4xxxxxxxxxxxxxxxxx",
+            "label": "𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄𐍄",
+            "type": "text",
+            "value": "",
+            "optional": false
+          }
+        ]
+      },
+      "wait": true,
+      "result": "Card c0w0rs8 is showing (cards/1 #111428810ac356fb): 𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰…\n  1. 𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰𐌰 (suggested)\n  2. 𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱𐌱\n  …and 12 more\nIts answer will come as a user message starting \"[card c0w0rs8]\", values as JSON on the next line.\nYou can't continue without it: end your turn now; the answer starts your next turn."
+    },
+    {
+      "about": "nine 60-character ASCII labels fit; five optional fields after them do not all fit, so the list ends …and N more among the fields",
+      "card": "c1a2s3c",
+      "input": {
+        "question": "Pick one, and fill these in?",
+        "options": [
+          "Option 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 2 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 4 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 5 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 6 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 7 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 8 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "Option 9 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ],
+        "fields": [
+          {
+            "id": "field_0yyyyyyyyyyyyyyyyy",
+            "label": "Field 1 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "optional": true
+          },
+          {
+            "id": "field_1yyyyyyyyyyyyyyyyy",
+            "label": "Field 2 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "optional": true
+          },
+          {
+            "id": "field_2yyyyyyyyyyyyyyyyy",
+            "label": "Field 3 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "optional": true
+          },
+          {
+            "id": "field_3yyyyyyyyyyyyyyyyy",
+            "label": "Field 4 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "optional": true
+          },
+          {
+            "id": "field_4yyyyyyyyyyyyyyyyy",
+            "label": "Field 5 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "optional": true
+          }
+        ]
+      },
+      "doc": {
+        "question": "Pick one, and fill these in?",
+        "options": [
+          {
+            "label": "Option 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 2 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 4 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 5 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 6 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 7 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 8 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          {
+            "label": "Option 9 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ],
+        "multi": false,
+        "fields": [
+          {
+            "id": "field_0yyyyyyyyyyyyyyyyy",
+            "label": "Field 1 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "type": "text",
+            "value": "",
+            "optional": true
+          },
+          {
+            "id": "field_1yyyyyyyyyyyyyyyyy",
+            "label": "Field 2 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "type": "text",
+            "value": "",
+            "optional": true
+          },
+          {
+            "id": "field_2yyyyyyyyyyyyyyyyy",
+            "label": "Field 3 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "type": "text",
+            "value": "",
+            "optional": true
+          },
+          {
+            "id": "field_3yyyyyyyyyyyyyyyyy",
+            "label": "Field 4 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "type": "text",
+            "value": "",
+            "optional": true
+          },
+          {
+            "id": "field_4yyyyyyyyyyyyyyyyy",
+            "label": "Field 5 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+            "type": "text",
+            "value": "",
+            "optional": true
+          }
+        ]
+      },
+      "wait": false,
+      "result": "Card c1a2s3c is showing (cards/1 #074ebfb65ca10249): Pick one, and fill these in?\n  1. Option 1 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  2. Option 2 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  3. Option 3 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  4. Option 4 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  5. Option 5 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  6. Option 6 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  7. Option 7 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  8. Option 8 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  9. Option 9 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n  field_0yyyyyyyyyyyyyyyyy: Field 1 zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz (optional)\n  …and 4 more\nIts answer will come as a user message starting \"[card c1a2s3c]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile."
+    },
+    {
+      "about": "a form with wait: fields only, the optional one marked, the last line telling the agent to end its turn",
+      "card": "c81kq0z",
+      "input": {
+        "question": "Release details",
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target"
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "long",
+            "optional": true
+          }
+        ],
+        "wait": true
+      },
+      "doc": {
+        "question": "Release details",
+        "multi": false,
+        "fields": [
+          {
+            "id": "target",
+            "label": "Target",
+            "type": "text",
+            "value": "",
+            "optional": false
+          },
+          {
+            "id": "notes",
+            "label": "Notes",
+            "type": "long",
+            "value": "",
+            "optional": true
+          }
+        ]
+      },
+      "wait": true,
+      "result": "Card c81kq0z is showing (cards/1 #1c07f8f903d35155): Release details\n  target: Target\n  notes: Notes (optional)\nIts answer will come as a user message starting \"[card c81kq0z]\", values as JSON on the next line.\nYou can't continue without it: end your turn now; the answer starts your next turn."
+    }
+  ]
+}

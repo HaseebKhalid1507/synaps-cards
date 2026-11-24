@@ -190,19 +190,23 @@
   ```
 
   With `wait: true`, the last line instead reads: `You can't continue without it: end your turn now; the answer starts your next turn.`
-- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it: keys in schema order, `\n` line endings, defaults materialized, string options as `{label}`. It is the doc the extension validated, after any hook rewrote the input (§2.2). It is a 64-bit checksum against accidental divergence, not an identity or a signature (§5.2).
+- **The envelope.** `cards/1` names the catalog and normalizer version. `#…` is the first 16 hex digits of SHA-256 over the normalized doc as `cards_spec` writes it, **with the call's `wait` last**: keys in schema order, `\n` line endings, defaults materialized (`wait` too, `false` when absent), string options as `{label}`. `wait` is the call's mode, not part of the doc, but it changes what the desk draws (NEEDS YOU) and what the result tells the agent, so a hook that flips it must not bind. It is the doc the extension validated, after any hook rewrote the input (§2.2). It is a 64-bit checksum against accidental divergence, not an identity or a signature (§5.2).
 - **Size.** A result is at most 1024 bytes of UTF-8, below the result bounds and the default spill threshold (`tool_output_spill_bytes`, `CLI:ae/runtime/tool_spill.rs:71-95`). `cards_ext` builds it in this order and cuts only at character boundaries:
   1. Line 1, the envelope, is at most 256 bytes. Only the question in it is cut, ending in `…`, and the id, version and digest are never cut.
   2. The trailer, the "Its answer will come…" lines, is fixed text of under 200 bytes, and is always kept.
   3. The options fill what is left. Each label is cut to 60 characters. When the next option wouldn't fit, the list ends `  …and N more`. Field names follow under the same rule.
 
   S2 tests the cap on worst-case fixtures, such as nine 60-character labels in a 4-byte script. A result cut later, by a transformer or the spill, still binds if line 1 is whole, and a result whose line 1 doesn't parse is a plain row.
-- **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no state, so it can't say whether the card was open.
+- **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no card state, so it can't say whether the card was open.
 - **Refusal:** a JSON-RPC error, which the host stores as plain text with no envelope, so the desk shows a plain row (`protocol.md:296-298`; `CLI:ae/runtime/stream.rs:2392-2403`):
   - a validation line;
-  - `cards_ui: only the main chat can show cards` when `session_id` is `null`, as it is for workers (`protocol.md:232`);
+  - `cards_ui: only the main chat can show cards` for a worker's call. The host-written fields decide, in this order (`protocol.md`, `tool.call`):
+    1. a `caller` that names a `parent` is a worker's (`Author::child` always sets one), refused **even with a `session_id`**;
+    2. else a nonempty `session_id` is a chat;
+    3. else a `caller` with a nonempty `group` is a chat, keyed by that group. A chat under the `SYNAPS_HOOK_SESSION_ID=0` kill switch sends a `null` `session_id` but keeps its `caller`, so a `null` session alone doesn't mean a worker;
+    4. else the call is refused. A host that sends neither (one before 0.10.3 sends no `session_id`) has a real chat's cards refused too: fail-closed, because nothing there tells a worker from a chat.
   - `cards_ui: 6 cards in the last 10 minutes; ask in plain text` (§5.5).
-- **Ids** are `c` plus 6 random `[a-z0-9]`, unique per session in practice. Nothing relies on them being secret (§5.2).
+- **Ids** are `c` plus 6 random `[a-z0-9]`. The extension never mints one twice while it runs: a draw that names an id it already minted draws again. One process serves every chat, so a session's ids are unique for the process's life, and across a restart (§1.6) unique in practice (36^6 ids). Nothing relies on them being secret (§5.2).
 
 **Description** (the v3.4 draft, adjusted; P4 tunes it):
 
@@ -217,7 +221,7 @@
 | Cancel | The tool already returned, so the card stays open, and answering it starts a new turn, as typing would. An answer steered in but not yet read is withdrawn (`Dequeued`, `CLI:ae/session/actor.rs:3629-3632`). The card checks the refreshed history, then offers Resend (§3.5). |
 | Compaction, `/new`, a context rollover | The card's call leaves the visible history, so the fold drops the card ("gone", §2.3). An answer already given stays in the summary's source. Answering is off while a compaction runs (§3.4). |
 | Daemon reload or crash | The card is in the journal once saved (§4). An answer refused during the drain (`Error("daemon reloading…")`, `daemon-mode.md:1079-1080`) or unconfirmed at the drop settles after the reconnect (§3.5): Resend, if the history the desk reconnected to lacks it. Nothing is re-sent on its own. |
-| Extension crash | Eager (v1): the host respawns it and retries the call once (`process.rs:1993-2010`); the retry mints a fresh id, and only its reply reaches the host. Leased (if a later manifest adds `deferred`): no retry, the call fails. The tool is stateless and has no side effects, so both are safe. After 3 failed restarts the tool fails (`protocol.md:1105`), and the agent asks in text. |
+| Extension crash | Eager (v1): the host respawns it and retries the call once (`process.rs:1993-2010`); the retry mints a fresh id, and only its reply reaches the host. Leased (if a later manifest adds `deferred`): no retry, the call fails. The tool keeps no card state and has no side effects, so both are safe. After 3 failed restarts the tool fails (`protocol.md:1105`), and the agent asks in text. |
 | Extension reload or uninstall | New calls fail. Existing cards still answer, because answers don't touch the extension. |
 
 ---
@@ -244,7 +248,7 @@
 
 1. **The tool call.** A `tool_use` named `cards_ui`, or `cards:ui` (the runtime form), is a card candidate. Another name, including a collision suffix such as `cards_ui_2`, is drawn as an ordinary tool row: the fail-safe.
 2. **The input.** It goes through `cards_spec::parse_input`, the same function the extension ran, and is normalized. If it is invalid, or comes from a newer catalog this build doesn't know, the call is drawn as an ordinary tool row, and the user can still answer in text.
-3. **The result.** Line 1 must parse as the envelope (§1.5), name a version this build knows, and carry the digest of step 2's normalized doc. That binds the id to the exact doc drawn. Anything else is a plain row:
+3. **The result.** Line 1 must parse as the envelope (§1.5), name a version this build knows, and carry the digest of step 2's normalized doc and `wait` (§1.5). That binds the id to the exact doc drawn, in the mode it was asked in. Anything else is a plain row:
    - **a mismatch:** a hook rewrote the input before the tool ran (`CLI:ae/runtime/stream.rs:2350-2390`), while the transcript keeps the model's original call. The extension validated one card, and the desk would draw another;
    - **an error:** the host stores it as text with no envelope, and the live `ToolResult` has no error flag (`stream.rs:2392-2403`; `CLI:ae/session/wire.rs:983`);
    - **a cut or virtualised line 1**, or an unknown version.
@@ -328,7 +332,7 @@ There is no clock-based expiry. A card is moot when the agent closes it, the use
 **Format:**
 - **Line 1, for people.** The pattern is `^\[card (c[a-z0-9]{6})( changed| skipped)?\] `. After it come the question and a summary: labels joined with `, `, then `Label: value` for each field, each cut at 40 characters with `…`. The line is at most 200 characters, and each piece is sanitized.
 - **Line 2, for machines.** The values as compact JSON. The spec's own writer emits the keys in doc order, so the bytes are the same with or without `preserve_order`.
-- **Size.** The message is at most 8 KiB plus 200 bytes, far under any steering bound.
+- **Size.** Line 1 is at most 200 *characters* (so at most 800 bytes of UTF-8), and line 2 at most 8 KiB: with the newline between them, the message is at most 8 KiB + 801 bytes, far under any steering bound.
 
 **Parsing (the fold):**
 - A user text (§2.3) counts as an answer only if it is exactly two lines: line 1 matches in full, line 2 is one JSON object that passes `parse_answer(doc, values)`, and the id names a card bound earlier in the history. Anything else is ordinary text.
@@ -444,7 +448,7 @@ The surviving answer lands in the compacted history as plain text, and the card 
 
 ## 4. Durability (Q4)
 
-**The extension stores nothing.** Its only state is an in-memory, per-`session_id` rate counter (§5.5), which a restart resets: acceptable for a spam brake. The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
+**The extension stores nothing.** Its only state is in memory, and a restart resets it: the per-chat rate counter (§5.5), acceptable for a spam brake, and the ids it has minted (§1.5). The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
 
 **The session journal is the only store.** The card is the stored `tool_use` plus its `tool_result`, and the answer is a stored user message.
 
@@ -506,7 +510,7 @@ Resend itself is checked on local evidence only (§3.5). It can repeat an answer
 ### 5.2 Provenance and sanitizing
 
 - **Chrome.** The desk draws it: "◇ The agent asks", the session, and the card frame. Agent strings never appear in the chrome. Cards never use the authorize card's warning colours or icon.
-- **Sanitizing.** `cards_spec::sanitize` is #75's `sanitize.rs`. It refuses, with a teaching line, any control, bidi or invisible character in an agent string. It sanitizes the summary line again on the way out.
+- **Sanitizing.** `cards_spec::sanitize` is #75's `sanitize.rs`. In an agent string it refuses, with a teaching line, any C0/C1 control (other than `\n`, `\t` and a line-ending `\r`) and any bidi embedding, override or isolate. It drops the other invisible characters (zero-width space, word joiner, BOM, soft hyphen, variation selectors, …), but **keeps ZWJ and ZWNJ** (U+200D, U+200C), which join emoji and shape scripts. It sanitizes the summary line again on the way out.
 - **Detail** is markdown-lite: bold, italic, inline code and lists. A link shows as plain text.
 - **Ids are not credentials.** Authority comes from the daemon's input rules (§3.2). A guessed id lets you do only what typing already lets you do.
 - **Names aren't identities.** A tool name, a plugin name and the envelope don't authenticate anything.
@@ -528,7 +532,7 @@ Resend itself is checked on local evidence only (§3.5). It can repeat an answer
 
 ### 5.5 Rate limits
 
-- **The extension:** 3 creates per session per minute, and 6 per 10 minutes. Past that, it returns a teaching error.
+- **The extension:** 3 creates per chat per minute, and 6 per 10 minutes. A chat is its `session_id`, or its `group` when that is `null` (§1.5). Past that, it returns a teaching error.
 - **The desk:** one answer in flight per card, and repeat presses are ignored.
 - **Skips.** A skip is a message the agent reads. The description tells it not to re-ask.
 

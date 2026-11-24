@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cards-ext"
+version = "0.1.0"
+dependencies = [
+ "cards-spec",
+ "serde_json",
+]
+
+[[package]]
 name = "cards-spec"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,15 @@
+{
+  "name": "cards",
+  "version": "0.1.0",
+  "description": "Agent cards: the agent asks one question as an inline card in the desktop app (the cards_ui tool). Answers come back as ordinary user messages.",
+  "author": "Haseeb Khalid",
+  "license": "MIT",
+  "extension": {
+    "protocol_version": 1,
+    "runtime": "process",
+    "command": "target/release/cards-ext",
+    "setup": "scripts/setup.sh",
+    "permissions": ["tools.register"],
+    "hooks": []
+  }
+}

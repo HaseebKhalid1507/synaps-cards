@@ -1,0 +1,12 @@
+[package]
+name = "cards-ext"
+description = "The `cards` Synaps extension: one tool, `ui` (the model's `cards_ui`), over the extension protocol on stdio."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cards-spec = { path = "../cards-spec" }
+serde_json.workspace = true
