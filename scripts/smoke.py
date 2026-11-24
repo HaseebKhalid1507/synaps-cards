@@ -15,9 +15,10 @@ running daemon is touched.
 3. A turn: `synaps rpc --model local/stub`, its `LOCAL_ENDPOINT` a scripted
    OpenAI-compatible model served here. The model calls `cards_ui` six
    times (a card, a wait card, an invalid one, a close, a third card, a
-   fourth that the rate limit refuses), then the user answers the first card
-   with a §3.3 message. A tee in front of the built binary records the frames
-   the host really sends it.
+   fourth that the rate limit refuses), then starts a worker (`subagent`,
+   on the same model) that tries `cards_ui` too; then the user answers the
+   first card with a §3.3 message. A tee in front of the built binary
+   records the frames the host really sends it.
 
 Each check is printed; the exit code is 0 only when all pass. The report,
 with what the model saw and the host's frames, is `<work>/report.json`.
@@ -58,6 +59,8 @@ SCRIPT = [
     ("a3", A3["input"]),
     ("a1 again (the 4th card this minute)", A1["input"]),
 ]
+WORKER_TASK = "SMOKE-WORKER: ask the user with cards_ui."
+SUBAGENT = {"system_prompt": "You are the cards smoke test's worker.", "name": "smoke-worker", "task": WORKER_TASK, "timeout": 90}
 
 checks = []
 
@@ -73,6 +76,7 @@ def check(ok, what, detail=""):
 
 class Model(BaseHTTPRequestHandler):
     seen = []  # every chat request's body
+    worker_seen = []  # every worker request's body
     tool_name = None
 
     def log_message(self, *args):
@@ -88,19 +92,30 @@ class Model(BaseHTTPRequestHandler):
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        Model.seen.append(req)
         names = [t.get("function", {}).get("name") for t in req.get("tools", [])]
-        Model.tool_name = next((n for n in names if n and "cards" in n), None)
+        cards = next((n for n in names if n and "cards" in n), None)
         messages = req.get("messages", [])
         done = sum(1 for m in messages if m.get("role") == "tool")
         last = messages[-1] if messages else {}
         text = last.get("content") if isinstance(last.get("content"), str) else json.dumps(last.get("content"))
-        if last.get("role") == "user" and text and text.startswith("[card "):
-            chunks = [self.text("Thanks, I have the answer.")]
-        elif done < len(SCRIPT) and Model.tool_name:
-            chunks = [self.call(f"call_{done}", Model.tool_name, SCRIPT[done][1])]
+        if any(m.get("role") == "user" and WORKER_TASK in str(m.get("content")) for m in messages):
+            # The worker: one card attempt, then done.
+            Model.worker_seen.append(req)
+            if done == 0 and cards:
+                chunks = [self.call("call_w0", cards, A1["input"])]
+            else:
+                chunks = [self.text("Worker done.")]
         else:
-            chunks = [self.text("Smoke turn done.")]
+            Model.seen.append(req)
+            Model.tool_name = cards
+            if last.get("role") == "user" and text and text.startswith("[card "):
+                chunks = [self.text("Thanks, I have the answer.")]
+            elif done < len(SCRIPT) and cards:
+                chunks = [self.call(f"call_{done}", cards, SCRIPT[done][1])]
+            elif done == len(SCRIPT) and "subagent" in names:
+                chunks = [self.call(f"call_{done}", "subagent", SUBAGENT)]
+            else:
+                chunks = [self.text("Smoke turn done.")]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -269,6 +284,7 @@ def main():
     report["events_tail"] = events[-5:]
     report["tool_name"] = Model.tool_name
     report["model_requests"] = len(Model.seen)
+    report["worker_requests"] = len(Model.worker_seen)
     judge(report, wire)
     return finish(report, work, a.keep, run)
 
@@ -302,7 +318,9 @@ def judge(report, wire):
         check(fn.get("parameters") == json.loads((ROOT / "crates/cards-spec/schema.json").read_text()),
               "its parameters are schema.json")
     results = report.get("results", [])
-    check(len(results) == len(SCRIPT), f"{len(SCRIPT)} tool results came back", json.dumps(results)[:800])
+    check(len(results) >= len(SCRIPT), f"{len(SCRIPT)} cards_ui results came back", json.dumps(results)[:800])
+    report["subagent_result"] = results[len(SCRIPT)] if len(results) > len(SCRIPT) else None
+    results = results[:len(SCRIPT)]
     while len(results) < len(SCRIPT):
         results.append(None)
     # What the model saw, call by call.
@@ -336,8 +354,27 @@ def judge(report, wire):
     report["host_tool_call_keys"] = [sorted(c.get("params", {}).keys()) for c in calls]
     report["host_tool_call_first"] = {k: v for k, v in (calls[0]["params"] if calls else {}).items() if k != "input"}
     check(init and init.get("params", {}).get("extension_protocol_version") == 1, "host: initialize, protocol 1", json.dumps(init)[:400])
-    check(len(calls) == len(SCRIPT) and all(c["params"].get("name") == "ui" for c in calls),
-          "host: one tool.call per model call, named ui", json.dumps(report["host_tool_call_keys"]))
+    chat_calls = [c for c in calls if isinstance(c["params"].get("session_id"), str)]
+    check(len(chat_calls) == len(SCRIPT) and all(c["params"].get("name") == "ui" for c in calls),
+          "host: one tool.call per chat call, named ui", json.dumps(report["host_tool_call_keys"]))
+    # The worker: what dev sends for it, and what it was told.
+    worker_tools = sorted({t.get("function", {}).get("name") for r in Model.worker_seen for t in r.get("tools", [])})
+    report["worker_tools"] = worker_tools
+    worker_calls = [c for c in calls if not isinstance(c["params"].get("session_id"), str)]
+    report["host_worker_tool_call"] = [{k: v for k, v in c["params"].items() if k != "input"} for c in worker_calls]
+    worker_saw = [m.get("content") for r in Model.worker_seen for m in r.get("messages", []) if m.get("role") == "tool"]
+    report["worker_saw"] = worker_saw
+    if not Model.worker_seen:
+        check(False, "worker: the chat started one on the stub model", str(report.get("subagent_result"))[:600])
+    elif report["tool_name"] not in worker_tools:
+        check(True, "worker: it is not even offered cards_ui", json.dumps(worker_tools))
+    else:
+        check(any(isinstance(s, str) and "cards_ui: only the main chat can show cards" in s for s in worker_saw),
+              "worker: its cards_ui call is refused with the worker line", json.dumps(worker_saw)[:600])
+        w = worker_calls[0]["params"] if len(worker_calls) == 1 else {}
+        check(len(worker_calls) == 1 and w.get("session_id") is None and ("caller" not in w or "parent" in w["caller"]),
+              "host: the worker's call has no session, and a caller with a parent or none",
+              json.dumps(report["host_worker_tool_call"]))
     check(calls and isinstance(calls[0]["params"].get("session_id"), str), "host: a chat's call carries its session_id",
           json.dumps(report["host_tool_call_first"]))
     check(calls and calls[0]["params"]["input"] == A1["input"], "host: the input is the model's, untouched")
