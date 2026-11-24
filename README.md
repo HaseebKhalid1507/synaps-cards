@@ -36,6 +36,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo test -p cards-spec --locked --features preserve_order   # serde_json maps in insertion order, as in synaps-desk
 python3 scripts/oracle.py --check
+python3 scripts/smoke.py --synaps "$(command -v synaps)"   # the built extension in a real Synaps, in a throwaway home
 ```
 
 ## License
