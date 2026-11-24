@@ -7,7 +7,7 @@ synaps-desk renders. No core changes. The design is [`docs/design.md`](docs/desi
 
 | Path | What |
 |---|---|
-| `crates/cards-spec` | The spec both sides run (S1): the doc schema (`schema.json`), `parse_input` and `revalidate`, the digest and the result's envelope line, `parse_answer`, and the answer message, built and parsed. No I/O; serde and serde_json only. |
+| `crates/cards-spec` | The spec both sides run (S1): the doc schema (`schema.json`), `parse_input` and `revalidate`, the digest and the result's envelope line, `parse_answer`, and the answer message, built and parsed. No I/O; serde, serde_json and sha2 only. |
 | `fixtures/` | The corpus the spec is tested against ([`fixtures/README.md`](fixtures/README.md)). |
 | `scripts/oracle.py` | A second implementation of the digest, envelope and message, in Python: it writes the corpus's goldens (`--check` verifies them). |
 | `scripts/gen-casefold.py` | Generates the case-folding table, pinned to Unicode 16.0.0, and `fixtures/casefold.json`. |

@@ -16,7 +16,8 @@
 //! (`crates/synaps-client/src/surface/` at `3f61cff`), itself a mirror of
 //! SynapsCLI's C1 (`6e895d27`), minus what only the dead core had: the
 //! contract digest, host ids, marks, the `<ui_answer>` message and its
-//! capsule. No I/O and no Synaps dependency: serde and serde_json only.
+//! capsule. No I/O and no Synaps dependency: serde, serde_json and sha2
+//! only.
 //!
 //! **Map order.** serde_json's `Map` sorts its keys unless `preserve_order`
 //! is on, as it is in synaps-desk's build (gpui turns it on). Nothing this

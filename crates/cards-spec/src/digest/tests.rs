@@ -1,6 +1,6 @@
-//! `digest`: SHA-256 against FIPS 180-4's vectors and its padding edges,
-//! the preimage's exact bytes, and the envelope's line, cap and binding.
-//! Every expected hash here is Python's `hashlib`.
+//! `digest`: the `sha2` crate against FIPS 180-4's vectors and its padding
+//! edges, the preimage's exact bytes, and the envelope's line, cap and
+//! binding. Every expected hash here is Python's `hashlib`.
 
 use serde_json::json;
 
