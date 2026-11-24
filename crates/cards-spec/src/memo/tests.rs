@@ -498,6 +498,21 @@ fn the_gate_is_checked_again_on_the_click() {
     let _ = t;
 }
 
+/// Rule 4: the check finds an answer we never saw, and not ours. Dropped
+/// on that view, before any cause shows: the card shows the fold's state.
+#[test]
+fn a_check_that_finds_an_answer_we_never_saw_drops_it() {
+    for trigger in [Event::Idle, Event::Attached] {
+        let mut d = Desk::new();
+        d.queued(false);
+        d.on(trigger);
+        assert_eq!(d.state(), Some(State::Checking));
+        d.lands(&text(ID, &answer("Leave it")));
+        d.settles();
+        assert_eq!((d.state(), d.may_resend()), (None, false), "{trigger:?}");
+    }
+}
+
 /// Compaction or `/new` with ours queued: the card leaves the history.
 #[test]
 fn compaction_or_new_mid_queue() {
