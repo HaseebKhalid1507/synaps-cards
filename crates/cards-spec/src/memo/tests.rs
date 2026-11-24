@@ -521,10 +521,13 @@ fn the_gate_is_checked_again_on_the_click() {
         (d.state(), d.cause().as_deref()),
         (Some(State::Unconfirmed), Some("It didn't reach the chat. Another message may have replaced it"))
     );
-    // Another desk's answer arrived since the button was painted.
+    // Another desk's answer arrived since the button was painted: the
+    // painted gate sees it before any view is observed, and so does the
+    // click.
     d.lands(&text(ID, &answer("Leave it")));
+    assert!(!d.memo.may_resend(&id(ID), &d.fold()), "the gate, on the fold alone");
+    assert_eq!(d.state(), Some(State::Unconfirmed));
     assert_eq!(d.resend(true), Resend::No);
-    assert!(!d.memo.may_resend(&id(ID), &d.fold()));
     d.settles();
     assert_eq!(d.state(), None, "superseded");
     let _ = t;
