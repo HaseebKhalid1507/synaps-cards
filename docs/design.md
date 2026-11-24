@@ -200,7 +200,11 @@
 - **Close:** `Card c4f9x2a closed (cards/1).` The tool keeps no card state, so it can't say whether the card was open.
 - **Refusal:** a JSON-RPC error, which the host stores as plain text with no envelope, so the desk shows a plain row (`protocol.md:296-298`; `CLI:ae/runtime/stream.rs:2392-2403`):
   - a validation line;
-  - `cards_ui: only the main chat can show cards` when `session_id` is `null`, as it is for workers (`protocol.md:232`);
+  - `cards_ui: only the main chat can show cards` for a worker's call. The host-written fields decide, in this order (`protocol.md`, `tool.call`):
+    1. a `caller` that names a `parent` is a worker's (`Author::child` always sets one), refused **even with a `session_id`**;
+    2. else a nonempty `session_id` is a chat;
+    3. else a `caller` with a nonempty `group` is a chat, keyed by that group. A chat under the `SYNAPS_HOOK_SESSION_ID=0` kill switch sends a `null` `session_id` but keeps its `caller`, so a `null` session alone doesn't mean a worker;
+    4. else the call is refused. A host that sends neither (one before 0.10.3 sends no `session_id`) has a real chat's cards refused too: fail-closed, because nothing there tells a worker from a chat.
   - `cards_ui: 6 cards in the last 10 minutes; ask in plain text` (§5.5).
 - **Ids** are `c` plus 6 random `[a-z0-9]`. The extension never mints one twice while it runs: a draw that names an id it already minted draws again. One process serves every chat, so a session's ids are unique for the process's life, and across a restart (§1.6) unique in practice (36^6 ids). Nothing relies on them being secret (§5.2).
 
@@ -528,7 +532,7 @@ Resend itself is checked on local evidence only (§3.5). It can repeat an answer
 
 ### 5.5 Rate limits
 
-- **The extension:** 3 creates per session per minute, and 6 per 10 minutes. Past that, it returns a teaching error.
+- **The extension:** 3 creates per chat per minute, and 6 per 10 minutes. A chat is its `session_id`, or its `group` when that is `null` (§1.5). Past that, it returns a teaching error.
 - **The desk:** one answer in flight per card, and repeat presses are ignored.
 - **Skips.** A skip is a message the agent reads. The description tells it not to re-ask.
 

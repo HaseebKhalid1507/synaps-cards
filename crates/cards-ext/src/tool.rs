@@ -91,16 +91,16 @@ impl Cards {
 }
 
 /// The chat a call comes from, which keys the rate counter; `None` for a
-/// worker, whose card no chat would show (§1.5).
+/// worker, whose card no chat would show (§1.5, in its order).
 ///
-/// The design reads a null `session_id` as a worker. On `dev` that is also
-/// every chat under the `SYNAPS_HOOK_SESSION_ID=0` kill switch, and a host
-/// before 0.10.3 sends no `session_id` at all (`protocol.md`, `tool.call`;
+/// A null `session_id` alone isn't a worker: on `dev` it is also every chat
+/// under the `SYNAPS_HOOK_SESSION_ID=0` kill switch, and a host before
+/// 0.10.3 sends no `session_id` at all (`protocol.md`, `tool.call`;
 /// `session-id.md`). The host-written `caller` says more: a worker's names
 /// its `parent` (`Author::child`), a chat's never does, and the kill switch
 /// leaves it alone. So a `parent` refuses, a `session_id` is a chat, a
 /// `caller` without one is a chat by its `group`, and a call with neither
-/// is refused, as the design says.
+/// is refused.
 pub fn chat_of(params: &Value) -> Option<String> {
     let caller = params.get("caller").and_then(Value::as_object);
     if caller.is_some_and(|c| c.contains_key("parent")) {
