@@ -1,0 +1,259 @@
+{
+ "source": "scripts/smoke.py at bea20bf: `get_messages` after the answer's turn, from SynapsCLI dev 0a71ea0d (synaps 0.12.0), with a scripted model",
+ "messages": [
+  {
+   "_synaps_hooked": 0,
+   "content": "Smoke: ask me with cards.",
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_0",
+     "input": {
+      "default": "Refactor the parser",
+      "detail": "The parser has three call sites; a rewrite touches all of them.",
+      "options": [
+       "Refactor the parser",
+       "Rewrite from scratch",
+       "Leave it"
+      ],
+      "question": "Which approach?"
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Card chhxbp0 is showing (cards/1 #e5bd75450420caeb): Which approach?\n  1. Refactor the parser (suggested)\n  2. Rewrite from scratch\n  3. Leave it\nIts answer will come as a user message starting \"[card chhxbp0]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile.",
+     "tool_use_id": "call_0",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_1",
+     "input": {
+      "default": "Approve",
+      "detail": "1. Extract `Lexer`\n2. Port call sites\n3. Delete the old parser",
+      "options": [
+       "Approve",
+       {
+        "label": "Revise",
+        "note": "What should change?"
+       }
+      ],
+      "question": "Plan ready. Go ahead?",
+      "wait": true
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Card cuc2852 is showing (cards/1 #971783ff05c8e314): Plan ready. Go ahead?\n  1. Approve (suggested)\n  2. Revise\nIts answer will come as a user message starting \"[card cuc2852]\", values as JSON on the next line.\nYou can't continue without it: end your turn now; the answer starts your next turn.",
+     "tool_use_id": "call_1",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_2",
+     "input": {
+      "options": [
+       "only"
+      ],
+      "question": "Q"
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Tool execution failed: Extension error: options: at least 2 (got 1); one option is not a choice",
+     "tool_use_id": "call_2",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_3",
+     "input": {
+      "close": "c4f9x2a"
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Card c4f9x2a closed (cards/1).",
+     "tool_use_id": "call_3",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_4",
+     "input": {
+      "fields": [
+       {
+        "id": "version",
+        "label": "Version",
+        "value": "0.13.0"
+       },
+       {
+        "id": "notes",
+        "label": "Notes",
+        "optional": true,
+        "type": "long"
+       },
+       {
+        "id": "publish",
+        "label": "Publish to crates.io",
+        "type": "check",
+        "value": true
+       }
+      ],
+      "question": "Release details"
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Card cjq5fc0 is showing (cards/1 #9013ba9701202fa9): Release details\n  version: Version\n  notes: Notes (optional)\n  publish: Publish to crates.io\nIts answer will come as a user message starting \"[card cjq5fc0]\", values as JSON on the next line.\nThe user may also just reply in text. Keep working meanwhile.",
+     "tool_use_id": "call_4",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_5",
+     "input": {
+      "default": "Refactor the parser",
+      "detail": "The parser has three call sites; a rewrite touches all of them.",
+      "options": [
+       "Refactor the parser",
+       "Rewrite from scratch",
+       "Leave it"
+      ],
+      "question": "Which approach?"
+     },
+     "name": "cards_ui",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "Tool execution failed: Extension error: cards_ui: 3 cards in the last minute; ask in plain text",
+     "tool_use_id": "call_5",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "id": "call_6",
+     "input": {
+      "name": "smoke-worker",
+      "system_prompt": "You are the cards smoke test's worker.",
+      "task": "SMOKE-WORKER: ask the user with cards_ui.",
+      "timeout": 90
+     },
+     "name": "subagent",
+     "type": "tool_use"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "content": "[subagent:smoke-worker] Worker done.",
+     "tool_use_id": "call_6",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "text": "Smoke turn done.",
+     "type": "text"
+    }
+   ],
+   "role": "assistant"
+  },
+  {
+   "_synaps_hooked": 0,
+   "content": "[card chhxbp0] Which approach? → Refactor the parser\n{\"choice\":\"Refactor the parser\"}",
+   "role": "user"
+  },
+  {
+   "_synaps_at": "2026-11-24T04:58:23Z",
+   "content": [
+    {
+     "text": "Thanks, I have the answer.",
+     "type": "text"
+    }
+   ],
+   "role": "assistant"
+  }
+ ]
+}
