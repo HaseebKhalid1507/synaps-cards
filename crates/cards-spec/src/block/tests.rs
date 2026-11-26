@@ -705,16 +705,34 @@ fn edit_look_alikes_are_ordinary_text() {
     assert!(message::parse(&text).is_some());
     let of = "\"of\":\"bab3b9916631463b1935420c710c9287\"";
     let set = l2.strip_prefix(&format!("{{{of},")).unwrap().strip_suffix('}').unwrap();
-    let l2_keys_swapped = format!("{{{set},{of}}}");
+    // §3.3 (amended): line 2 is read for what it says. Any JSON spelling of
+    // the same patch is the same edit; the builder writes one.
+    for same in [
+        format!("{{{set},{of}}}"),
+        format!("{l2} "),
+        format!(" {l2}"),
+        l2.replace(":\"skipped\"", ": \"skipped\"").replace(',', " , "),
+        l2.replace("skipped", "skip\\u0070ed"),
+        l2.replace("\"of\"", "\"\\u006f\\u0066\""),
+    ] {
+        assert_eq!(message::parse(&format!("{l1}\n{same}")).as_ref(), Some(&e), "{same}");
+    }
+    // Shady's example: an escape the builder doesn't write, in a note's text.
+    let cafe = edit(json!({"set":{"text":"café"}}));
+    assert_eq!(cafe.patch_text(), "{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"text\":\"café\"}}");
+    let typed = "[block plan edited r4] n → text café\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"text\":\"caf\\u00e9\"}}";
+    assert_eq!(message::parse(typed), Some(cafe));
     for bad in [
         l1.to_string(),
         format!("{l1}\n{l2}\n"),
-        format!("{l1}\n{l2} "),
-        format!("{l1}\n{l2_keys_swapped}"),
+        format!("{l1}\n{l2}\t"),
+        format!("{l1}\n{l2}\r"),
+        format!("{l1}\n{}", l2.replace(':', ":\t")),
         format!("{l1}\n{}", l2.replace("skipped", "done")),
         format!("{l1}\n{}", l2.replace("\"set\"", "\"remove\":[\"steps.x\"],\"set\"")),
-        format!("{l1}\n{}", l2.replace(":\"skipped\"", ": \"skipped\"")),
         format!("{l1}\n{}", l2.replace("bab3", "BAB3")),
+        format!("{l1}\n{}", l2.replace(&format!("{of},"), "")),
+        format!("{l1}\n[{l2}]"),
         format!("{l1}\n{}", l2.replace("set", "state")),
         l1.replace("r4", "r0") + "\n" + l2,
         l1.replace("r4", "r04") + "\n" + l2,

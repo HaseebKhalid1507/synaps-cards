@@ -56,7 +56,9 @@ Each case reads back to its edit.
 ## `look_alikes.json`
 
 Texts that are, or nearly are, an edit. `edit` is what `message::parse`
-reads, or `null`: one text per edit, nothing else counts.
+reads, or `null`. Line 2 is read for what it says: another JSON spelling
+of the same patch (key order, spaces, escapes) is the same edit, while a
+control character, a missing `of` or a path that isn't the user's is not.
 
 ## `notices.json`
 

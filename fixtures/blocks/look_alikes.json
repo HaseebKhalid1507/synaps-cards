@@ -49,18 +49,64 @@
       "edit": null
     },
     {
-      "about": "line 2 with of last",
+      "about": "line 2 with of last: the same edit (§3.3, amended at B1: read for what it says, not how it is spelled)",
       "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"set\":{\"steps.bandaid.state\":\"skipped\"},\"of\":\"bab3b9916631463b1935420c710c9287\"}",
-      "edit": null
+      "edit": {
+        "id": "plan",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
     },
     {
-      "about": "line 2 with a space",
+      "about": "line 2 with a space: the same edit",
       "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\": \"skipped\"}}",
-      "edit": null
+      "edit": {
+        "id": "plan",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
     },
     {
-      "about": "line 2 with an escape the builder doesn't write",
+      "about": "line 2 with an escape the builder doesn't write: the same edit",
       "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skip\\u0070ed\"}}",
+      "edit": {
+        "id": "plan",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
+    },
+    {
+      "about": "Shady's café: a note's text with an escape the builder doesn't write",
+      "text": "[block n edited r1] n → text café\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"text\":\"caf\\u00e9\"}}",
+      "edit": {
+        "id": "n",
+        "base": 1,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "text": "café"
+          }
+        }
+      }
+    },
+    {
+      "about": "line 2 with a tab between tokens (a control character)",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\t\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
       "edit": null
     },
     {

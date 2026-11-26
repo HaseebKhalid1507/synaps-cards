@@ -37,11 +37,16 @@
 //!   order (`append`, `order`, `set`), compact, at most 8 KiB. **Reading:**
 //!   §3.3's prose lists "set, append and order, in schema key order", but
 //!   its first example writes `order` before `set`: byte order is what all
-//!   four examples do. Read back, line 2 must be exactly what [`build`]
-//!   writes for what it says (keys in that order, values normalized): the
-//!   edit grammar is one text per edit. Its paths must be user paths of
-//!   some kind (§3.4), and pass the overlap rule; [`Edit::admit`] checks
-//!   them against the block's kind where the message lands.
+//!   four examples do. That is how [`build`] writes it, always the same
+//!   way. Read back, line 2 is read for what it says, not how it is
+//!   spelled (§3.3, amended at B1): any JSON spelling of the same patch
+//!   (keys in another order, spaces between tokens, another escape) is the
+//!   same edit. It is one line with no control character, at most 8 KiB as
+//!   written, an object of `of` and the user's parts, no key twice. The
+//!   memo matches a message by its body's own bytes ([`Read::body`]), not
+//!   by this spelling. Its paths must be user paths of some kind (§3.4),
+//!   and pass the overlap rule; [`Edit::admit`] checks them against the
+//!   block's kind where the message lands.
 //!
 //! **Reading:** a `card:<id>` block can't be edited: line 1's id is a block
 //! id (§3.3's pattern has no `:`).
@@ -286,7 +291,7 @@ pub fn build(edit: &Edit, summary: &Summary) -> String {
 /// unless all of it is the grammar (module docs).
 pub fn parse(body: &str) -> Option<Edit> {
     let (line1, line2) = body.split_once('\n')?;
-    if line2.contains('\n') || line2.len() > EDIT_PATCH_MAX_BYTES || !line2.starts_with("{\"of\":\"") {
+    if line2.len() > EDIT_PATCH_MAX_BYTES || line2.chars().any(char::is_control) {
         return None;
     }
     if line1.chars().count() > EDIT_LINE_MAX || line1.chars().any(char::is_control) {
@@ -306,8 +311,7 @@ pub fn parse(body: &str) -> Option<Edit> {
     }
     let of = Tag::parse(o.get("of")?.as_str()?)?;
     let parts = parse_parts(o, "", Author::User).ok()?;
-    let edit = Edit { id, base, of, parts };
-    (edit.patch_text() == line2).then_some(edit)
+    Some(Edit { id, base, of, parts })
 }
 
 /// A genuine user message's text, read (§1.7 step 3): its edit, if all of

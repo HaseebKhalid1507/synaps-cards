@@ -532,8 +532,9 @@ fn messages_split_and_read_back_under_mutation() {
         assert!(t.lines.iter().all(|l| (1..=8).contains(&l.notices.len())), "case {i}");
         trailers += usize::from(!t.lines.is_empty());
         if let Some(e) = message::parse(&text) {
-            let line2 = text.split_once('\n').unwrap().1;
-            assert_eq!(line2, e.patch_text(), "case {i}: line 2 is read only as the builder writes it");
+            let line1 = text.split_once('\n').unwrap().0;
+            // Line 2 is read for what it says: the builder's spelling of it reads the same.
+            assert_eq!(message::parse(&format!("{line1}\n{}", e.patch_text())).as_ref(), Some(&e), "case {i}: line 2 respelled");
             let again = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["x"] });
             assert_eq!(message::parse(&again).as_ref(), Some(&e), "case {i}");
             edits += 1;
