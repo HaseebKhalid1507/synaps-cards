@@ -42,14 +42,21 @@ pub const NAMES: [&str; 2] = ["cards_ui", "cards:ui"];
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// An assistant `tool_use` block, of any tool: the fold must see every
-    /// call, because a call takes its tool id over. Only a card call's
-    /// `input` is read; [`events`] gives other tools' as `Null`.
+    /// call, because a call takes its tool id over. Only a card call's and
+    /// a block call's `input` is read ([`crate::board`]); [`events`] gives
+    /// other tools' as `Null`.
     Call { tool_id: String, name: String, input: Value },
     /// A `tool_result` block's text.
     Result { tool_id: String, text: String },
     /// A genuine outer user message's text, in the history ([`events`]
     /// says which messages are).
     User { text: String },
+    /// The message after an assistant message has given every result it
+    /// holds (blocks.md §1.7): its calls get no more. [`events`] puts one
+    /// after that message's results, before anything else it holds. The
+    /// card fold reads nothing in it; the board commits the assistant
+    /// message's block calls here.
+    ResultsEnd,
 }
 
 /// A card's state (§2.3). A card no longer in the history has none: it is
@@ -164,6 +171,29 @@ pub fn fold<'a>(events: impl IntoIterator<Item = &'a Event>) -> Fold {
 }
 
 impl Fold {
+    /// What the fold retains, in bytes: an estimate, inline sizes plus the
+    /// strings it owns, a card's doc counted as its JSON. It grows with the
+    /// history's cards (the board reports it apart from its working set:
+    /// `Board::card_fold_bytes`).
+    pub fn retained_estimate(&self) -> usize {
+        use std::mem::size_of;
+        let card = |c: &Card| {
+            c.tool_id.capacity()
+                + c.doc.as_ref().map_or(0, |d| serde_json::to_vec(d).map_or(0, |v| v.len()))
+                + c.answers.capacity() * size_of::<Answered>()
+                + c.answers.iter().map(|a| a.text.capacity()).sum::<usize>()
+        };
+        let entry = |key: usize, value: usize| key + value + size_of::<u64>();
+        size_of::<Fold>()
+            + self.cards.capacity() * size_of::<Card>()
+            + self.cards.iter().map(card).sum::<usize>()
+            + self.closes.capacity() * size_of::<Close>()
+            + self.closes.iter().map(|c| c.tool_id.capacity()).sum::<usize>()
+            + self.calls.capacity() * entry(size_of::<String>(), size_of::<Slot>())
+            + self.calls.keys().map(String::capacity).sum::<usize>()
+            + self.bound.capacity() * entry(size_of::<CardId>(), size_of::<usize>())
+    }
+
     /// Read one more event.
     pub fn apply(&mut self, event: &Event) {
         let at = self.at;
@@ -172,6 +202,7 @@ impl Fold {
             Event::Call { tool_id, name, input } => self.call(tool_id, name, input, at),
             Event::Result { tool_id, text } => self.result(tool_id, text),
             Event::User { text } => self.user(text, at),
+            Event::ResultsEnd => {}
         }
     }
 
@@ -301,10 +332,19 @@ impl Fold {
 
 /// The fold's events in a session's history as the daemon sends it
 /// (`api_messages`, Full; §2.1): every call in an assistant message (another
-/// tool's with a `Null` input), the results of card calls, and each user
-/// message whose content, once the host's extension blocks are removed, is
-/// one string. A result belongs to its tool id's latest call, as in the
-/// fold: one after another tool's call took the id over is left out.
+/// tool's with a `Null` input), the results of card calls and of block calls
+/// (`cards_block`, blocks.md §1.7), and each user message whose content,
+/// once the host's extension blocks are removed, is one string. A result
+/// belongs to its tool id's latest call, as in the fold: one after another
+/// tool's call took the id over is left out. The card fold reads a block
+/// call as any other tool's call; the board ([`crate::board`]) reads both.
+///
+/// The message after an assistant message ends its results with
+/// [`Event::ResultsEnd`]: a user message after its results, before its
+/// text; another assistant message (it has none) before its calls. So the
+/// board knows where an assistant message's results end even when the
+/// message gives no other event: another tool's results only, or a result
+/// with no text.
 ///
 /// That removal is the host's own ([`user_content`]). A message's other
 /// shapes are never the user's text: a `tool_result` container, a block
@@ -314,18 +354,25 @@ impl Fold {
 /// fold reads it as ordinary text.
 pub fn events(messages: &[Value]) -> Vec<Event> {
     let mut out = Vec::new();
-    // Each tool id's latest call is a card call.
+    // Each tool id's latest call is a card call or a block call.
     let mut calls: HashMap<&str, bool> = HashMap::new();
+    // The last message was an assistant's: this one ends its results.
+    let mut after_assistant = false;
     for m in messages {
         let blocks = m["content"].as_array().map(Vec::as_slice).unwrap_or_default();
-        match m["role"].as_str() {
+        let role = m["role"].as_str();
+        let ends = std::mem::replace(&mut after_assistant, role == Some("assistant"));
+        match role {
             Some("assistant") => {
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
                 for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
                     let Some(id) = b["id"].as_str() else { continue };
                     let name = b["name"].as_str().unwrap_or_default();
-                    let card = NAMES.contains(&name);
-                    calls.insert(id, card);
-                    let input = if card { b["input"].clone() } else { Value::Null };
+                    let kept = NAMES.contains(&name) || crate::block::NAMES.contains(&name);
+                    calls.insert(id, kept);
+                    let input = if kept { b["input"].clone() } else { Value::Null };
                     out.push(Event::Call { tool_id: id.into(), name: name.into(), input });
                 }
             }
@@ -337,11 +384,18 @@ pub fn events(messages: &[Value]) -> Vec<Event> {
                         out.push(Event::Result { tool_id: id.into(), text });
                     }
                 }
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
                 if let Value::String(text) = &*user_content(m) {
                     out.push(Event::User { text: text.clone() });
                 }
             }
-            _ => {}
+            _ => {
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
+            }
         }
     }
     out

@@ -67,7 +67,7 @@ impl Path {
         segs.next().is_none().then(|| Path(s.to_string()))
     }
 
-    fn of(list: &str, item: &str, field: &str) -> Self {
+    pub(crate) fn of(list: &str, item: &str, field: &str) -> Self {
         Path(format!("{list}.{item}.{field}"))
     }
 
@@ -86,12 +86,17 @@ impl Path {
     }
 
     /// `list.item`, for a path inside an item.
-    fn item_path(&self) -> Option<String> {
+    pub(crate) fn item_path(&self) -> Option<String> {
         Some(format!("{}.{}", self.head(), self.item()?))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Its heap bytes: the board's owned-byte count (§1.8).
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
     }
 }
 

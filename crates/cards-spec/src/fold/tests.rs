@@ -317,7 +317,8 @@ fn a_later_call_takes_its_tool_id_over() {
         tool_result("t1", json!(showing(A_ID, &ask()))),
     ];
     let got = events(&history);
-    assert_eq!(got, card[..2]);
+    // Each message after an assistant's ends its results (the board's).
+    assert_eq!(got, [card[0].clone(), Event::ResultsEnd, card[1].clone(), Event::ResultsEnd]);
     assert_eq!(of(&got).cards(), of(&card).cards());
 }
 
@@ -429,7 +430,16 @@ fn a_history_reads_every_call_and_card_results_only() {
         said(json!(answer(A_ID, "Refactor the parser"))),
     ];
     let got = events(&history);
-    assert_eq!(got, [bash("t0"), call("t1", ask()), result("t1", &showing(A_ID, &ask())), user(&answer(A_ID, "Refactor the parser")),]);
+    assert_eq!(
+        got,
+        [
+            bash("t0"),
+            call("t1", ask()),
+            result("t1", &showing(A_ID, &ask())),
+            Event::ResultsEnd,
+            user(&answer(A_ID, "Refactor the parser"))
+        ]
+    );
     assert_eq!(fold(&got).card("t1").unwrap().state, State::Answered);
 }
 
