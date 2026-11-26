@@ -166,6 +166,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
     - It **resolves once**, when the op applies, to a place in a list. It is never a standing link: the placed block doesn't follow when the other one moves later, so links can't form a cycle.
     - `after` naming the op's own id is refused by the extension. Anything else that doesn't resolve sends a `put` to "here", marked, and makes a `move` skip, marked.
   - **`move` with neither `target`, `slot` nor `at`** means "here": re-anchored at this call. This is the mocks' "the plan moves down beside the summary".
+  - **`move` with `at` alone** (no `target`, no `slot`) joins the `after` block's list, wherever that is: the same anchor's list in the transcript, or the same rail slot (decision D5, settled at B2). It is the one op that changes a block's target without naming one, because `after` names a concrete list. A card still never goes to the rail (§1.5): a `move` of `card:<id>` whose `after` is in the rail is skipped, marked.
 
 ### 1.3 Ops
 

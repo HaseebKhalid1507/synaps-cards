@@ -1593,3 +1593,31 @@ fn of_two_paths_that_pass_a_cap_together_the_later_is_skipped() {
     let Body::Plan(p) = &s.block(&r("plan")).unwrap().body else { panic!() };
     assert_eq!((p.steps[10].label.chars().count(), p.steps[11].label.chars().count()), (100, 10));
 }
+
+/// Decision D5 (§1.2, amended): a `move` with `at` alone joins the `after`
+/// block's list, either way between the transcript and a rail slot; a card
+/// never goes to the rail by it.
+#[test]
+fn a_move_by_at_alone_joins_the_after_blocks_list() {
+    let mut h = H::default();
+    let a0 = h.ops(json!([note("t", "x"), {"op":"put","id":"r","kind":"note","slot":"end","body":{"text":"r"}}]));
+    h.ops(json!([{"op":"move","id":"t","at":{"after":"r"}}]));
+    let s = h.state();
+    assert_eq!(
+        (ids(&s, Place::Rail(Slot::End)), s.block(&r("t")).unwrap().place),
+        (vec!["r".to_string(), "t".to_string()], Place::Rail(Slot::End))
+    );
+    h.ops(json!([note("u", "y")]));
+    let u = h.state().block(&r("u")).unwrap().place;
+    h.ops(json!([{"op":"move","id":"r","at":{"after":"u"}}]));
+    let s = h.state();
+    assert_eq!((ids(&s, u), ids(&s, Place::Rail(Slot::End))), (vec!["u".to_string(), "r".to_string()], vec!["t".to_string()]));
+    assert!(ids(&s, Place::Transcript(a0)).is_empty());
+    h.ask();
+    h.answer();
+    h.ops(json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"900 ms"}}]));
+    h.ops(json!([{"op":"move","id":"card:c4f9x2a","at":{"after":"t"}}]));
+    let s = h.state();
+    assert_eq!(last(&s, "card:c4f9x2a"), Outcome::Skipped(Why::Rail));
+    assert!(matches!(s.block(&r("card:c4f9x2a")).unwrap().place, Place::Transcript(_)));
+}

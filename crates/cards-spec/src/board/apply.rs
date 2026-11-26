@@ -475,7 +475,7 @@ impl State {
             (Some(Target::Rail), None) => Some(Place::Rail(Slot::Upper)),
             (Some(Target::Transcript), None) => Some(Place::Transcript(cx.call)),
             (None, None) if m.at.is_none() => Some(Place::Transcript(cx.call)),
-            // Decision (pending Haseeb), D5: `at` alone places in its block's list.
+            // Decision D5 (§1.2): `at` alone joins the `after` block's list.
             (None, None) => None,
         };
         let after = match &m.at {
