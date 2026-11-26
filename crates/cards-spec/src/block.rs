@@ -24,8 +24,9 @@
 //! empty optional string is absent, strings are sanitized, numbers are
 //! canonical ([`Num`]). serde_json's `preserve_order` never touches it: no
 //! `Map` is written, so the bytes are the same in both builds. The digest
-//! hashes that form, and normalizing is a fixed point (a normalized batch
-//! parses back to itself).
+//! hashes that form, and normalizing is a fixed point: a normalized batch
+//! parses back to itself, once its bytes fit [`CALL_MAX_BYTES`] (defaults
+//! can grow a call past the raw cap, which bounds only what is sent).
 //!
 //! **Readings.** Where `docs/blocks.md` leaves a choice open, this module
 //! takes one, and says so where it does (`Reading:` in the docs below):

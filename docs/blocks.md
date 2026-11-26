@@ -192,6 +192,8 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
 
 "Marked" means: a line in the op log, with its reason (§3.8), and a dim `skipped` chip on the block, if the block is live.
 
+`why` (on `replace` and `remove`) and a run's `summary` are one line of ≤ 80 characters, as a title is.
+
 **Groups (`merge`), one level deep:**
 - A group is a block of kind `group`, whose body is its members' ids. **A group can't be a member**, so groups never nest and can never cycle.
 - **`into`** names one of three things:
@@ -608,7 +610,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
   - After that comes a summary of pieces joined by ` · `. Each piece is cut at 40 characters, and the line is at most 200 characters, sanitized (design §3.3's rules).
   - There is one verb. A restore is an edit whose summary says `back to rN` (§3.6).
   - `rN` is the **base**: the revision of incarnation `of` that the user edited from. It tells the agent what the user saw.
-- **Line 2, for machines.** It is a patch in the agent's own vocabulary (§1.4), with `of` first: the incarnation's tag (§1.2). Then come the user's parts, `set`, `append` and `order`, in schema key order, with no `op` or `id`, since line 1 names the block. It is ≤ 8 KiB. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
+- **Line 2, for machines.** It is a patch in the agent's own vocabulary (§1.4), with `of` first: the incarnation's tag (§1.2). Then come the user's parts, `append`, `order` and `set`, in byte order of their keys, as all four examples write them, with no `op` or `id`, since line 1 names the block. That is only how line 2 is written: the parts still apply in §1.4's phases (`append`, `set`, `order`). It is ≤ 8 KiB. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
 - **Then 0 to 2 notice lines** (§3.5).
 - **Admission** (the fold, at the message's place in history). The message is read as an edit only if all of these hold:
   - all of the genuine user message is the grammar: lines 1 and 2, then optional notices (design §2.3);
@@ -1047,7 +1049,7 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 
 | Bound | Limit |
 |---|---|
-| A call | 1–16 ops, ≤ 8 KiB compact, depth ≤ 6 |
+| A call | 1–16 ops, ≤ 8 KiB compact, depth ≤ 6 per op, scalars counted (≤ 8 with `{"ops":[…]}`): §1.5's proposed diff has its lines 6 deep in its op |
 | A block's body | the kind's cap (§1.5), ≤ 6 KiB |
 | Blocks | ≤ 32 live per conversation, groups and members included |
 | Groups | one level, 2–8 members |
