@@ -34,10 +34,46 @@
 //! will hold it (an assistant message's calls, then the next message's
 //! results, then its text), as [`crate::fold::events`] gives them.
 //!
-//! **Readings.** Where the design leaves a mechanical choice, this module
-//! takes one and says so (`Reading:` on the item). The choices that are the
-//! design's to make are marked `Decision (pending Haseeb)`, each in one
-//! function, so a different answer is a local change.
+//! **Decisions (pending Haseeb).** Where the design leaves a contract or
+//! something the user sees open, this module takes a default, marked
+//! `Decision (pending Haseeb), Dn` in the one function that makes it, so a
+//! different answer is a local change:
+//! - D1: on a resolved card no `replace` converted, only `replace` acts
+//!   (`patch`, `collapse`, `move` and `remove` skip: `no block yet`);
+//! - D2: a `replace` without a title keeps the block's;
+//! - D3: a list's and a body's caps are checked per path: the path that
+//!   would pass one is skipped, and the patch's other paths apply;
+//! - D4: a user's skip of a skipped step, or unskip of a todo one, is
+//!   `unchanged`, not a conflict;
+//! - D5: a `move` with only `at` lands in its block's list, whatever the
+//!   target (a card's into the rail is skipped);
+//! - D6: what overwrites the user's edit (`changed your edit`): the agent's
+//!   `set` of the path, `order` of the list, or `remove` of the item;
+//! - D7: the fold holds a patch to the kinds' maxima only, so a patch may
+//!   remove a plan's last step (1–20 steps is the extension's, on a body);
+//! - D8: §1.8's bytes per entry are payload figures ([`State::owned_bytes`]).
+//!
+//! **Readings** (mechanical, `Reading:` where they're made):
+//! - the open batch closes at a user message, or at a call after a result
+//!   (the next assistant message); the events carry no message boundary;
+//! - a card closed in the same batch is resolved at the commit (the card
+//!   fold has read the batch's results); one asked in it is still open;
+//! - a call that doesn't bind logs one line, `unbound`, for all its ops;
+//! - an agent append's live ids are no-ops (idempotent), and a spent id or
+//!   the 65th id skips the list's whole path;
+//! - a new group sits at its first member that qualifies;
+//! - a group's membership is its body, so a join or a leave is a revision
+//!   of it;
+//! - a `remove` of an absent id logs `no change`; a `collapse` to the state
+//!   it has logs `no change` but still marks the agent's latest fold;
+//! - an edit of an id with no live block is `the block is gone`; of another
+//!   incarnation, or from beyond the latest revision, `rewritten`;
+//! - the highest version seen counts every notice read, stale ones and ids
+//!   named twice included;
+//! - only the user's last writes are kept: a path the agent wrote last has
+//!   no entry;
+//! - no past body is materialized: a past revision is a [`Refold`] to its
+//!   reference (§1.8's re-fold scratch, the desk's).
 
 use std::collections::{BTreeMap, VecDeque};
 

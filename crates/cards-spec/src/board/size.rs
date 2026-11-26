@@ -4,6 +4,13 @@
 //! heap, a `Vec` and a `VecDeque` by capacity, a `BTreeMap` entry at twice
 //! its key and value plus a node's share ([`BTREE_ENTRY`]). The card fold
 //! keeps its own bounds and isn't counted (§1.8).
+//!
+//! Decision (pending Haseeb), D8: §1.8's bytes per entry (6.25 KiB a live
+//! block, 96 B a tombstone, 40 B a visibility record, 16 B a last writer)
+//! are its payload figures. In owned bytes a maximal plan with its item and
+//! writer tables is ~10 KiB. The caps hold as counts per owner, as owned
+//! bytes for a revision record and a log line (≤ [`RECORD_MAX_BYTES`]), and
+//! as owned bytes for the working set (≤ [`WORKING_SET_MAX_BYTES`]).
 
 use std::mem::size_of;
 

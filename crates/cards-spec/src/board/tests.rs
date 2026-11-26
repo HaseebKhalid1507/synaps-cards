@@ -786,6 +786,28 @@ fn a_card_asked_in_the_same_batch_is_still_open_at_the_commit() {
 }
 
 #[test]
+fn a_card_closed_in_the_same_batch_is_resolved_at_the_commit() {
+    let mut h = H::default();
+    h.ask();
+    h.user("thinking");
+    // One assistant message: close the card, and turn it into its outcome.
+    let ops = json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"Went with 900 ms"}}]);
+    let b = h.call(ops.clone());
+    let k = h.tool();
+    h.events.push(Event::Call { tool_id: k.clone(), name: "cards_ui".into(), input: json!({"close": "c4f9x2a"}) });
+    h.bind(&b, &ops);
+    // Pending on the close's result: the card is still open, so the
+    // overlay skips the replace, as the commit would without it.
+    assert_eq!(last(&h.board().view(), "card:c4f9x2a"), Outcome::Skipped(Why::CardOpen));
+    h.result(&k, "Card c4f9x2a closed (cards/1).");
+    let s = h.state();
+    assert_eq!(last(&s, "card:c4f9x2a"), Outcome::Applied);
+    assert_eq!(h.board().cards().bound(&card_id()).unwrap().state, crate::fold::State::Closed);
+    h.user("ok");
+    assert_eq!(h.state().block(&r("card:c4f9x2a")).unwrap().kind, Kind::Note);
+}
+
+#[test]
 fn an_edit_of_an_unconverted_card_applies_nothing() {
     let mut h = H::default();
     h.ask();
