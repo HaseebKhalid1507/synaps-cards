@@ -2161,12 +2161,15 @@ fn a_refold_ends_the_targets_batch_where_the_fold_does() {
 
 /// §1.8 (R3-P3-2): a replay's exact work for block calls and then their
 /// results. A pass is full at [`REPLAY_IDS`] tool ids; while no block call
-/// comes after its last one, it is the only pass, and reads the batch once
-/// and applies it once: two visits an event, the full pass's included. One
-/// call more takes a second pass, which reads the rest of the batch again.
+/// comes after its last one (another tool's may), it is the only pass, and
+/// reads the batch once and applies it once: two visits an event, the full
+/// pass's included. One call more takes a second pass, which reads the rest
+/// of the batch again, and so do twice as many, the second pass the last.
 #[test]
 fn a_batch_of_calls_and_their_results_replays_at_its_exact_cost() {
-    for (n, passes) in [(REPLAY_IDS - 1, 1), (REPLAY_IDS, 1), (REPLAY_IDS + 1, 2)] {
+    for (n, others, passes) in
+        [(REPLAY_IDS - 1, 0, 1), (REPLAY_IDS, 0, 1), (REPLAY_IDS, 8, 1), (REPLAY_IDS + 1, 0, 2), (2 * REPLAY_IDS, 0, 2)]
+    {
         let mut h = H::default();
         h.ops(json!([note("n", "0")]));
         h.events.push(Event::ResultsEnd);
@@ -2177,6 +2180,7 @@ fn a_batch_of_calls_and_their_results_replays_at_its_exact_cost() {
                 (h.call(ops.clone()), ops)
             })
             .collect();
+        h.events.extend((0..others).map(|i| Event::Call { tool_id: format!("b{i}"), name: "bash".into(), input: Value::Null }));
         for (t, ops) in &calls {
             h.bind(t, ops);
         }
@@ -2192,7 +2196,7 @@ fn a_batch_of_calls_and_their_results_replays_at_its_exact_cost() {
         let mut budget = usize::MAX;
         let mut replay = replay::Replay::new(open, end, replay::Mode::Commit, None);
         assert_eq!(replay.run(&Fold::default(), &mut state, &h.events, &mut budget), Some(false));
-        assert_eq!(usize::MAX - budget, work, "{n} calls and their results");
+        assert_eq!(usize::MAX - budget, work, "{n} calls, {others} others and their results");
         assert_eq!(note_text(&state, "n"), n.to_string());
         assert_eq!(state.block(&r("n")).unwrap().rev as usize, n + 1);
         // The board's commit replays the same batch to the same board.
