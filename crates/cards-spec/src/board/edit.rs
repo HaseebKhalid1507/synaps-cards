@@ -109,7 +109,7 @@ impl State {
                 Key::Item(p) | Key::Set(p) | Key::Order(p) => p.clone(),
             };
             changed.push(key.to_string());
-            b.writers.insert(p, Writer { author: Author::User, at, key: u16::try_from(k).unwrap_or(u16::MAX) });
+            b.writers.insert(p, Writer { at, key: u16::try_from(k).unwrap_or(u16::MAX) });
         }
         let outcome = if changed.is_empty() {
             Outcome::NoChange
@@ -125,10 +125,7 @@ impl State {
     }
 
     fn keep_outcome(&mut self, o: EditOutcome) {
-        self.outcomes.push_back(o);
-        while self.outcomes.len() > OUTCOMES_MAX {
-            self.outcomes.pop_front();
-        }
+        push_capped(&mut self.outcomes, o, OUTCOMES_MAX);
     }
 
     /// A message's notices (§3.5), after its edit.
@@ -179,7 +176,7 @@ impl State {
 /// A user's added step (§3.4): its id unused in the incarnation, the list
 /// within 20.
 fn add_step(b: &mut Block, s: &Step) -> Code {
-    if b.items.contains_key(&s.id) {
+    if b.items.contains(&s.id) {
         return Code::Collided;
     }
     let Body::Plan(plan) = &b.body else { return Code::NotThere };

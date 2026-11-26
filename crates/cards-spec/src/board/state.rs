@@ -49,10 +49,10 @@ pub struct Block {
     /// The `replace` that started it, if one did: `r1 · replaced`, its
     /// `why` read at the reference.
     pub replaced: Option<Pos>,
-    /// Every item id it named, live (`None`) or removed at a revision.
-    pub(crate) items: BTreeMap<ItemId, Option<u32>>,
-    /// Each field's last writer (§1.8).
-    pub(crate) writers: BTreeMap<Path, Writer>,
+    /// Every item id it named, live or removed at a revision (§1.4).
+    pub(crate) items: Items,
+    /// The paths the user wrote last (§1.8's last writers).
+    pub(crate) writers: Writers,
     /// The agent overwrote a path the user wrote last (§3.4 step 6): the
     /// header says `changed your edit` until the user focuses it.
     pub changed_your_edit: Option<Path>,
@@ -66,12 +66,12 @@ pub struct Block {
 impl Block {
     /// Whether `id` names one of its items now.
     pub fn has_item(&self, id: &ItemId) -> bool {
-        self.items.get(id) == Some(&None)
+        self.items.get(id) == Some(None)
     }
 
     /// The revision `id` was removed at, if it was.
     pub fn removed_at(&self, id: &ItemId) -> Option<u32> {
-        self.items.get(id).copied().flatten()
+        self.items.get(id).flatten()
     }
 
     /// Item ids named over its life, live and removed (≤ [`block::ITEM_IDS_MAX`]).
@@ -79,9 +79,12 @@ impl Block {
         self.items.len()
     }
 
-    /// The last writer of `path` (a field, `list.item.field`, or a list's
-    /// order as the list's name).
-    pub fn writer(&self, path: &Path) -> Option<&Writer> {
+    /// The user's write of `path`, if the user wrote it last: the hand-back
+    /// and its key. A path is a field, `list.item.field`, an added item
+    /// (`steps.u-k3x7qa`), or a list's order as the list's name (`steps`).
+    /// Reading: the agent's writes aren't kept, as no rule needs them; a
+    /// path the agent wrote last has no entry.
+    pub fn user_wrote(&self, path: &Path) -> Option<Writer> {
         self.writers.get(path)
     }
 
@@ -94,13 +97,80 @@ impl Block {
     }
 }
 
-/// Who last wrote a field, where, and for the user's, which of the edit's
-/// keys ([`keys`]).
+/// A user's write: the hand-back, and which of its keys ([`keys`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Writer {
-    pub author: Author,
     pub at: Pos,
     pub key: u16,
+}
+
+/// An incarnation's item ids (§1.4), sorted: live (`None`), or removed at
+/// a revision. At most [`block::ITEM_IDS_MAX`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Items(pub(crate) Vec<(ItemId, Option<u32>)>);
+
+impl Items {
+    pub(crate) fn get(&self, id: &ItemId) -> Option<Option<u32>> {
+        self.0.binary_search_by(|(i, _)| i.cmp(id)).ok().map(|k| self.0[k].1)
+    }
+
+    pub(crate) fn contains(&self, id: &ItemId) -> bool {
+        self.get(id).is_some()
+    }
+
+    pub(crate) fn insert(&mut self, id: ItemId, v: Option<u32>) {
+        match self.0.binary_search_by(|(i, _)| i.cmp(&id)) {
+            Ok(k) => self.0[k].1 = v,
+            Err(k) => self.0.insert(k, (id, v)),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// The paths the user wrote last, sorted.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Writers(pub(crate) Vec<(Path, Writer)>);
+
+impl Writers {
+    pub(crate) fn get(&self, p: &Path) -> Option<Writer> {
+        self.0.binary_search_by(|(q, _)| q.cmp(p)).ok().map(|k| self.0[k].1)
+    }
+
+    pub(crate) fn insert(&mut self, p: Path, w: Writer) {
+        match self.0.binary_search_by(|(q, _)| q.cmp(&p)) {
+            Ok(k) => self.0[k].1 = w,
+            Err(k) => self.0.insert(k, (p, w)),
+        }
+    }
+
+    pub(crate) fn remove(&mut self, p: &Path) -> Option<Writer> {
+        let k = self.0.binary_search_by(|(q, _)| q.cmp(p)).ok()?;
+        Some(self.0.remove(k).1)
+    }
+
+    /// Takes out every write inside item `item` (`steps.fix`), the item's
+    /// own included.
+    pub(crate) fn remove_item(&mut self, item: &str) -> Vec<(Path, Writer)> {
+        let (gone, kept) =
+            std::mem::take(&mut self.0).into_iter().partition(|(q, _)| q.as_str() == item || q.item_path().as_deref() == Some(item));
+        self.0 = kept;
+        gone
+    }
+}
+
+/// Pushes `v`, dropping the oldest past `cap`, and keeps the deque's
+/// capacity (its owned bytes) at `cap`.
+pub(crate) fn push_capped<T>(dq: &mut VecDeque<T>, v: T, cap: usize) {
+    if dq.len() >= cap {
+        dq.pop_front();
+    }
+    dq.push_back(v);
+    if dq.capacity() > cap {
+        dq.shrink_to(cap);
+    }
 }
 
 /// An ended incarnation (§1.8): its id, tag, last revision, and the op that
@@ -452,10 +522,7 @@ impl State {
             b.skipped = Some(at);
             b.pending |= pending;
         }
-        self.log.push_back(Logged { at, author, did, id, outcome, pending });
-        while self.log.len() > LOG_MAX {
-            self.log.pop_front();
-        }
+        push_capped(&mut self.log, Logged { at, author, did, id, outcome, pending }, LOG_MAX);
     }
 
     pub(crate) fn skip(&mut self, at: Pos, did: Did, id: &Ref, why: Why) {
@@ -478,22 +545,16 @@ impl State {
             shown.push_str(p);
         }
         let changed = u16::try_from(paths.len()).unwrap_or(u16::MAX);
-        self.records.push_back(Record { tag: b.tag, rev: b.rev, at, author, did, changed, paths: shown.into() });
         // The incarnation's oldest past its 64, then the board's oldest past 1,024.
-        if self.records.iter().filter(|r| r.tag == b.tag).count() > RECORDS_PER_BLOCK
+        if self.records.iter().filter(|r| r.tag == b.tag).count() >= RECORDS_PER_BLOCK
             && let Some(i) = self.records.iter().position(|r| r.tag == b.tag)
         {
             self.records.remove(i);
         }
-        while self.records.len() > RECORDS_MAX {
-            self.records.pop_front();
-        }
+        push_capped(&mut self.records, Record { tag: b.tag, rev: b.rev, at, author, did, changed, paths: shown.into() }, RECORDS_MAX);
     }
 
     pub(crate) fn tombstone(&mut self, b: &Block, ended: Pos) {
-        self.tombstones.push_back(Tombstone { id: b.id.clone(), tag: b.tag, rev: b.rev, ended });
-        while self.tombstones.len() > TOMBSTONES_MAX {
-            self.tombstones.pop_front();
-        }
+        push_capped(&mut self.tombstones, Tombstone { id: b.id.clone(), tag: b.tag, rev: b.rev, ended }, TOMBSTONES_MAX);
     }
 }

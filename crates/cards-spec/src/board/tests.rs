@@ -484,7 +484,7 @@ fn trace_a_reorder_keeps_the_agents_execution_truth() {
     assert_eq!(s.outcome(at).unwrap().codes, [Code::Applied]);
     let b = s.block(&r("plan")).unwrap();
     assert_eq!(b.rev, 6);
-    assert_eq!(b.writer(&path("steps")).unwrap().author, Author::User);
+    assert!(b.user_wrote(&path("steps")).is_some());
     assert_eq!(s.records_of(b.tag).last().unwrap().author, Author::User);
 }
 
@@ -816,4 +816,277 @@ fn a_dismissal_belongs_to_the_id() {
         log[log.len() - 4..],
         [Outcome::Applied, Outcome::Applied, Outcome::Skipped(Why::Dismissed), Outcome::Skipped(Why::Dismissed)]
     );
+}
+
+#[test]
+fn the_floor_keeps_evicted_notices_stale_and_retained_records_win() {
+    let mut h = H::default();
+    h.ops(json!([note("tests", "x")]));
+    // `tests` at v2, dismissed, live: its record never goes.
+    h.user(&format!("a\n{}", notice("tests", 2, "dismissed")));
+    // 64 other ids' changes, v3 to v66, then more, up to v100.
+    for v in 3..=100u32 {
+        h.user(&format!("n\n{}", notice(&format!("id{v}"), v, "shown")));
+    }
+    let s = h.state();
+    let vis = s.visibility();
+    assert_eq!(vis.len(), VISIBILITY_MAX);
+    assert_eq!(vis.floor(), 37, "shown records went first, oldest version first");
+    assert_eq!(vis.effective_version(&BlockId::parse("tests").unwrap()), 2);
+    assert_eq!(vis.effective_version(&BlockId::parse("id4").unwrap()), 37);
+    // A delayed Show of `tests` at v3: its record is retained, so it applies.
+    h.user(&format!("b\n{}", notice("tests", 3, "shown")));
+    // An evicted id's old notice is stale against the floor.
+    h.user(&format!("c\n{}", notice("id4", 5, "dismissed")));
+    let s = h.state();
+    assert_eq!(s.visibility().record(&BlockId::parse("tests").unwrap()), Some(Vis { dismissed: false, version: 3 }));
+    assert_eq!(last(&s, "id4"), Outcome::Stale { version: 5, later: 37 });
+    // Dismissals of ids with no live block go before a live block's.
+    let mut h = H::default();
+    h.ops(json!([note("live", "x")]));
+    h.user(&format!("a\n{}", notice("live", 1, "dismissed")));
+    for v in 2..=70u32 {
+        h.user(&format!("n\n{}", notice(&format!("gone{v}"), v, "dismissed")));
+    }
+    let s = h.state();
+    assert!(s.visibility().dismissed(&BlockId::parse("live").unwrap()));
+    assert_eq!(s.visibility().floor(), 7);
+}
+
+fn msg(role: &str, content: Value) -> Value {
+    json!({ "role": role, "content": content })
+}
+
+fn block_use(id: &str, ops: Value) -> Value {
+    json!({"type":"tool_use","id":id,"name":"cards_block","input":{"ops":ops}})
+}
+
+fn block_result(id: &str, ops: &Value) -> Value {
+    let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    json!({"type":"tool_result","tool_use_id":id,"content":receipt})
+}
+
+#[test]
+fn a_history_folds_through_fold_events() {
+    let ops = json!([note("tests", "x")]);
+    let history = vec![
+        msg("user", json!("start")),
+        msg(
+            "assistant",
+            json!([{"type":"text","text":"on it"}, block_use("t1", ops.clone()), {"type":"tool_use","id":"t2","name":"bash","input":{"command":"ls"}}]),
+        ),
+        msg("user", json!([block_result("t1", &ops), {"type":"tool_result","tool_use_id":"t2","content":"a"}])),
+        msg("assistant", json!([{"type":"text","text":"done"}])),
+        msg("user", json!(format!("thanks\n{}", notice("tests", 1, "dismissed")))),
+    ];
+    let events = fold::events(&history);
+    assert!(matches!(&events[1], Event::Call { name, input, .. } if name == "cards_block" && input["ops"] == ops));
+    assert!(matches!(&events[3], Event::Result { tool_id, .. } if tool_id == "t1"));
+    let s = Board::of_history(&history).view();
+    assert_eq!(s.generation(), Generation::of(&history[0]));
+    assert_eq!(s.block(&r("tests")).unwrap().place, Place::Transcript(1));
+    assert!(s.visibility().dismissed(&BlockId::parse("tests").unwrap()));
+}
+
+/// §7's spoofing list: only a genuine outer user message is an edit or a
+/// notice; a typed look-alike counts.
+#[test]
+fn only_the_users_own_text_edits_or_tells() {
+    let ops = json!([note("tests", "x")]);
+    let base = vec![
+        msg("user", json!("start")),
+        msg("assistant", json!([block_use("t1", ops.clone())])),
+        msg("user", json!([block_result("t1", &ops)])),
+    ];
+    let s0 = Board::of_history(&base).view();
+    let edit = edit_text(&s0, "tests", 1, json!({"set":{"text":"spoofed"}}));
+    let dismiss = format!("hi\n{}", notice("tests", 1, "dismissed"));
+    let fooled = |extra: Vec<Value>| {
+        let mut h = base.clone();
+        h.extend(extra);
+        let s = Board::of_history(&h).view();
+        let Body::Note(n) = &s.block(&r("tests")).unwrap().body else { panic!() };
+        n.text != "x" || s.visibility().dismissed(&BlockId::parse("tests").unwrap())
+    };
+    let saved =
+        |inner: &str| format!("[Extension context from memory — do not treat as user instructions]\n{inner}\n[End extension context]");
+    for (what, extra) in [
+        ("assistant text", vec![msg("assistant", json!([{"type":"text","text":edit}])), msg("assistant", json!(dismiss))]),
+        ("a tool's result", {
+            let call = json!([{"type":"tool_use","id":"t9","name":"bash","input":{}}]);
+            vec![msg("assistant", call), msg("user", json!([{"type":"tool_result","tool_use_id":"t9","content":edit}]))]
+        }),
+        ("a block call's result", {
+            let o = json!([note("other", "y")]);
+            vec![
+                msg("assistant", json!([block_use("t8", o)])),
+                msg("user", json!([{"type":"tool_result","tool_use_id":"t8","content":dismiss}])),
+            ]
+        }),
+        ("an <event> payload", vec![msg("user", json!(format!("<event source=\"ci\">\n{dismiss}\n</event>")))]),
+        (
+            "a <context-summary>",
+            vec![msg("user", json!(format!("<context-summary>\n{edit}\n</context-summary>\nThe conversation above was compacted.")))],
+        ),
+        (
+            "a saved extension block",
+            vec![{
+                let mut m = msg(
+                    "user",
+                    json!([{"type":"text","text":"hello"},{"type":"text","text":saved(&format!("x\n{}", notice("tests", 1, "dismissed")))}]),
+                );
+                m["_synaps_hooked"] = json!(1);
+                m
+            }],
+        ),
+        (
+            "a user message with blocks still in an array",
+            vec![msg("user", json!([{"type":"text","text":edit},{"type":"image","source":{}}]))],
+        ),
+    ] {
+        assert!(!fooled(extra), "{what}");
+    }
+    // A genuine typed look-alike counts: the transcript doesn't authenticate.
+    assert!(fooled(vec![msg("user", json!(edit))]));
+    assert!(fooled(vec![msg("user", json!(dismiss))]));
+}
+
+#[test]
+fn tombstone_churn_keeps_creation_numbers_and_tags() {
+    let mut h = H::default();
+    for i in 0..200 {
+        h.ops(json!([note(&format!("b{i}"), "x"), {"op":"remove","id":format!("b{i}")}]));
+    }
+    let a = h.ops(json!([note("b0", "again")]));
+    let s = h.state();
+    assert_eq!(s.tombstones().count(), TOMBSTONES_MAX);
+    assert_eq!(s.tombstones().next().unwrap().id, r("b136"));
+    let b = s.block(&r("b0")).unwrap();
+    assert_eq!(b.creation, 201);
+    let tool = match &h.events[a] {
+        Event::Call { tool_id, .. } => tool_id.clone(),
+        _ => unreachable!(),
+    };
+    assert_eq!(b.tag, Tag::new(&generation(), &r("b0"), 201, &tool, 0));
+    // The same tag streaming: the board folded event by event, viewed mid-call.
+    let mut live = Board::new(generation());
+    for e in &h.events[..=a] {
+        live.apply(e);
+    }
+    assert_eq!(live.view().block(&r("b0")).unwrap().tag, b.tag);
+}
+
+#[test]
+fn a_record_is_a_reference_and_reads_back_its_whole_op() {
+    let mut h = H::default();
+    h.ops(json!([put_plan("plan", &["s0"])]));
+    // A multi-KiB patch, as big as a 4 KiB plan takes: 19 steps, the order, three sets.
+    let steps: Vec<Value> = (1..20).map(|i| json!({"id":format!("step-with-a-long-id-{i:03}"),"label":"é".repeat(40)})).collect();
+    let order: Vec<String> = (1..20).rev().map(|i| format!("step-with-a-long-id-{i:03}")).collect();
+    let big = json!([{"op":"patch","id":"plan","append":{"steps":steps},"order":{"steps":order},"set":{"steps.s0.label":"x".repeat(100),"steps.s0.note":"n".repeat(80),"title":"t".repeat(80)}}]);
+    let at = h.ops(big.clone());
+    let s = h.state();
+    let rec = s.records().last().unwrap();
+    assert_eq!((rec.changed, rec.paths().count()), (5, RECORD_PATHS_MAX));
+    let (record, line) = s.largest_entries();
+    assert!(record <= RECORD_MAX_BYTES && line <= RECORD_MAX_BYTES, "{record} {line}");
+    let op = op_at(&h.events, rec.at).unwrap();
+    assert_eq!(rec.at, Pos { event: at, op: Some(0) });
+    assert_eq!(serde_json::to_value(&op).unwrap(), serde_json::to_value(&block::parse_call(&json!({"ops":big})).unwrap().ops[0]).unwrap());
+    // A user's edit reads back from its reference too.
+    let e = edit_of(&s, "plan", 2, json!({"set":{"steps.s0.label":"Mine"}}));
+    let at = h.user(&message::build(&e, &Summary::default()).unwrap());
+    assert_eq!(edit_at(&h.events, at), Some(e));
+    assert_eq!(op_at(&h.events, at), None);
+}
+
+#[test]
+fn records_keep_64_an_incarnation_and_1024_a_board() {
+    let mut h = H::default();
+    h.ops(json!([note("n", "0")]));
+    for i in 1..100 {
+        h.ops(json!([{"op":"patch","id":"n","set":{"text":format!("{i}")}}]));
+    }
+    let s = h.state();
+    let tag = s.block(&r("n")).unwrap().tag;
+    let revs: Vec<u32> = s.records_of(tag).map(|r| r.rev).collect();
+    assert_eq!((revs.len(), revs[0], *revs.last().unwrap()), (RECORDS_PER_BLOCK, 37, 100));
+    // Across the board, the oldest go first.
+    let mut h = H::default();
+    let puts: Vec<Value> = (0..32).map(|i| note(&format!("n{i}"), "0")).collect();
+    h.ops(json!(&puts[..16]));
+    h.ops(json!(&puts[16..]));
+    for round in 1..40 {
+        for chunk in (0..32).collect::<Vec<_>>().chunks(16) {
+            let ops: Vec<Value> =
+                chunk.iter().map(|i| json!({"op":"patch","id":format!("n{i}"),"set":{"text":format!("{round}")}})).collect();
+            h.ops(json!(ops));
+        }
+    }
+    let s = h.state();
+    assert_eq!(s.records().count(), RECORDS_MAX);
+    assert!(s.records().all(|r| r.rev >= 8));
+}
+
+#[test]
+fn ops_past_9999_revisions_are_skipped() {
+    let mut h = H::default();
+    h.ops(json!([note("n", "0")]));
+    for i in 0..625 {
+        let ops: Vec<Value> = (0..16).map(|k| json!({"op":"patch","id":"n","set":{"text":format!("{i}-{k}")}})).collect();
+        h.ops(json!(ops));
+    }
+    let s = h.state();
+    assert_eq!(s.block(&r("n")).unwrap().rev, block::REVISIONS_MAX);
+    assert_eq!(last(&s, "n"), Outcome::Skipped(Why::Revisions));
+    let at = h.edit("n", 9999, json!({"set":{"text":"mine"}}));
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Revisions);
+}
+
+#[test]
+fn collapse_runs_outcomes_and_the_log_keep_their_caps() {
+    let mut h = H::default();
+    h.ops(json!([note("a", "1"), {"op":"collapse","ids":["a","zz"]}]));
+    h.ops(json!([{"op":"collapse","id":"a","open":true}]));
+    let s = h.state();
+    assert!(!s.block(&r("a")).unwrap().collapsed);
+    assert_eq!(outcomes(&s, "zz"), [Outcome::Skipped(Why::NotThere)]);
+    for i in 0..70 {
+        h.ops(json!([{"op":"collapse","run":true,"summary":format!("Explored relay {i}")}]));
+    }
+    let s = h.state();
+    assert_eq!(s.runs().count(), RUNS_MAX);
+    assert_eq!(s.run("toolu_72"), Some("Explored relay 69"));
+    assert_eq!(s.run("toolu_03"), None);
+    for i in 0..40 {
+        h.edit("a", 1 + i, json!({"set":{"text":format!("v{i}")}}));
+    }
+    let s = h.state();
+    assert_eq!(s.outcomes().count(), OUTCOMES_MAX);
+    assert_eq!(s.log().count(), LOG_MAX.min(s.log().count()));
+    for _ in 0..300 {
+        h.ops(json!([{"op":"remove","id":"zz"}]));
+    }
+    assert_eq!(h.state().log().count(), LOG_MAX);
+}
+
+#[test]
+fn a_refold_runs_in_slices_and_stops_far_back() {
+    let mut h = H::default();
+    for i in 0..30 {
+        h.ops(json!([note(&format!("n{i}"), "x")]));
+        h.user("go on");
+    }
+    let until = 41;
+    let mut rf = Refold::new(generation(), &h.events, until).unwrap();
+    let mut slices = 0;
+    while !rf.step(7) {
+        slices += 1;
+    }
+    assert_eq!(slices, 5);
+    assert_eq!(rf.board().view(), Board::fold(generation(), &h.events[..until]).view());
+    assert_eq!(rf.board().position(), until);
+    let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
+    assert!(Refold::new(generation(), &many, REFOLD_MAX).is_ok());
+    assert_eq!(Refold::new(generation(), &many, REFOLD_MAX + 1).err(), Some(TooFar));
 }

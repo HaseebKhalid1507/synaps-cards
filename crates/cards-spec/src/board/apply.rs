@@ -1,8 +1,6 @@
 //! The agent's ops on the board (§1.3, §1.4): one at a time, in call order,
 //! each applied on its own or skipped and marked.
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::block::{
     Appended, Collapse, DiffState, FileState, GROUP_MAX, GROUP_MIN, GroupBody, HunkState, ITEM_IDS_MAX, LIVE_MAX, Merge, MetricState, Move,
@@ -99,7 +97,7 @@ impl State {
             rev: 1,
             replaced: None,
             items,
-            writers: BTreeMap::new(),
+            writers: Writers::default(),
             changed_your_edit: None,
             skipped: None,
             pending: self.pending,
@@ -246,7 +244,7 @@ impl State {
             note(p, true, r);
         }
         for (p, _) in changed.iter().filter(|(_, writes)| *writes) {
-            self.agent_wrote(&mut b, p, at);
+            self.agent_wrote(&mut b, p);
         }
         b.pending |= self.pending;
         let outcome = if !changed.is_empty() {
@@ -266,28 +264,17 @@ impl State {
         }
     }
 
-    /// The agent wrote `p` on `b`: its last writer now. Over a path the user
-    /// wrote last, that edit's key is overwritten, and the header says so
-    /// (§3.4 step 6). Decision (pending Haseeb), D6: a `set` of the path, an
-    /// `order` of the list, or a `remove` of the item overwrites.
-    fn agent_wrote(&mut self, b: &mut Block, p: &Path, at: Pos) {
-        let mut users: Vec<(Path, Writer)> = Vec::new();
-        if p.item().is_some() && p.field().is_none() {
-            // A removed item: every field of it.
-            let item = p.as_str();
-            let gone: Vec<Path> =
-                b.writers.keys().filter(|w| w.item_path().as_deref() == Some(item) || w.as_str() == item).cloned().collect();
-            for w in gone {
-                let writer = b.writers.remove(&w).expect("listed");
-                if writer.author == Author::User {
-                    users.push((w, writer));
-                }
-            }
-        } else if let Some(old) = b.writers.insert(p.clone(), Writer { author: Author::Agent, at, key: 0 })
-            && old.author == Author::User
-        {
-            users.push((p.clone(), old));
-        }
+    /// The agent wrote `p` on `b`: it is the last writer now. Over a path the
+    /// user wrote last, that edit's key is overwritten, and the header says
+    /// so (§3.4 step 6). Decision (pending Haseeb), D6: a `set` of the path,
+    /// an `order` of the list, or a `remove` of the item overwrites.
+    fn agent_wrote(&mut self, b: &mut Block, p: &Path) {
+        let users: Vec<(Path, Writer)> = if p.item().is_some() && p.field().is_none() {
+            // A removed item: every write inside it.
+            b.writers.remove_item(p.as_str())
+        } else {
+            b.writers.remove(p).map(|w| (p.clone(), w)).into_iter().collect()
+        };
         for (path, w) in users {
             b.changed_your_edit = Some(path);
             if let Some(o) = self.outcomes.iter_mut().find(|o| o.at == w.at)
@@ -309,12 +296,7 @@ impl State {
                     r.summary = summary;
                     r.at = at;
                 }
-                None => {
-                    self.runs.push_back(Run { tool_id: cx.tool_id.into(), summary, at });
-                    while self.runs.len() > RUNS_MAX {
-                        self.runs.pop_front();
-                    }
-                }
+                None => push_capped(&mut self.runs, Run { tool_id: cx.tool_id.into(), summary, at }, RUNS_MAX),
             }
             self.logged(at, Author::Agent, Did::Run, None, Outcome::Applied);
             return;
@@ -609,12 +591,17 @@ fn same_list_kind(a: Place, b: Place) -> bool {
 }
 
 /// A body's items, all live.
-fn items_of(body: &Body) -> BTreeMap<ItemId, Option<u32>> {
-    match body {
-        Body::Plan(p) => p.steps.iter().map(|s| (s.id.clone(), None)).collect(),
-        Body::Diff(d) => d.hunks.iter().map(|h| (h.id.clone(), None)).collect(),
-        _ => BTreeMap::new(),
+fn items_of(body: &Body) -> Items {
+    let mut items = Items::default();
+    let ids: Vec<&ItemId> = match body {
+        Body::Plan(p) => p.steps.iter().map(|s| &s.id).collect(),
+        Body::Diff(d) => d.hunks.iter().map(|h| &h.id).collect(),
+        _ => Vec::new(),
+    };
+    for id in ids {
+        items.insert(id.clone(), None);
     }
+    items
 }
 
 /// Whether the agent's `set` of `p` to `v` fits a block of `kind`: its spec
@@ -676,8 +663,8 @@ fn word<T>(v: &SetValue, parse: fn(&str) -> Option<T>) -> Result<T, PathWhy> {
 }
 
 /// An item that isn't live: removed at a revision, or never there.
-fn missing(items: &BTreeMap<ItemId, Option<u32>>, id: &str) -> PathWhy {
-    match ItemId::parse(id).and_then(|i| items.get(&i).copied().flatten()) {
+fn missing(items: &Items, id: &str) -> PathWhy {
+    match ItemId::parse(id).and_then(|i| items.get(&i).flatten()) {
         Some(r) => PathWhy::Removed(r),
         None => PathWhy::NotThere,
     }
@@ -740,12 +727,12 @@ pub(crate) fn set_field(b: &mut Block, p: &Path, v: &SetValue) -> Result<bool, P
 /// The new items of an append: one already live is a no-op (appending is
 /// idempotent by id, §1.6); a spent id or the 64th id skips the path.
 /// Reading: the whole path, as §1.4 makes each path all or nothing.
-fn fresh<'a, T>(items: &BTreeMap<ItemId, Option<u32>>, new: &'a [T], id: impl Fn(&T) -> &ItemId) -> Result<Vec<&'a T>, PathWhy> {
+fn fresh<'a, T>(items: &Items, new: &'a [T], id: impl Fn(&T) -> &ItemId) -> Result<Vec<&'a T>, PathWhy> {
     let mut out = Vec::new();
     for t in new {
         match items.get(id(t)) {
             Some(None) => {}
-            Some(Some(rev)) => return Err(PathWhy::Removed(*rev)),
+            Some(Some(rev)) => return Err(PathWhy::Removed(rev)),
             None => out.push(t),
         }
     }

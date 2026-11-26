@@ -121,6 +121,18 @@ impl Owned for Body {
     }
 }
 
+impl Owned for Items {
+    fn heap(&self) -> usize {
+        self.0.capacity() * size_of::<(ItemId, Option<u32>)>() + self.0.iter().map(|(i, _)| i.heap()).sum::<usize>()
+    }
+}
+
+impl Owned for Writers {
+    fn heap(&self) -> usize {
+        self.0.capacity() * size_of::<(Path, Writer)>() + self.0.iter().map(|(p, _)| p.heap()).sum::<usize>()
+    }
+}
+
 impl Owned for Block {
     fn heap(&self) -> usize {
         self.id.heap()
