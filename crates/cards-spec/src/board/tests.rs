@@ -1387,3 +1387,45 @@ fn an_append_that_leaves_a_series_as_it_was_is_no_change() {
     let s = h.state();
     assert_eq!((s.block(&r("flat")).unwrap().rev, last(&s, "flat")), (3, Outcome::Applied), "a changed series is a revision, each time");
 }
+
+/// §1.4's revision cap on a group (P2-5): a member's leaving revises its
+/// group (its membership is its body), so at 9,999 revisions a member can't
+/// move out or be removed while two or more would stay. A group of two ends
+/// instead, which takes no revision.
+#[test]
+fn a_group_at_its_revision_cap_keeps_its_members_unless_it_ends() {
+    let group = |h: &mut H, g: &str, ids: &[&str]| {
+        let mut ops: Vec<Value> = ids.iter().map(|i| note(i, "x")).collect();
+        ops.push(json!({"op":"merge","into":g,"ids":ids}));
+        h.ops(json!(ops));
+        for i in 0..625 {
+            let titles: Vec<Value> = (0..16).map(|k| json!({"op":"patch","id":g,"set":{"title":format!("{i}-{k}")}})).collect();
+            h.ops(json!(titles));
+        }
+    };
+    let mut h = H::default();
+    group(&mut h, "g", &["a", "b", "c"]);
+    let s = h.state();
+    assert_eq!(s.block(&r("g")).unwrap().rev, block::REVISIONS_MAX);
+    h.ops(json!([{"op":"move","id":"a","target":"rail"}, {"op":"remove","id":"b"}]));
+    let s = h.state();
+    let g = s.block(&r("g")).unwrap();
+    assert_eq!((g.members().len(), g.rev), (3, block::REVISIONS_MAX), "{:?}", g.members());
+    assert_eq!(last(&s, "a"), Outcome::Skipped(Why::GroupRevisions));
+    assert_eq!(last(&s, "b"), Outcome::Skipped(Why::GroupRevisions));
+    assert!(s.block(&r("a")).unwrap().group.is_some() && s.block(&r("b")).is_some());
+
+    // Two members: one leaving ends the group, at any revision.
+    let mut h = H::default();
+    group(&mut h, "p", &["a", "b"]);
+    h.ops(json!([{"op":"remove","id":"a"}]));
+    let s = h.state();
+    assert!(s.block(&r("p")).is_none() && s.block(&r("a")).is_none());
+    assert_eq!(s.block(&r("b")).unwrap().group, None);
+    let mut h = H::default();
+    group(&mut h, "p", &["a", "b"]);
+    h.ops(json!([{"op":"move","id":"a","target":"rail"}]));
+    let s = h.state();
+    assert!(s.block(&r("p")).is_none());
+    assert_eq!(s.block(&r("a")).unwrap().place, Place::Rail(Slot::Upper));
+}

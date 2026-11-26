@@ -399,6 +399,9 @@ pub enum Why {
     Rail,
     /// [`block::REVISIONS_MAX`] revisions: `replace the block or use a new id`.
     Revisions,
+    /// Its group is at [`block::REVISIONS_MAX`] revisions, and leaving would
+    /// revise it (two or more members would stay).
+    GroupRevisions,
     /// Every path of the patch was skipped.
     Paths,
     /// An edit of another incarnation (§3.3).
