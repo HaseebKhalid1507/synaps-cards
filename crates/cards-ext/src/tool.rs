@@ -3,6 +3,9 @@
 //! result text (§1.5). Nothing waits for the answer, which comes later as a
 //! user message and never through here. The only state is the rate counter
 //! (§5.5) and the ids minted so far (§1.5).
+//!
+//! [`Cards`] also routes the second tool, `block` ([`crate::block`]), when
+//! `initialize` turned it on.
 
 use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -12,6 +15,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use cards_spec::sanitize::cut_chars;
 use cards_spec::{CardDoc, CardId, DefaultChoice, Envelope, FIELD_LABEL_MAX, Input, OPTION_LABEL_MAX, parse_input};
 use serde_json::{Value, json};
+
+use crate::block::{self, Blocks};
 
 /// The tool's name as the extension declares it. The host namespaces it
 /// `cards:ui`, and the model sees `cards_ui` (`protocol.md`, "Registered tool
@@ -46,39 +51,74 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    fn invalid(message: String) -> Self {
+    pub(crate) fn invalid(message: String) -> Self {
         Refusal { code: INVALID_PARAMS, message }
     }
 
-    fn refused(message: String) -> Self {
+    pub(crate) fn refused(message: String) -> Self {
         Refusal { code: REFUSED, message }
     }
 }
 
-/// `initialize`'s result: protocol 1 and the one tool, its input schema
-/// cards-spec's `schema.json` (§1.4).
-pub fn initialize() -> Value {
+/// `initialize`'s result: protocol 1 and the tools, `ui` with cards-spec's
+/// `schema.json` as its input schema (§1.4), then, when `blocks` is on,
+/// `block` with `schema-blocks.json` (`docs/blocks.md` §1.1). Off, `block`
+/// isn't declared at all, so its description costs nothing.
+pub fn initialize(blocks: bool) -> Value {
     let schema: Value = serde_json::from_str(cards_spec::SCHEMA).expect("cards-spec's schema.json is JSON");
-    json!({
-        "protocol_version": PROTOCOL_VERSION,
-        "capabilities": { "tools": [{ "name": NAME, "description": DESCRIPTION.trim_end(), "input_schema": schema }] }
-    })
+    let mut tools = vec![json!({ "name": NAME, "description": DESCRIPTION.trim_end(), "input_schema": schema })];
+    if blocks {
+        let schema: Value = serde_json::from_str(cards_spec::block::SCHEMA).expect("cards-spec's schema-blocks.json is JSON");
+        tools.push(json!({ "name": block::NAME, "description": block::DESCRIPTION.trim_end(), "input_schema": schema }));
+    }
+    json!({ "protocol_version": PROTOCOL_VERSION, "capabilities": { "tools": tools } })
 }
 
 #[derive(Default)]
 pub struct Cards {
     rate: Rate,
     ids: Ids,
+    /// `block`, once `initialize` turned it on; `None` until then and off.
+    blocks: Option<Blocks>,
 }
 
 impl Cards {
+    /// `initialize`: read the gate from `params.config` (`docs/blocks.md`
+    /// §1.1), then declare the tools. The host resolves the config when it
+    /// starts the process, so the gate holds for the process's life; a
+    /// change takes `synaps daemon reload-extension cards`.
+    pub fn initialize(&mut self, params: &Value) -> Value {
+        let on = block::gate(params.get("config"));
+        if on != self.blocks.is_some() {
+            self.blocks = on.then(Blocks::default);
+        }
+        initialize(on)
+    }
+
     /// One `tool.call`: the result text, or why not.
     pub fn call(&mut self, params: &Value, now: Instant) -> Result<String, Refusal> {
         let name = params.get("name").and_then(Value::as_str);
-        if name != Some(NAME) {
-            let name = name.map_or_else(|| "(none)".to_string(), |n| format!("{n:?}"));
-            return Err(Refusal::invalid(format!("cards: no tool {name}; this extension has one, `{NAME}`")));
+        if name == Some(NAME) {
+            return self.ui(params, now);
         }
+        match (name, self.blocks.as_mut()) {
+            (Some(block::NAME), Some(blocks)) => blocks.call(params, now),
+            (Some(block::NAME), None) => {
+                Err(Refusal::invalid(format!("cards: no tool \"{}\"; blocks are off (extension.cards.{})", block::NAME, block::GATE)))
+            }
+            (name, blocks) => {
+                let name = name.map_or_else(|| "(none)".to_string(), |n| format!("{n:?}"));
+                let has = match blocks {
+                    Some(_) => format!("two, `{NAME}` and `{}`", block::NAME),
+                    None => format!("one, `{NAME}`"),
+                };
+                Err(Refusal::invalid(format!("cards: no tool {name}; this extension has {has}")))
+            }
+        }
+    }
+
+    /// One `tool.call` of `ui`.
+    fn ui(&mut self, params: &Value, now: Instant) -> Result<String, Refusal> {
         let chat = chat_of(params).ok_or_else(|| Refusal::refused(WORKER.to_string()))?;
         match parse_input(params.get("input").unwrap_or(&Value::Null)).map_err(|e| Refusal::invalid(e.to_string()))? {
             Input::Close(card) => Ok(Envelope::closed(card).to_string()),

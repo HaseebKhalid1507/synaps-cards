@@ -4,6 +4,7 @@
 use std::io::{BufReader, Cursor, Read};
 
 use super::*;
+use crate::tool;
 
 fn frame(v: &Value) -> Vec<u8> {
     let body = v.to_string();
@@ -76,6 +77,82 @@ fn check_session(done: Result<(), FrameError>, r: &[Value]) {
     );
     assert_eq!(r[4]["error"], json!({ "code": METHOD_NOT_FOUND, "message": "cards: no method \"hook.handle\"" }));
     assert_eq!(r[5], json!({ "jsonrpc": "2.0", "id": 6, "result": null }));
+}
+
+fn block_call(id: u64, input: Value) -> Vec<u8> {
+    request(id, "tool.call", json!({ "name": "block", "input": input, "session_id": "s1", "cwd": "/p" }))
+}
+
+fn plan() -> Value {
+    json!({ "ops": [{ "op": "put", "id": "plan", "kind": "plan", "body": { "steps": [{ "id": "fix", "label": "Fix it" }] } }] })
+}
+
+/// A session with blocks on (`docs/blocks.md` §1.1): the gate as the host
+/// passes a value from the environment, a batch, a refusal, a worker, a card
+/// beside them, then `shutdown`.
+fn blocks_session() -> Vec<u8> {
+    let worker = json!({ "actor": "a", "group": "g", "parent": "p" });
+    [
+        request(
+            1,
+            "initialize",
+            json!({ "synaps_version": "0.12.0", "extension_protocol_version": 1, "plugin_id": "cards", "config": { "blocks": "true" } }),
+        ),
+        block_call(2, plan()),
+        block_call(3, json!({ "ops": [] })),
+        request(4, "tool.call", json!({ "name": "block", "input": plan(), "session_id": null, "caller": worker })),
+        call(5, json!({ "close": "c4f9x2a" })),
+        request(6, "shutdown", Value::Null),
+        block_call(7, plan()),
+    ]
+    .concat()
+}
+
+fn check_blocks_session(done: Result<(), FrameError>, r: &[Value]) {
+    assert!(done.is_ok(), "{done:?}");
+    assert_eq!(r.len(), 6, "nothing after shutdown is read: {r:?}");
+    for (i, reply) in r.iter().enumerate() {
+        assert_eq!(reply["jsonrpc"], "2.0");
+        assert_eq!(reply["id"], i as u64 + 1);
+    }
+    let names: Vec<&Value> = r[0]["result"]["capabilities"]["tools"].as_array().unwrap().iter().map(|t| &t["name"]).collect();
+    assert_eq!(names, ["ui", "block"]);
+    let receipt = cards_spec::block::parse_call(&plan()).unwrap().receipt().to_string();
+    assert!(receipt.starts_with("ok 1 ops (blocks/1 #"), "{receipt}");
+    assert_eq!(r[1]["result"], json!({ "content": receipt }));
+    assert_eq!(r[2]["error"], json!({ "code": tool::INVALID_PARAMS, "message": "cards_block: ops: at least 1 op" }));
+    assert_eq!(r[3]["error"], json!({ "code": tool::REFUSED, "message": "cards_block: only the main chat has blocks" }));
+    assert_eq!(r[4]["result"], json!({ "content": "Card c4f9x2a closed (cards/1)." }));
+    assert_eq!(r[5], json!({ "jsonrpc": "2.0", "id": 6, "result": null }));
+}
+
+#[test]
+fn blocks_in_joined_and_split_frames() {
+    let input = blocks_session();
+    let (done, r) = run(&mut Cursor::new(&input[..]));
+    check_blocks_session(done, &r);
+    for n in [1, 2, 3, 7, 64] {
+        let (done, r) = run(&mut BufReader::with_capacity(n, Trickle(&input, n)));
+        check_blocks_session(done, &r);
+    }
+}
+
+/// Off (the manifest's default, or no config at all), `block` is no tool,
+/// and `ui` is answered as before.
+#[test]
+fn blocks_off_on_the_wire() {
+    for init in [json!({ "config": { "blocks": false } }), json!({ "config": {} }), json!({})] {
+        let input = [request(1, "initialize", init.clone()), block_call(2, plan()), call(3, json!({ "close": "c4f9x2a" }))].concat();
+        let (done, r) = run(&mut Cursor::new(&input[..]));
+        assert!(done.is_ok() && r.len() == 3, "{init}: {r:?}");
+        assert_eq!(r[0]["result"]["capabilities"]["tools"].as_array().unwrap().len(), 1, "{init}");
+        assert_eq!(
+            r[1]["error"],
+            json!({ "code": tool::INVALID_PARAMS, "message": "cards: no tool \"block\"; blocks are off (extension.cards.blocks)" }),
+            "{init}"
+        );
+        assert_eq!(r[2]["result"]["content"], "Card c4f9x2a closed (cards/1).", "{init}");
+    }
 }
 
 #[test]

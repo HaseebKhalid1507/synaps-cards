@@ -89,7 +89,11 @@ impl Ext {
     }
 
     fn call(&mut self, input: &Value, session_id: Value, caller: Option<Value>) -> Value {
-        let mut params = json!({ "name": "ui", "input": input, "session_id": session_id, "cwd": "/home/u/project" });
+        self.call_tool("ui", input, session_id, caller)
+    }
+
+    fn call_tool(&mut self, name: &str, input: &Value, session_id: Value, caller: Option<Value>) -> Value {
+        let mut params = json!({ "name": name, "input": input, "session_id": session_id, "cwd": "/home/u/project" });
         if let Some(caller) = caller {
             params["caller"] = caller;
         }
@@ -111,6 +115,12 @@ impl Ext {
 /// `InitializeParams` at `dev`: the host refuses any other protocol version,
 /// and checks each tool's name, description and schema.
 fn initialize(ext: &mut Ext) -> Value {
+    initialize_with(ext, json!({}), &["ui"])
+}
+
+/// `initialize` with the config the host resolved (`params.config`), and
+/// the tools it must declare.
+fn initialize_with(ext: &mut Ext, config: Value, names: &[&str]) -> Value {
     let reply = ext.request(
         "initialize",
         json!({
@@ -118,17 +128,18 @@ fn initialize(ext: &mut Ext) -> Value {
             "extension_protocol_version": 1,
             "plugin_id": "cards",
             "plugin_root": root().to_string_lossy(),
-            "config": {},
+            "config": config,
             "features": ["inject.forget"],
         }),
     );
     let result = &reply["result"];
     assert_eq!(result["protocol_version"], 1, "{reply}");
     let tools = result["capabilities"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["name"], "ui");
-    assert!(!tools[0]["description"].as_str().unwrap().trim().is_empty());
-    assert!(tools[0]["input_schema"].is_object());
+    assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), names, "{config}");
+    for t in tools {
+        assert!(!t["description"].as_str().unwrap().trim().is_empty());
+        assert_eq!(t["input_schema"]["type"], "object");
+    }
     reply
 }
 
@@ -211,4 +222,73 @@ fn a_frame_written_in_pieces() {
     ext.write(b"Content-Type: text/plain\r\n\r\n");
     drop(ext.stdin.take());
     assert_eq!(ext.exit(Duration::from_secs(2)).code(), Some(1));
+}
+
+/// Blocks on, as the host passes a value from the environment
+/// (`SYNAPS_EXTENSION_CARDS_BLOCKS=true`): every valid call of the corpus
+/// gets its golden receipt, a refusal and a worker's call are answered and
+/// not counted, and the 31st call this minute is refused (§7).
+#[test]
+fn a_host_session_with_blocks() {
+    let mut ext = Ext::start();
+    let init = initialize_with(&mut ext, json!({ "blocks": "true" }), &["ui", "block"]);
+    let block = &init["result"]["capabilities"]["tools"][1];
+    assert!(block["description"].as_str().unwrap().starts_with("Keep a few living blocks in the user's desktop app"));
+    assert_eq!(block["input_schema"], serde_json::from_str::<Value>(cards_spec::block::SCHEMA).unwrap());
+    let chat = Some(json!({ "actor": ACTOR, "group": GROUP }));
+    let session = json!("20261126-161500-b3b3");
+    let valid = fixture("blocks/valid.json")["cases"].as_array().unwrap().clone();
+    assert_eq!(valid.len(), 29);
+    for case in &valid {
+        let reply = ext.call_tool("block", &case["input"], session.clone(), chat.clone());
+        let text = reply["result"]["content"].as_str().unwrap_or_else(|| panic!("{}: {reply}", case["about"]));
+        assert_eq!(text, case["result"].as_str().unwrap(), "{}", case["about"]);
+        assert!(text.len() <= 64);
+        // The desk binds the call in the transcript: the same input, parsed again.
+        let receipt = cards_spec::block::Receipt::parse(text).unwrap();
+        assert!(receipt.binds(&cards_spec::block::parse_call(&case["input"]).unwrap()), "{}", case["about"]);
+    }
+    let refused = fixture("blocks/invalid.json")["cases"].as_array().unwrap()[0].clone();
+    let reply = ext.call_tool("block", &refused["input"], session.clone(), chat.clone());
+    assert_eq!(reply["error"], json!({ "code": -32602, "message": format!("cards_block: {}", refused["error"].as_str().unwrap()) }));
+    assert!(reply.get("result").is_none());
+    let worker = Some(json!({ "actor": ACTOR, "group": GROUP, "parent": PARENT }));
+    let reply = ext.call_tool("block", &valid[0]["input"], Value::Null, worker);
+    assert_eq!(reply["error"], json!({ "code": -32000, "message": "cards_block: only the main chat has blocks" }));
+    // 29 calls so far: the 30th fits, the 31st doesn't; another chat does.
+    let reply = ext.call_tool("block", &valid[0]["input"], session.clone(), chat.clone());
+    assert_eq!(reply["result"]["content"], valid[0]["result"]);
+    let reply = ext.call_tool("block", &valid[0]["input"], session.clone(), chat.clone());
+    assert_eq!(
+        reply["error"],
+        json!({ "code": -32000, "message": "cards_block: 31 calls in the last minute; batch your ops or patch less" })
+    );
+    let reply = ext.call_tool("block", &valid[0]["input"], json!("another"), None);
+    assert_eq!(reply["result"]["content"], valid[0]["result"]);
+    // Cards count apart.
+    let reply = ext.call(&fixture("valid/a1_plan_with_choices.json")["input"], session, chat);
+    assert!(reply["result"]["content"].as_str().unwrap().starts_with("Card c"), "{reply}");
+    assert_eq!(ext.request("shutdown", Value::Null)["result"], Value::Null);
+    assert_eq!(ext.exit(Duration::from_secs(2)).code(), Some(0));
+}
+
+/// Off, as the manifest's default reaches the extension (`false`) or with
+/// no config at all: one tool, and a `block` call is no tool.
+#[test]
+fn blocks_are_off_by_default_on_the_wire() {
+    let manifest: Value = serde_json::from_str(&std::fs::read_to_string(root().join(".synaps-plugin/plugin.json")).unwrap()).unwrap();
+    let default = manifest["extension"]["config"][0]["default"].clone();
+    assert_eq!(default, json!(false));
+    for config in [json!({ "blocks": default }), json!({})] {
+        let mut ext = Ext::start();
+        initialize_with(&mut ext, config, &["ui"]);
+        let input = fixture("blocks/valid.json")["cases"][0]["input"].clone();
+        let reply = ext.call_tool("block", &input, json!("s"), None);
+        assert_eq!(
+            reply["error"],
+            json!({ "code": -32602, "message": "cards: no tool \"block\"; blocks are off (extension.cards.blocks)" })
+        );
+        drop(ext.stdin.take());
+        assert_eq!(ext.exit(Duration::from_secs(2)).code(), Some(0));
+    }
 }

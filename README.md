@@ -1,14 +1,15 @@
 # synaps-cards
 
 Agent-drawn cards for Synaps: a Synaps extension (the `ui` tool, which the model sees as `cards_ui`) plus the card spec
-synaps-desk renders. No core changes. The design is [`docs/design.md`](docs/design.md).
+synaps-desk renders. No core changes. The design is [`docs/design.md`](docs/design.md); blocks, the editable
+transcript, are [`docs/blocks.md`](docs/blocks.md).
 
 ## What's here
 
 | Path | What |
 |---|---|
 | `crates/cards-spec` | The spec both sides run (S1): the doc schema (`schema.json`), `parse_input` and `revalidate`, the digest and the result's envelope line, `parse_answer`, and the answer message, built and parsed. No I/O; serde, serde_json and sha2 only. |
-| `crates/cards-ext` | The extension (S2): the process Synaps starts, speaking the extension protocol on stdio. It registers `ui` and answers each call at once with the card's envelope and result text, or a refusal. Needs only `tools.register`. |
+| `crates/cards-ext` | The extension (S2): the process Synaps starts, speaking the extension protocol on stdio. It registers `ui` and answers each call at once with the card's envelope and result text, or a refusal. With the `blocks` setting on, it registers `block` too (B3): a batch of block ops, validated and answered `ok N ops (blocks/1 #…)`, or refused. Needs only `tools.register`. |
 | `.synaps-plugin/plugin.json`, `scripts/setup.sh` | The plugin: this repo is its root. Setup builds `target/release/cards-ext`. |
 | `fixtures/` | The corpus the spec is tested against ([`fixtures/README.md`](fixtures/README.md)). |
 | `scripts/oracle.py` | A second implementation of the digest, envelope, message and the extension's result text, in Python: it writes the corpus's goldens (`--check` verifies them). |
@@ -27,6 +28,19 @@ synaps daemon reload-extension cards
 The model then sees `cards_ui`. With progressive tool disclosure on, extension tools stay deferred unless
 `tools.always_loaded` lists `ext.cards:ui`. A card shows in synaps-desk; anywhere else the agent's question and its
 numbered options are a plain tool row, and the user answers in text.
+
+### Blocks (opt-in)
+
+`cards_block`, living blocks in the transcript and the right rail (`docs/blocks.md`), is off by default. To turn it
+on, set `extension.cards.blocks = true` in Synaps's config (or `SYNAPS_EXTENSION_CARDS_BLOCKS=true` in the daemon's
+environment), then reload:
+
+```
+synaps daemon reload-extension cards
+```
+
+The model then sees `cards_block` beside `cards_ui`. Blocks draw in synaps-desk; the TUI shows each call as a JSON
+panel, so keep it off in a TUI-only setup. Off, `block` isn't declared at all and its description costs nothing.
 
 ## Building
 

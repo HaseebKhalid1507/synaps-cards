@@ -54,7 +54,7 @@ fn secs(n: u64) -> Duration {
 
 #[test]
 fn initialize_declares_one_tool_the_host_accepts() {
-    let init = initialize();
+    let init = initialize(false);
     assert_eq!(init["protocol_version"], 1);
     let tools = init["capabilities"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 1);
