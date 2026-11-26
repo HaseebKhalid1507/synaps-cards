@@ -137,10 +137,11 @@ impl State {
     }
 
     /// `at.after` (§1.2): right after `x` in its list, if `x` is a live block
-    /// that isn't a group member, in a place `want` takes. Resolved once.
+    /// in a place `want` takes. A group member is in no list, so it never
+    /// resolves. Resolved once.
     fn after(&self, x: &Ref, want: impl Fn(Place) -> bool) -> Option<(Place, usize)> {
         let b = self.blocks.get(x)?;
-        if b.group.is_some() || !want(b.place) {
+        if !want(b.place) {
             return None;
         }
         let i = self.lists.get(&b.place)?.iter().position(|r| r == x)?;

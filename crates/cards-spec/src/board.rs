@@ -183,7 +183,8 @@ impl Board {
                 self.cards.apply(event);
             }
             Event::Result { tool_id, text } => {
-                if let Some(o) = self.open.iter_mut().rev().find(|o| &o.tool_id == tool_id && !o.taken)
+                // The tool id's latest call; one taken over never binds.
+                if let Some(o) = self.open.iter_mut().rev().find(|o| &o.tool_id == tool_id)
                     && o.result.is_none()
                 {
                     let binds = block::Receipt::parse(text).zip(o.batch.as_ref()).is_some_and(|(r, b)| r.binds(b));
@@ -220,9 +221,6 @@ impl Board {
                     true
                 }
             };
-            if mode == Replay::Bound && pending {
-                return;
-            }
             match (&o.batch, binds) {
                 (Some(batch), true) => {
                     let cx = apply::Cx { call: o.at, tool_id: &o.tool_id, cards: &self.cards, pending };

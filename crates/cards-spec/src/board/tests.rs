@@ -237,6 +237,25 @@ fn calls_commit_in_call_order_whatever_order_results_come_in() {
 }
 
 #[test]
+fn the_next_assistant_message_commits_the_last_ones_calls() {
+    // A call whose result never came, then the next message's call: the
+    // first is unbound for good, the second binds and is no longer pending.
+    let mut h = H::default();
+    h.call(json!([note("a", "1")]));
+    let other = h.tool();
+    h.result(&other, "a bash result");
+    let b = json!([note("b", "2")]);
+    let t = h.call(b.clone());
+    h.bind(&t, &b);
+    let board = h.board();
+    let v = board.view();
+    assert!(v.block(&r("a")).is_none());
+    assert!(!v.block(&r("b")).unwrap().pending);
+    assert_eq!(board.bound(), v);
+    assert_eq!(v.log().next().unwrap().outcome, Outcome::Unbound);
+}
+
+#[test]
 fn a_tool_id_called_again_belongs_to_its_latest_call() {
     let ops = json!([note("n", "hello")]);
     let mut h = H::default();
@@ -398,6 +417,10 @@ fn item_churn_stops_at_64_ids() {
     let s = h.state();
     assert_eq!(last(&s, "plan"), Outcome::SkippedPath(path("steps"), PathWhy::Ids));
     assert_eq!(steps(&s, "plan"), [("s63".to_string(), "todo".to_string())]);
+    // The user's step too: `replace the block`.
+    let rev = s.block(&r("plan")).unwrap().rev;
+    let at = h.edit("plan", rev, json!({"append":{"steps":[{"id":"u-aaaaaa","label":"Mine"}]}}));
+    assert_eq!(h.state().outcome(at).unwrap().codes, [Code::Full]);
 }
 
 #[test]
@@ -514,6 +537,14 @@ fn trace_a_rewritten_block_takes_no_stale_edit() {
     let ahead = edit_text(&h.state(), "plan", 5, json!({"set":{"steps.fix.label":"Mine"}}));
     let at = h.user(&ahead);
     assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Rewritten);
+    // Another incarnation at a revision past the base: rewritten by its tag.
+    let mut h = at_r4();
+    let stale = edit_text(&h.state(), "plan", 2, json!({"set":{"steps.fix.label":"Mine"}}));
+    h.ops(json!([{"op":"replace","id":"plan","kind":"plan","body":plan(&["fix"])}]));
+    h.ops(json!([{"op":"patch","id":"plan","set":{"title":"a"}},{"op":"patch","id":"plan","set":{"title":"b"}}]));
+    let at = h.user(&stale);
+    let s = h.state();
+    assert_eq!((s.outcome(at).unwrap().result, s.block(&r("plan")).unwrap().rev), (EditResult::Rewritten, 3));
 }
 
 #[test]
@@ -580,6 +611,13 @@ fn guards_on_every_user_path() {
     h.ops(json!([{"op":"patch","id":"d","set":{"state":"written"}}]));
     let at = h.edit("d", 3, json!({"set":{"hunks.h1.state":"dropped"}}));
     assert_eq!(h.state().outcome(at).unwrap().codes, [Code::NotProposal]);
+    // A step added to a plan of 20: full.
+    let twenty: Vec<String> = (0..17).map(|i| format!("x{i}")).collect();
+    let more: Vec<Value> = twenty.iter().map(|id| json!({"id": id, "label": "x"})).collect();
+    h.ops(json!([{"op":"patch","id":"plan","append":{"steps":more}}]));
+    let rev = h.state().block(&r("plan")).unwrap().rev;
+    let at = h.edit("plan", rev, json!({"append":{"steps":[{"id":"u-aaaaaa","label":"Mine"}]}}));
+    assert_eq!(h.state().outcome(at).unwrap().codes, [Code::Full]);
     // A note's text past its 2 KiB: too big.
     let at = h.edit("n", 1, json!({"set":{"text":"😀".repeat(600)}}));
     assert_eq!(h.state().outcome(at).unwrap().codes, [Code::TooBig]);
@@ -851,6 +889,17 @@ fn the_floor_keeps_evicted_notices_stale_and_retained_records_win() {
     let s = h.state();
     assert!(s.visibility().dismissed(&BlockId::parse("live").unwrap()));
     assert_eq!(s.visibility().floor(), 7);
+    // Shown records go before older dismissals.
+    let mut h = H::default();
+    for v in 1..=40u32 {
+        h.user(&format!("d\n{}", notice(&format!("d{v}"), v, "dismissed")));
+    }
+    for v in 41..=70u32 {
+        h.user(&format!("s\n{}", notice(&format!("s{v}"), v, "shown")));
+    }
+    let s = h.state();
+    assert_eq!((s.visibility().len(), s.visibility().floor()), (VISIBILITY_MAX, 46));
+    assert!(s.visibility().record(&BlockId::parse("d1").unwrap()).is_some());
 }
 
 fn msg(role: &str, content: Value) -> Value {
@@ -1089,4 +1138,27 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
     assert!(Refold::new(generation(), &many, REFOLD_MAX).is_ok());
     assert_eq!(Refold::new(generation(), &many, REFOLD_MAX + 1).err(), Some(TooFar));
+}
+
+/// §1.9, §5.2: a compaction starts a new generation with an empty board; a
+/// carrier still queued lands in the successor, and its notices count there.
+#[test]
+fn a_compaction_empties_the_board_and_a_queued_carrier_counts_in_the_next() {
+    let ops = json!([note("tests", "x")]);
+    let before = vec![
+        msg("user", json!("start")),
+        msg("assistant", json!([block_use("t1", ops.clone())])),
+        msg("user", json!([block_result("t1", &ops)])),
+        msg("user", json!(format!("hm\n{}", notice("tests", 4, "dismissed")))),
+    ];
+    let old = Board::of_history(&before).view();
+    assert_eq!((old.live(), old.visibility().highest()), (1, 4));
+    let after = vec![
+        msg("user", json!("<context-summary>\nWe put a tests block.\n</context-summary>")),
+        msg("user", json!(format!("and this\n{}", notice("tests", 1, "shown")))),
+    ];
+    let new = Board::of_history(&after).view();
+    assert_ne!(new.generation(), old.generation());
+    assert_eq!((new.live(), new.creations(), new.tombstones().count()), (0, 0, 0));
+    assert_eq!(new.visibility().record(&BlockId::parse("tests").unwrap()), Some(Vis { dismissed: false, version: 1 }));
 }

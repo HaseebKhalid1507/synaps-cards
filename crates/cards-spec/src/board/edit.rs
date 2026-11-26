@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use super::apply::{order_list, path, set_field};
 use super::*;
 use crate::block::message::Visibility as Seen;
-use crate::block::{Appended, ITEM_IDS_MAX, PLAN_STEPS_MAX, REVISIONS_MAX, SetValue, Step, StepState};
+use crate::block::{Appended, ITEM_IDS_MAX, REVISIONS_MAX, SetValue, Step, StepState};
 
 /// One intent of an edit (§3.7's coverage keys), in the order the fold
 /// applies them: each appended item (`steps.u-k3x7qa`), each `set` path,
@@ -174,13 +174,12 @@ impl State {
 }
 
 /// A user's added step (§3.4): its id unused in the incarnation, the list
-/// within 20.
+/// within 20 (the caps, in [`path`]).
 fn add_step(b: &mut Block, s: &Step) -> Code {
     if b.items.contains(&s.id) {
         return Code::Collided;
     }
-    let Body::Plan(plan) = &b.body else { return Code::NotThere };
-    if plan.steps.len() >= PLAN_STEPS_MAX || b.items.len() >= ITEM_IDS_MAX {
+    if b.items.len() >= ITEM_IDS_MAX {
         return Code::Full;
     }
     code_of(path(b, |b| {
