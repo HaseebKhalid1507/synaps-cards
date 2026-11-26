@@ -1724,6 +1724,34 @@ fn the_owned_byte_ceilings_are_derived_and_sum_under_one_mib() {
     );
 }
 
+/// D8 (R2-P3-1): §1.8's table of the board's working set names only the
+/// owners its ceilings sum (the derivation above), so it promises no
+/// allowance the sum leaves out.
+#[test]
+fn the_working_set_table_names_only_what_its_sum_counts() {
+    let doc = include_str!("../../../../docs/blocks.md");
+    let table = doc.split("**The board's working set**").nth(1).unwrap();
+    let table = &table[..table.find("| **The working set** |").unwrap()];
+    let counted = [
+        "Live blocks",
+        "Tombstones",
+        "The creation number",
+        "Revision records",
+        "Item ids per incarnation",
+        "Field last-writers",
+        "Visibility records",
+        "Run titles",
+        "Edit outcomes",
+        "Op log",
+        "The open batch",
+    ];
+    let rows: Vec<&str> = table.lines().filter(|l| l.starts_with("| ") && !l.starts_with("| State |")).collect();
+    assert_eq!(rows.len(), counted.len(), "{rows:#?}");
+    for row in rows {
+        assert!(counted.iter().any(|c| row.starts_with(&format!("| {c}"))), "not in the sum: {row}");
+    }
+}
+
 /// D8: a plan built to its maximum (20 steps in its 4 KiB, 64 item ids,
 /// the user's writes on every step) and a diff at its maximum stay under
 /// the block ceiling, measured.
