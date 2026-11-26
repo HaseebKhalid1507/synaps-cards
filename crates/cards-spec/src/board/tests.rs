@@ -1445,3 +1445,57 @@ fn a_refold_step_reads_at_most_a_slice() {
     let slices = |k: usize| 1 + k * REFOLD_SLICE;
     assert_eq!(read, [(0, false), (1, false), (slices(1), false), (slices(2), false), (slices(3), false), (n, true)]);
 }
+
+// D6 (Shady agrees): what overwrites the user's edit, pinned directly.
+
+#[test]
+fn removing_the_item_the_user_wrote_overwrites_that_edit() {
+    let mut h = at_r4();
+    let at = h.edit("plan", 4, json!({"set":{"steps.deploy.label":"Ship it","steps.deploy.stop":true}}));
+    h.ops(json!([{"op":"patch","id":"plan","remove":["steps.deploy"]}]));
+    let s = h.state();
+    assert_eq!(s.outcome(at).unwrap().codes, [Code::Overwritten, Code::Overwritten]);
+    let changed = s.block(&r("plan")).unwrap().changed_your_edit.clone().unwrap();
+    assert!(changed.as_str().starts_with("steps.deploy."), "{changed}");
+}
+
+#[test]
+fn the_agent_writing_the_users_own_value_overwrites_nothing() {
+    let mut h = at_r4();
+    let at = h.edit("plan", 4, json!({"set":{"steps.deploy.label":"Ship it"},"order":{"steps":["deploy","fix","test"]}}));
+    // The same value, the same order, and an append: none supersedes it.
+    h.ops(json!([{"op":"patch","id":"plan","set":{"steps.deploy.label":"Ship it"},"order":{"steps":["deploy","fix","test"]},"append":{"steps":[{"id":"docs","label":"Docs"}]}}]));
+    let s = h.state();
+    assert_eq!(s.outcome(at).unwrap().codes, [Code::Applied, Code::Applied]);
+    let p = s.block(&r("plan")).unwrap();
+    assert_eq!((p.changed_your_edit.as_ref(), p.user_wrote(&path("steps.deploy.label")).map(|w| w.at)), (None, Some(at)));
+}
+
+/// §3.3 on a converted card: an edit names the live incarnation, so one of
+/// an earlier conversion is stale after a replace, gone after a remove, and
+/// still stale after the card is converted again.
+#[test]
+fn a_converted_cards_old_tag_never_applies_again() {
+    let mut h = H::default();
+    h.ask();
+    h.answer();
+    let replace = |text: &str| json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":text}}]);
+    h.ops(replace("first"));
+    let first = edit_of(&h.state(), "card:c4f9x2a", 1, json!({"set":{"text":"mine"}}));
+    let send = |h: &mut H, e: &Edit| h.user(&message::build(e, &Summary::default()).unwrap());
+    let at = send(&mut h, &first);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Applied);
+    h.ops(replace("second"));
+    let at = send(&mut h, &first);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Rewritten);
+    h.ops(json!([{"op":"remove","id":"card:c4f9x2a"}]));
+    let at = send(&mut h, &first);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Gone);
+    h.ops(replace("third"));
+    let at = send(&mut h, &first);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Rewritten);
+    let third = edit_of(&h.state(), "card:c4f9x2a", 1, json!({"set":{"text":"mine again"}}));
+    let at = send(&mut h, &third);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Applied);
+    assert_eq!(note_text(&h.state(), "card:c4f9x2a"), "mine again");
+}
