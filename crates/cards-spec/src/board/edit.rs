@@ -241,6 +241,6 @@ fn code_of(r: Result<bool, PathWhy>) -> Code {
         Ok(false) => Code::Unchanged,
         Err(PathWhy::TooBig) => Code::TooBig,
         Err(PathWhy::Full | PathWhy::Ids) => Code::Full,
-        Err(PathWhy::NotThere | PathWhy::Removed(_) | PathWhy::NotKind) => Code::NotThere,
+        Err(PathWhy::NotThere | PathWhy::Removed(_) | PathWhy::NotKind | PathWhy::FromEdits) => Code::NotThere,
     }
 }

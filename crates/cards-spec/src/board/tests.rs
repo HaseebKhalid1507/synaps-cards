@@ -1324,3 +1324,38 @@ fn a_refold_keeps_the_outcome_it_was_asked_for() {
     assert_eq!((o.result, o.codes.as_slice()), (EditResult::Applied, [Code::Overwritten].as_slice()));
     assert_eq!(s.outcomes().count(), OUTCOMES_MAX);
 }
+
+// §1.4, §1.5 (P2-3): a patch keeps B1's stored-body contract.
+
+#[test]
+fn a_status_patch_folds_its_text_to_one_line() {
+    let mut h = H::default();
+    h.ops(json!([{"op":"put","id":"st","kind":"status","body":{"text":"A B"}}]));
+    h.ops(json!([{"op":"patch","id":"st","set":{"text":"A\nB"}}]));
+    let s = h.state();
+    let st = s.block(&r("st")).unwrap();
+    let Body::Status(b) = &st.body else { panic!() };
+    assert_eq!((b.text.as_str(), st.rev), ("A B", 1), "the same normalized value: no revision");
+    assert_eq!(last(&s, "st"), Outcome::NoChange);
+    h.ops(json!([{"op":"patch","id":"st","set":{"text":"C\nD"}}]));
+    let s = h.state();
+    let Body::Status(b) = &s.block(&r("st")).unwrap().body else { panic!() };
+    assert_eq!(b.text, "C D");
+    // A note keeps its lines.
+    h.ops(json!([note("n", "x"), {"op":"patch","id":"n","set":{"text":"A\nB"}}]));
+    assert_eq!(note_text(&h.state(), "n"), "A\nB");
+}
+
+#[test]
+fn a_diff_from_the_edits_takes_no_hunks() {
+    let mut h = H::default();
+    h.ops(json!([{"op":"put","id":"d","kind":"diff","body":{"file":"f.rs","state":"editing","from":"edits"}}]));
+    h.ops(json!([{"op":"patch","id":"d","append":{"hunks":[{"id":"h1","lines":["+x"]}]}}]));
+    let s = h.state();
+    let d = s.block(&r("d")).unwrap();
+    let Body::Diff(body) = &d.body else { panic!() };
+    assert!(body.from.is_some() && body.hunks.is_empty(), "{body:?}");
+    assert_eq!(d.rev, 1);
+    assert_eq!(last(&s, "d"), Outcome::SkippedPath(path("hunks"), PathWhy::FromEdits));
+    assert_eq!(check_stored(&d.body), Ok(()));
+}

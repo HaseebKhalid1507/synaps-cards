@@ -422,6 +422,8 @@ pub enum PathWhy {
     Full,
     /// It would take the body past its kind's byte cap.
     TooBig,
+    /// Interim (fail first).
+    FromEdits,
 }
 
 impl State {

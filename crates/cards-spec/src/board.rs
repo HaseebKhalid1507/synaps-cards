@@ -122,6 +122,7 @@ mod edit;
 mod size;
 mod state;
 
+pub use apply::check_stored;
 pub use edit::{Key, keys};
 pub use state::*;
 

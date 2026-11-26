@@ -630,6 +630,11 @@ pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, Pat
 /// lines, the byte cap. Decision (pending Haseeb), D3: checked per path, so
 /// the path that would pass a cap is the one skipped. Decision D7: only the
 /// maxima, so a patch may remove a plan's last step (1–20 is the put's).
+/// Interim (fail first).
+pub fn check_stored(body: &Body) -> Result<(), PathWhy> {
+    caps(body)
+}
+
 fn caps(body: &Body) -> Result<(), PathWhy> {
     use crate::block::{DIFF_LINES_MAX, HUNKS_MAX, PLAN_STEPS_MAX};
     match body {
