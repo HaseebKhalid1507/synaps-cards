@@ -2156,3 +2156,45 @@ fn a_refold_ends_the_targets_batch_where_the_fold_does() {
     assert!(Board::fold(generation(), &open).bound(&open).block(&r("n")).is_none());
     assert_eq!(refold(&open, Target::Revision(Pos { event: 1, op: Some(0) })), None);
 }
+
+/// §1.8 (R3-P3-2): a replay's exact work for block calls and then their
+/// results. A pass is full at [`REPLAY_IDS`] tool ids; while no block call
+/// comes after its last one, it is the only pass, and reads the batch once
+/// and applies it once: two visits an event, the full pass's included. One
+/// call more takes a second pass, which reads the rest of the batch again.
+#[test]
+fn a_batch_of_calls_and_their_results_replays_at_its_exact_cost() {
+    for (n, passes) in [(REPLAY_IDS - 1, 1), (REPLAY_IDS, 1), (REPLAY_IDS + 1, 2)] {
+        let mut h = H::default();
+        h.ops(json!([note("n", "0")]));
+        h.events.push(Event::ResultsEnd);
+        let open = h.events.len();
+        let calls: Vec<(String, Value)> = (1..=n)
+            .map(|i| {
+                let ops = json!([{"op":"patch","id":"n","set":{"text": i.to_string()}}]);
+                (h.call(ops.clone()), ops)
+            })
+            .collect();
+        for (t, ops) in &calls {
+            h.bind(t, ops);
+        }
+        let end = h.events.len();
+        let batch = end - open;
+        // Each pass reads from its first call to the batch's end, and the
+        // passes apply the batch once between them.
+        let work = match passes {
+            1 => 2 * batch,
+            _ => 2 * batch + (batch - REPLAY_IDS),
+        };
+        let mut state = Board::fold(generation(), &h.events[..open]).bound(&h.events[..open]);
+        let mut budget = usize::MAX;
+        let mut replay = replay::Replay::new(open, end, replay::Mode::Commit, None);
+        assert_eq!(replay.run(&Fold::default(), &mut state, &h.events, &mut budget), Some(false));
+        assert_eq!(usize::MAX - budget, work, "{n} calls and their results");
+        assert_eq!(note_text(&state, "n"), n.to_string());
+        assert_eq!(state.block(&r("n")).unwrap().rev as usize, n + 1);
+        // The board's commit replays the same batch to the same board.
+        h.events.push(Event::ResultsEnd);
+        assert_eq!(h.board().bound(&h.events).blocks().collect::<Vec<_>>(), state.blocks().collect::<Vec<_>>());
+    }
+}
