@@ -7,7 +7,9 @@
 //! ([`Memo::observe`], with whether the view is settled), and the clock
 //! ([`Memo::tick`]), and it draws each card from the fold and its
 //! [`Entry`]. Nothing here sends: [`Memo::press`], [`Memo::retry`] and
-//! [`Memo::resend`] return the text, and the desk sends it.
+//! [`Memo::resend`] return the text, and the desk sends it. A desk that
+//! knows more than an entry's `seen` can drop that one entry itself
+//! ([`Memo::forget`]).
 //!
 //! §3.5 states every transition, including these, which S3's review
 //! settled:
@@ -447,6 +449,21 @@ impl Memo {
     /// and, on a settled view, the settle rule for each entry checking.
     pub fn observe(&mut self, view: &View<'_>, now: Instant) {
         self.entries.retain_mut(|e| e.follow(view, now));
+    }
+
+    /// Drop `card`'s entry on the desk's own word (§3.5, "What drops an
+    /// entry"), and nothing else: every other entry stays as it was, in
+    /// its order. For a desk that knows more than the entry's `seen`. For
+    /// example, a change whose `seen` counts an earlier answer the desk
+    /// knows a turn's end lost: another desk's copy of that answer then
+    /// reads as the one `seen` expected (rule 4 doesn't fire), and only
+    /// the desk can tell it supersedes ours. The card then shows the
+    /// fold's state, with no Resend or Retry, and a press starts a new
+    /// entry that sees the fold's answers. Returns the entry dropped, if
+    /// the card had one.
+    pub fn forget(&mut self, card: &CardId) -> Option<Entry> {
+        let i = self.entries.iter().position(|e| e.card == *card)?;
+        Some(self.entries.remove(i))
     }
 }
 

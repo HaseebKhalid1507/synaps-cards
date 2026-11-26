@@ -772,3 +772,108 @@ fn eviction_at_32() {
     memo.press(g.bound(&id("czzzzzz")).unwrap(), answer("Leave it"), now).unwrap();
     assert_eq!((memo.entries().len(), state(&memo, 0)), (CAP, None));
 }
+
+/// Seven cards of one session, an entry for each in another state, oldest
+/// first: unconfirmed, held, not sent, in the chat, queued, checking,
+/// sending.
+fn seven() -> (Vec<String>, Memo) {
+    let ids: Vec<String> = (0..7).map(|i| format!("c{i:06}")).collect();
+    let history: Vec<F> = ids.iter().enumerate().flat_map(|(i, c)| bound(&format!("t{i}"), c)).collect();
+    let f = fold::fold(&history);
+    let mut now = Instant::now();
+    let mut memo = Memo::default();
+    let t = |i: usize| text(&ids[i], &answer("Leave it"));
+    let press = |memo: &mut Memo, i: usize, now: Instant| {
+        assert_eq!(memo.press(f.bound(&id(&ids[i])).unwrap(), answer("Leave it"), now), Some(t(i)));
+    };
+    // Echoed, `Idle`, a settled view without it: unconfirmed.
+    press(&mut memo, 0, now);
+    memo.on(Event::Echo { text: &t(0), driver: false }, now);
+    memo.on(Event::Idle, now);
+    memo.observe(&View { fold: &f, settled: true, queued: None, streaming: false }, now);
+    // Echoed, `Idle`, and the slot still holds it, idle: held.
+    press(&mut memo, 1, now);
+    memo.on(Event::Echo { text: &t(1), driver: false }, now);
+    memo.on(Event::Idle, now);
+    memo.observe(&View { fold: &f, settled: true, queued: Some(&t(1)), streaming: false }, now);
+    // Refused: not sent.
+    press(&mut memo, 2, now);
+    memo.on(Event::Refused { reason: "r" }, now);
+    // Echoed and taken in: in the chat.
+    press(&mut memo, 3, now);
+    memo.on(Event::Echo { text: &t(3), driver: false }, now);
+    memo.on(Event::Delivered { text: &t(3) }, now);
+    // Echoed: queued.
+    press(&mut memo, 4, now);
+    memo.on(Event::Echo { text: &t(4), driver: false }, now);
+    // No echo in 10 s: checking.
+    press(&mut memo, 5, now);
+    now += ECHO_WAIT;
+    memo.tick(now);
+    // Sending.
+    press(&mut memo, 6, now);
+    let states: Vec<State> = memo.entries().iter().map(|e| e.state).collect();
+    use State::*;
+    assert_eq!(states, [Unconfirmed, Held, NotSent, InChat, Queued, Checking, Sending]);
+    (ids, memo)
+}
+
+/// The desk forgets one entry: that one goes, whatever its state, and
+/// every other stays exactly as it was (state, cause, `seen`, timers,
+/// flags), in its order. Forgetting it again, or a card with no entry,
+/// drops nothing.
+#[test]
+fn forget_drops_one_entry_and_leaves_every_other_as_it_was() {
+    let (ids, memo) = seven();
+    for (i, card) in ids.iter().enumerate() {
+        let mut m = memo.clone();
+        assert_eq!(m.forget(&id(card)).as_ref(), Some(&memo.entries()[i]), "{card}: its entry");
+        let others: Vec<&Entry> = memo.entries().iter().filter(|e| e.card != id(card)).collect();
+        assert_eq!(m.entries().iter().collect::<Vec<_>>(), others, "{card}: every other entry as it was");
+        assert_eq!(m.forget(&id(card)), None, "{card}: once");
+        assert_eq!(m.entries().len(), 6);
+    }
+    let mut m = memo.clone();
+    assert_eq!(m.forget(&id("czzzzzz")), None);
+    assert_eq!(m.entries(), memo.entries(), "a card with no entry: nothing moves");
+}
+
+/// Why a desk forgets. A was taken in, then changed to B, sent with
+/// `seen = [A]` (the desk expected A's history, which was still to come),
+/// and the turn's end lost both: B is unconfirmed. Another desk's answer,
+/// byte for byte A's, lands. To the memo it is the A that `seen` expected
+/// (rule 4 doesn't fire), so B keeps its Resend. The desk knows that A
+/// was lost, so this one is another's, later than B, and forgets B. The
+/// card then shows the fold's answer with no Resend or Retry, and later
+/// views don't bring B back. A press is a new entry that sees the fold's
+/// answers, A: one change, which lands in the chat.
+#[test]
+fn a_forgotten_card_shows_the_fold_and_a_press_starts_afresh() {
+    let mut d = Desk::new();
+    let a = text(ID, &answer("Rewrite from scratch"));
+    let mut expecting = d.fold().bound(&id(ID)).cloned().unwrap();
+    expecting.answers.push(fold::Answered { text: a.clone(), reply: answer("Rewrite from scratch"), at: usize::MAX });
+    let b = d.memo.press(&expecting, change("Leave it"), d.now).unwrap();
+    d.on(Event::Echo { text: &b, driver: false });
+    d.on(Event::Idle);
+    d.settles();
+    assert_eq!((d.state(), d.may_resend()), (Some(State::Unconfirmed), true), "B lost, Resend");
+    d.lands(&a);
+    d.settles();
+    assert_eq!((d.state(), d.may_resend()), (Some(State::Unconfirmed), true), "the copy reads as the A expected");
+    let gone = d.memo.forget(&id(ID)).unwrap();
+    assert_eq!((gone.text.as_str(), gone.seen.as_slice()), (b.as_str(), [a.clone()].as_slice()));
+    assert_eq!((d.state(), d.may_resend(), d.resend(true)), (None, false, Resend::No), "the fold's state, no Resend");
+    assert_eq!(d.memo.retry(&id(ID), &d.fold(), d.now), None, "nor Retry");
+    d.settles();
+    assert_eq!(d.state(), None, "a later view brings nothing back");
+    let again = d.press(change("Leave it")).unwrap();
+    assert_eq!(again, b, "the same change");
+    let e = d.memo.get(&id(ID)).unwrap();
+    assert_eq!((e.state, e.seen.as_slice()), (State::Sending, [a].as_slice()), "a new entry, seeing the fold's answers");
+    d.on(Event::Echo { text: &b, driver: false });
+    d.on(Event::Delivered { text: &b });
+    d.lands(&b);
+    d.settles();
+    assert_eq!((d.state(), d.may_resend()), (Some(State::InChat), false));
+}
