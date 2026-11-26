@@ -464,9 +464,10 @@ pub enum Target {
 }
 
 /// A board folded to a [`Target`], cooperatively (§1.8): a revision view,
-/// or an evicted outcome's row. [`Refold::step`] reads at most a budget of
-/// events, so the desk can yield between slices (it adds its own 30 ms
-/// clock); the step that reaches the target also reads the target's batch.
+/// or an evicted outcome's row. [`Refold::step`] reads at most its budget
+/// and at most [`REFOLD_SLICE`] events, so the desk can yield between
+/// slices; it adds the 30 ms clock (D5). The step that reaches the target
+/// also reads the target's batch.
 #[derive(Clone, Debug)]
 pub struct Refold<'a> {
     events: &'a [Event],
@@ -502,12 +503,15 @@ impl<'a> Refold<'a> {
         Ok(Refold { events, target, until, board, done: None })
     }
 
-    /// Read up to `budget` more events; `true` once done.
+    /// Read up to `budget` more events, and never more than
+    /// [`REFOLD_SLICE`]; `true` once done. A step can't be preempted, so the
+    /// desk gives small budgets and checks its 30 ms clock between steps
+    /// (§1.8: a yield every 50,000 events or 30 ms, whichever comes first).
     pub fn step(&mut self, budget: usize) -> bool {
         if self.done.is_some() {
             return true;
         }
-        let to = self.until.min(self.board.position().saturating_add(budget));
+        let to = self.until.min(self.board.position().saturating_add(budget.min(REFOLD_SLICE)));
         self.board.read(&self.events[..to]);
         if self.board.position() < self.until {
             return false;
