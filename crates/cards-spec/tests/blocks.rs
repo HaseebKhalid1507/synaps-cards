@@ -78,7 +78,7 @@ fn block_refusals() {
 #[test]
 fn block_limits_come_in_pairs() {
     let all = cases("limits.json");
-    assert!(all.len() >= 90 && all.len().is_multiple_of(2), "{}", all.len());
+    assert!(all.len() >= 88 && all.len().is_multiple_of(2), "{}", all.len());
     for pair in all.chunks(2) {
         let (n, past) = (about(&pair[0]), about(&pair[1]));
         assert_eq!(n.strip_suffix(": at the bound"), past.strip_suffix(": one past it"), "{n} / {past}");

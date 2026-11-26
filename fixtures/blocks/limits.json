@@ -4315,67 +4315,6 @@
       "error": "ops[0].body.series: at most 32 numbers (got 33); an append rolls off the oldest"
     },
     {
-      "about": "a series number (below 10^15): at the bound",
-      "input": {
-        "ops": [
-          {
-            "op": "put",
-            "id": "b",
-            "kind": "metric",
-            "body": {
-              "label": "L",
-              "value": "1",
-              "series": [
-                999999999999999,
-                -999999999999999
-              ]
-            }
-          }
-        ]
-      },
-      "normalized": {
-        "ops": [
-          {
-            "op": "put",
-            "id": "b",
-            "kind": "metric",
-            "target": "transcript",
-            "body": {
-              "label": "L",
-              "value": "1",
-              "series": [
-                999999999999999,
-                -999999999999999
-              ],
-              "state": "neutral"
-            }
-          }
-        ]
-      },
-      "digest": "56fb82328c3e9b00",
-      "result": "ok 1 ops (blocks/1 #56fb82328c3e9b00)"
-    },
-    {
-      "about": "a series number (below 10^15): one past it",
-      "input": {
-        "ops": [
-          {
-            "op": "put",
-            "id": "b",
-            "kind": "metric",
-            "body": {
-              "label": "L",
-              "value": "1",
-              "series": [
-                1000000000000000
-              ]
-            }
-          }
-        ]
-      },
-      "error": "ops[0].body.series[0]: must be a number between -10^15 and 10^15 (got 1000000000000000)"
-    },
-    {
       "about": "numbers one append adds to a series (32): at the bound",
       "input": {
         "ops": [
@@ -4726,7 +4665,7 @@
       "error": "ops[0].body.note: at most 80 characters (got 81)"
     },
     {
-      "about": "a file's line (10^7): at the bound",
+      "about": "a file's line: no ceiling, what 64 bits hold (2^64 - 1; 2^64 reads as a float): at the bound",
       "input": {
         "ops": [
           {
@@ -4736,7 +4675,7 @@
             "body": {
               "path": "p",
               "state": "reading",
-              "line": 10000000
+              "line": 18446744073709551615
             }
           }
         ]
@@ -4750,17 +4689,17 @@
             "target": "transcript",
             "body": {
               "path": "p",
-              "line": 10000000,
+              "line": 18446744073709551615,
               "state": "reading"
             }
           }
         ]
       },
-      "digest": "71eef74f28e7caf3",
-      "result": "ok 1 ops (blocks/1 #71eef74f28e7caf3)"
+      "digest": "a94ba7e6565b0e09",
+      "result": "ok 1 ops (blocks/1 #a94ba7e6565b0e09)"
     },
     {
-      "about": "a file's line (10^7): one past it",
+      "about": "a file's line: no ceiling, what 64 bits hold (2^64 - 1; 2^64 reads as a float): one past it",
       "input": {
         "ops": [
           {
@@ -4770,12 +4709,12 @@
             "body": {
               "path": "p",
               "state": "reading",
-              "line": 10000001
+              "line": 18446744073709551616
             }
           }
         ]
       },
-      "error": "ops[0].body.line: must be a whole number from 1 to 10000000 (got 10000001)"
+      "error": "ops[0].body.line: must be a whole number of at least 1 that fits 64 bits (got 1.8446744073709552e+19)"
     },
     {
       "about": "a file's body (512 bytes, normalized): at the bound",

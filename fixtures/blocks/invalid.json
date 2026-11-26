@@ -1315,7 +1315,7 @@
           }
         ]
       },
-      "error": "ops[0].body.series[0]: must be a number between -10^15 and 10^15 (got \"1\")"
+      "error": "ops[0].body.series[0]: must be a number (got \"1\")"
     },
     {
       "about": "file: no state (a file has no neutral one)",
@@ -1349,7 +1349,7 @@
           }
         ]
       },
-      "error": "ops[0].body.line: must be a whole number from 1 to 10000000 (got 0)"
+      "error": "ops[0].body.line: must be a whole number of at least 1 that fits 64 bits (got 0)"
     }
   ]
 }

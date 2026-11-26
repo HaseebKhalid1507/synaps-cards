@@ -468,11 +468,30 @@ fn numbers_are_canonical() {
         series(json!([1.0, -0.0, 2, -3, 1.5, 0.00012, 0.00001, 1e-7, 1.5e-7, 123456.75, 999999999999999u64])),
         "[1,0,2,-3,1.5,0.00012,0.00001,1e-7,1.5e-7,123456.75,999999999999999]"
     );
+    // §1.5 (amended): no ceiling. From 10¹⁶ a whole number takes serde_json's
+    // exponent form; below, it is an integer.
     assert_eq!(
-        refused(json!([{"op":"patch","id":"m","append":{"series":[1e15]}}])),
-        "ops[0].append.series[0]: must be a number between -10^15 and 10^15 (got 1000000000000000.0)"
+        series(json!([1e15, 9999999999999998u64, 1e16, -1e16, 12345678901234567890u64, 1.5e300, f64::MAX, -f64::MAX, 5e-324])),
+        "[1000000000000000,9999999999999998,1e+16,-1e+16,1.2345678901234567e+19,1.5e+300,1.7976931348623157e+308,-1.7976931348623157e+308,5e-324]"
     );
-    assert!(Num::parse(&json!(-999999999999999.9)).is_some() && Num::parse(&json!("1")).is_none());
+    assert_eq!(
+        refused(json!([{"op":"patch","id":"m","append":{"series":["1"]}}])),
+        "ops[0].append.series[0]: must be a number (got \"1\")"
+    );
+    assert!(Num::parse(&json!(-999999999999999.9)).is_some() && Num::parse(&json!(1e300)).is_some() && Num::parse(&json!("1")).is_none());
+    // A file's line: whole, at least 1, any u64.
+    let line = |v: Value| call(json!([{"op":"put","id":"f","kind":"file","body":{"path":"p","line":v,"state":"reading"}}]));
+    for n in [1, 10_000_001, u64::MAX] {
+        let Op::Put(p) = &line(json!(n)).unwrap().ops[0] else { unreachable!() };
+        assert!(matches!(&p.body, Body::File(f) if f.line == Some(n)));
+    }
+    for (v, got) in [(json!(0), "0"), (json!(1.5), "1.5"), (json!(-1), "-1"), (json!(18446744073709551616.0), "1.8446744073709552e+19")] {
+        assert_eq!(
+            line(v).unwrap_err().to_string(),
+            format!("ops[0].body.line: must be a whole number of at least 1 that fits 64 bits (got {got})")
+        );
+    }
+    assert_eq!(ok(json!([{"op":"patch","id":"f","set":{"line":10_000_001}}]))[0]["set"]["line"], 10_000_001);
     // 17 digits, read from text, back as written: every build reads a number
     // correctly rounded (serde_json's float_roundtrip), so normalizing is a
     // fixed point, and the desk's build and the extension's agree.

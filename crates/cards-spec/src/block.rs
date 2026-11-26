@@ -485,10 +485,14 @@ pub(crate) fn flag(o: &Map<String, Value>, key: &str, path: &str) -> Result<bool
     }
 }
 
-/// A whole number in `min..=max`, given as a JSON integer.
-pub(crate) fn whole(v: &Value, path: &str, min: u32, max: u32) -> Result<u32, Error> {
+/// A whole number in `min..=max`, given as a JSON integer. `max` at
+/// `u64::MAX` is no ceiling but what the number fits in.
+pub(crate) fn whole(v: &Value, path: &str, min: u64, max: u64) -> Result<u64, Error> {
     match v.as_u64() {
-        Some(n) if n >= u64::from(min) && n <= u64::from(max) => Ok(n as u32),
+        Some(n) if n >= min && n <= max => Ok(n),
+        _ if max == u64::MAX => {
+            Err(Error::new(path, format!("must be a whole number of at least {min} that fits 64 bits (got {})", crate::doc::json_quote(v))))
+        }
         _ => Err(Error::new(path, format!("must be a whole number from {min} to {max} (got {})", crate::doc::json_quote(v)))),
     }
 }

@@ -18,8 +18,9 @@
 //!   allowed (a blank context line);
 //! - a diff gives `hunks` or `from:"edits"`, not both, or neither (a header);
 //! - a status's `progress` is whole numbers, `of` at least 1;
-//! - a file's `line` is a whole number from 1 to [`LINE_NUMBER_MAX`];
-//! - series numbers are [`Num`]s.
+//! - a file's `line` is a whole number of at least 1, as a JSON integer:
+//!   any a `u64` holds, no product ceiling (§1.5, amended at B1);
+//! - series numbers are [`Num`]s: any finite number, no ceiling.
 
 use std::collections::BTreeSet;
 
@@ -55,12 +56,11 @@ pub const SERIES_MAX: usize = 32;
 pub const METRIC_MAX_BYTES: usize = 1024;
 pub const FILE_PATH_MAX: usize = 200;
 pub const FILE_NOTE_MAX: usize = 80;
-pub const LINE_NUMBER_MAX: u32 = 10_000_000;
 pub const FILE_MAX_BYTES: usize = 512;
 /// A group's body is the desk's (8 member ids), never the agent's.
 pub const GROUP_MAX_BYTES: usize = 512;
-/// A series number's bound: `-10¹⁵ < x < 10¹⁵`.
-pub const NUM_MAX: f64 = 1e15;
+/// Below this, a whole series number is written as an integer ([`Num`]).
+const NUM_PLAIN_BELOW: f64 = 1e16;
 
 macro_rules! states {
     ($(#[$m:meta])* $name:ident, $what:literal, [$($v:ident = $s:literal),+ $(,)?]) => {
@@ -132,13 +132,17 @@ fn parse_state<T>(
     }
 }
 
-/// A series number (§1.5): finite, with `|x| < 10¹⁵`, `-0` as `0`.
+/// A series number (§1.5): any finite number, `-0` as `0`. JSON has no
+/// other kind, so every number is one; the series' count (32) and the
+/// metric's 1 KiB bound how many.
 ///
-/// **Canonical form.** A whole number is written as an integer (`1.0` is
-/// `1`); any other as serde_json writes an `f64`, the shortest decimal that
-/// reads back (`1.5`, `0.00012`, `1e-7`). Below 10¹⁵ that is never
-/// exponent notation for a whole number, so the form is one rule, and
-/// `scripts/oracle.py` writes the same bytes.
+/// **Canonical form:** as serde_json writes an `f64`, the shortest decimal
+/// that reads back, without a trailing `.0`. So a whole number below 10¹⁶
+/// is an integer (`1.0` is `1`, `1e15` is `1000000000000000`), from 10¹⁶ it
+/// takes an exponent (`1e+16`, `1.5e+300`), and any other number is as it
+/// reads (`1.5`, `0.00012`, `1e-7`). `scripts/oracle.py` writes the same
+/// bytes, and numbers read correctly rounded (`float_roundtrip`), so the
+/// form reads back to the same number.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Num(f64);
 
@@ -148,7 +152,7 @@ impl Eq for Num {}
 impl Num {
     pub fn parse(v: &Value) -> Option<Self> {
         let x = v.as_f64()?;
-        (x.is_finite() && x.abs() < NUM_MAX).then_some(Num(if x == 0.0 { 0.0 } else { x }))
+        x.is_finite().then_some(Num(if x == 0.0 { 0.0 } else { x }))
     }
 
     pub fn get(self) -> f64 {
@@ -158,12 +162,13 @@ impl Num {
 
 impl Serialize for Num {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        if self.0.fract() == 0.0 { s.serialize_i64(self.0 as i64) } else { s.serialize_f64(self.0) }
+        // Below 10¹⁶ a whole f64 is exact in an i64; serde_json would add `.0`.
+        if self.0.fract() == 0.0 && self.0.abs() < NUM_PLAIN_BELOW { s.serialize_i64(self.0 as i64) } else { s.serialize_f64(self.0) }
     }
 }
 
 pub(crate) fn num(v: &Value, path: &str) -> Result<Num, Error> {
-    Num::parse(v).ok_or_else(|| Error::new(path, format!("must be a number between -10^15 and 10^15 (got {})", crate::doc::json_quote(v))))
+    Num::parse(v).ok_or_else(|| Error::new(path, format!("must be a number (got {})", crate::doc::json_quote(v))))
 }
 
 fn is_false(b: &bool) -> bool {
@@ -256,7 +261,7 @@ pub struct MetricBody {
 pub struct FileBody {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
+    pub line: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub state: FileState,
@@ -446,8 +451,8 @@ pub(crate) fn progress(v: &Value, path: &str) -> Result<Progress, Error> {
     let (Some(n), Some(of)) = (o.get("n"), o.get("of")) else {
         return Err(Error::new(path, "needs n and of: {\"n\":3,\"of\":7}"));
     };
-    let n = whole(n, &join(path, "n"), 0, PROGRESS_MAX)?;
-    let of = whole(of, &join(path, "of"), 1, PROGRESS_MAX)?;
+    let n = whole(n, &join(path, "n"), 0, PROGRESS_MAX.into())? as u32;
+    let of = whole(of, &join(path, "of"), 1, PROGRESS_MAX.into())? as u32;
     if n > of {
         return Err(Error::new(join(path, "n"), format!("{n} is more than of ({of})")));
     }
@@ -578,7 +583,7 @@ fn file(o: &Map<String, Value>, path: &str) -> Result<FileBody, Error> {
         return Err(Error::new(join(path, "path"), "required"));
     };
     let file_path = string(p, &join(path, "path"), Lines::Single, 1, FILE_PATH_MAX, "")?;
-    let line = o.get("line").map(|v| whole(v, &join(path, "line"), 1, LINE_NUMBER_MAX)).transpose()?;
+    let line = o.get("line").map(|v| whole(v, &join(path, "line"), 1, u64::MAX)).transpose()?;
     let note = optional(o, "note", path, FILE_NOTE_MAX)?;
     let state = parse_state(o.get("state"), &join(path, "state"), FileState::ALL, FileState::WHAT, FileState::parse, None)?;
     Ok(FileBody { path: file_path, line, note, state })

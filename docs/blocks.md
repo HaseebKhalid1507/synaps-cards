@@ -249,7 +249,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
   - **Not revisions:** placement (`move`, `at`, `target`, `slot`), `collapse`, and dismissal.
   - **A user edit** that applies at least one path adds one revision, authored by the user.
   - **Cap:** at most 9,999 revisions per incarnation. Ops past that are skipped, with `replace the block or use a new id`.
-- **Semantic equality** is equality of the normalized form, as `cards_spec::block` normalizes it: defaults filled, strings sanitized, keys in schema order, map keys in byte order. The digest hashes the same form (§1.6).
+- **Semantic equality** is equality of the normalized form, as `cards_spec::block` normalizes it: defaults filled, strings sanitized, keys in schema order, map keys in byte order, and each number in one spelling: the shortest that reads back, a whole one below 10¹⁶ as an integer (`1e+16` from there). The digest hashes the same form (§1.6).
 
 ### 1.5 Kinds v1
 
@@ -261,8 +261,8 @@ A block's `title` (≤ 80) is top-level, and the `body` is its kind's. All strin
 | **status** | `{"text":"Bisecting the cutoff","detail":"3 of 7 commits left","progress":{"n":3,"of":7},"state":"working"}` | text ≤ 80, detail ≤ 120; n ≤ of ≤ 10⁶; state `working·waiting·blocked·done`; ≤ 512 B | — | none (it's the agent's voice) |
 | **diff** | `{"file":"crates/relay/src/token_store.rs","state":"editing","from":"edits"}`, or a proposal: `{"file":…,"state":"proposed","hunks":[{"id":"h1","at":"rotate()","lines":["- let t = …","+ let _g = slot.lock().await;"],"state":"open"}]}` | file ≤ 200; state `editing·proposed·written·reverted`; 1–6 hunks, ≤ 120 lines in all, a line ≤ 160; hunk state `open·kept·dropped`, where the agent writes `open` and `kept` and `dropped` are the user's (§3.4); ≤ 6 KiB | `hunks` | a proposal's hunks: kept or dropped |
 | **note** | `{"text":"Two refreshes read the same token before either rotates it…"}` | ≤ 1500 chars, ≤ 30 lines, markdown-lite as a card's detail (design §5.2); ≤ 2 KiB | — | `text`, `title` |
-| **metric** | `{"label":"Upstream rotations per burst","value":"1.0","was":"2.0","unit":"","series":[2,2,1.5,1],"state":"ok"}` | label ≤ 60; value, was and unit ≤ 16 (the agent formats them); series ≤ 32 numbers, and an append rolls off the oldest; state `ok·warn·bad·neutral`; ≤ 1 KiB | — | none |
-| **file** | `{"path":"crates/relay/src/token_store.rs","line":84,"note":"TokenStore::rotate","state":"editing"}` | path ≤ 200, note ≤ 80; state `reading·editing·written·done`; ≤ 512 B | — | none |
+| **metric** | `{"label":"Upstream rotations per burst","value":"1.0","was":"2.0","unit":"","series":[2,2,1.5,1],"state":"ok"}` | label ≤ 60; value, was and unit ≤ 16 (the agent formats them); series ≤ 32 numbers, any finite ones (no ceiling: the count and the 1 KiB bound them), and an append rolls off the oldest; state `ok·warn·bad·neutral`; ≤ 1 KiB | — | none |
+| **file** | `{"path":"crates/relay/src/token_store.rs","line":84,"note":"TokenStore::rotate","state":"editing"}` | path ≤ 200, note ≤ 80; `line` a whole number ≥ 1, any that fits 64 bits; state `reading·editing·written·done`; ≤ 512 B | — | none |
 | **question** | **A card.** It is made only by `cards_ui` (design §1.4), and named `card:c4f9x2a` in ops | the card's own: 8 KiB | — | answered as a card (design §3) |
 | *group* | from `merge` only: `{"members":["schema","trace"]}` | 2–8 members, one level (§1.3) | — | unpack (local) |
 

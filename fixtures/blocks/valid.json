@@ -1304,6 +1304,93 @@
       "result": "ok 4 ops (blocks/1 #7e594a7c3cb59399)"
     },
     {
+      "about": "§1.5 (amended at B1): numbers have no product ceiling: a file's line past 10^7 up to 2^64 - 1, and series numbers from 10^16 on (exponent form), up to the largest f64",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 10000001,
+              "state": "reading"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "g",
+            "set": {
+              "line": 18446744073709551615
+            }
+          },
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "series": [
+                1000000000000000.0,
+                9999999999999998,
+                1e+16,
+                -1e+16,
+                12345678901234567890,
+                1.5e+300,
+                1.7976931348623157e+308
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "line": 10000001,
+              "state": "reading"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "g",
+            "set": {
+              "line": 18446744073709551615
+            }
+          },
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "series": [
+                1000000000000000,
+                9999999999999998,
+                1e+16,
+                -1e+16,
+                1.2345678901234567e+19,
+                1.5e+300,
+                1.7976931348623157e+308
+              ],
+              "state": "neutral"
+            }
+          }
+        ]
+      },
+      "digest": "93f78a4ffc7a729b",
+      "result": "ok 3 ops (blocks/1 #93f78a4ffc7a729b)"
+    },
+    {
       "about": "sanitized strings: CRLF and tabs, invisibles dropped, ZWJ kept; a note keeps its lines, a title folds them",
       "input": {
         "ops": [

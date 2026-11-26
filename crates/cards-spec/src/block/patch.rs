@@ -125,8 +125,8 @@ pub enum Spec {
     },
     Flag,
     Whole {
-        min: u32,
-        max: u32,
+        min: u64,
+        max: u64,
     },
     /// `{"n":…,"of":…}`.
     Progress,
@@ -179,7 +179,7 @@ pub fn set_spec(kind: Kind, author: Author, path: &Path) -> Option<Spec> {
             (Metric, "was" | "unit", false, None) => one_line(0, METRIC_VALUE_MAX),
             (Metric, "state", false, None) => words!(MetricState),
             (File, "path", false, None) => one_line(1, FILE_PATH_MAX),
-            (File, "line", false, None) => Spec::Whole { min: 1, max: LINE_NUMBER_MAX },
+            (File, "line", false, None) => Spec::Whole { min: 1, max: u64::MAX },
             (File, "note", false, None) => one_line(0, FILE_NOTE_MAX),
             (File, "state", false, None) => words!(FileState),
             _ => return None,
@@ -245,7 +245,7 @@ pub enum SetValue {
     /// A string, or a state's word.
     Text(String),
     Flag(bool),
-    Whole(u32),
+    Whole(u64),
     Progress(Progress),
 }
 

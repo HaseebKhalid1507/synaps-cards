@@ -74,9 +74,10 @@ def cut(s, n):
 
 
 def fnum(x):
-    """A non-whole float as serde_json writes an f64 (ryu): the shortest
-    digits that read back; plain below 10^16, `0.000ddd` down to 10^-5,
-    then `d.ddde-N`."""
+    """A float as serde_json writes an f64, for a number that isn't whole or
+    is 10^16 or more: the shortest digits that read back; plain below
+    10^16, `0.000ddd` down to 10^-5, else `d.ddde-N` or `d.ddde+N`
+    (`1e-7`, `1e+16`)."""
     sign, digits, exp = Decimal(repr(x)).as_tuple()
     ds = "".join(map(str, digits))
     kk = len(ds) + exp
@@ -85,7 +86,7 @@ def fnum(x):
         return s + ds[:kk] + "." + ds[kk:]
     if -5 < kk <= 0:
         return s + "0." + "0" * -kk + ds
-    return s + ds[0] + ("." + ds[1:] if len(ds) > 1 else "") + "e" + str(kk - 1)
+    return s + ds[0] + ("." + ds[1:] if len(ds) > 1 else "") + "e" + ("+" if kk > 1 else "") + str(kk - 1)
 
 
 def canon(v):
@@ -100,7 +101,7 @@ def canon(v):
     if isinstance(v, int):
         return str(v)
     if isinstance(v, float):
-        return str(int(v)) if v == int(v) else fnum(v)
+        return str(int(v)) if v == int(v) and abs(v) < 1e16 else fnum(v)
     if isinstance(v, str):
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, list):
@@ -109,10 +110,11 @@ def canon(v):
 
 
 def num(x):
+    """A series number: any finite one; whole below 10^16 as an integer."""
     x = float(x)
     if x == 0:
         return 0
-    return int(x) if x == int(x) else x
+    return int(x) if x == int(x) and abs(x) < 1e16 else x
 
 
 # ── Normalizing (§1.3–§1.5) ──────────────────────────────────────────────
@@ -593,12 +595,6 @@ def limits():
     pair("a metric's unit (16 characters)", call(m(unit=chars(16))), call(m(unit=chars(17))), "ops[0].body.unit: at most 16 characters (got 17)")
     pair("a metric's series (32)", call(m(series=[1] * 32)), call(m(series=[1] * 33)), "ops[0].body.series: at most 32 numbers (got 33); an append rolls off the oldest")
     pair(
-        "a series number (below 10^15)",
-        call(m(series=[999999999999999, -999999999999999])),
-        call(m(series=[1000000000000000])),
-        "ops[0].body.series[0]: must be a number between -10^15 and 10^15 (got 1000000000000000)",
-    )
-    pair(
         "numbers one append adds to a series (32)",
         call(patch(append={"series": [0.5] * 32})),
         call(patch(append={"series": [0.5] * 33})),
@@ -622,7 +618,12 @@ def limits():
     f = lambda **b: put("file", {"path": "p", "state": "reading", **b})  # noqa: E731
     pair("a file's path (200 characters)", call(f(path=chars(200))), call(f(path=chars(201))), "ops[0].body.path: at most 200 characters (got 201)")
     pair("a file's note (80 characters)", call(f(note=chars(80))), call(f(note=chars(81))), "ops[0].body.note: at most 80 characters (got 81)")
-    pair("a file's line (10^7)", call(f(line=10000000)), call(f(line=10000001)), "ops[0].body.line: must be a whole number from 1 to 10000000 (got 10000001)")
+    pair(
+        "a file's line: no ceiling, what 64 bits hold (2^64 - 1; 2^64 reads as a float)",
+        call(f(line=2**64 - 1)),
+        call(f(line=2**64)),
+        "ops[0].body.line: must be a whole number of at least 1 that fits 64 bits (got 1.8446744073709552e+19)",
+    )
     file_of = lambda bs: {"path": text_of(bs[0], 200), "note": text_of(bs[1], 80), "state": "reading"}  # noqa: E731
     pair(
         "a file's body (512 bytes, normalized)",
