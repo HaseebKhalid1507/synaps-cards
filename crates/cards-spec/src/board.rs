@@ -31,11 +31,19 @@
 //!   each under §1.8's cap with its stated eviction ([`State::owned_bytes`]
 //!   counts them, and [`Board::owned_bytes`] everything the board keeps but
 //!   the card fold, which [`Board::card_fold_bytes`] reports apart).
+//! - **Replaying a batch** (its commit, [`Board::view`], [`Board::bound`]):
+//!   in passes of up to [`REPLAY_IDS`] block calls, each reading the rest of
+//!   the batch once for its calls' results, through an index that borrows
+//!   their tool ids from the history (≤ [`REPLAY_MAX_OWNED`] bytes). A batch
+//!   of up to [`REPLAY_IDS`] block calls costs two reads of it.
 //! - **Re-folding** ([`Refold`]): the board at a revision record's
 //!   reference, op by op ([`Target::Revision`]: its batch's binding read
 //!   from its results, the card fold as the commit had it), or the whole
-//!   history keeping one hand-back's outcome ([`Target::Outcome`]); in
-//!   slices of at most [`REFOLD_SLICE`] events, refused past [`REFOLD_MAX`].
+//!   history keeping one hand-back's outcome ([`Target::Outcome`]). In
+//!   steps of at most their budget of work and [`REFOLD_SLICE`], every
+//!   event visited counted (a commit pauses with its step); in one working
+//!   set; reading at most [`REFOLD_MAX`] events, the target's batch
+//!   included ([`TooFar`]).
 //!
 //! **References** ([`Pos`]) are positions in the board's input: an event's
 //! index, and an op's index in its call. The board never copies the history:
@@ -66,7 +74,9 @@
 //!    survives another history under the same positions), the generation
 //!    from the real first message;
 //! 6. re-folds ([`Refold`]) in small steps, the 30 ms clock checked between
-//!    them (a step can't be preempted), one scratch at a time.
+//!    them (a step can't be preempted, and does at most its budget of
+//!    work), one scratch at a time; `too far back to show` on a [`TooFar`]
+//!    from a step as from [`Refold::to`].
 //!
 //! **Decisions.** Where the design left a contract or something the user
 //! sees open, B2 took a default, made in one function marked `Decision Dn`.
@@ -132,11 +142,14 @@ pub use crate::fold::Event;
 
 mod apply;
 mod edit;
+mod replay;
 mod size;
 mod state;
 
 pub use apply::check_stored;
 pub use edit::{Key, keys};
+use replay::{Mode, Replay};
+pub use replay::{REPLAY_IDS, REPLAY_MAX_OWNED};
 pub use size::Largest;
 pub use state::*;
 
@@ -240,33 +253,6 @@ pub struct Board {
     at: usize,
 }
 
-/// What a block call of the open batch has, read from the history: its
-/// result's text, none yet, or a later call took its tool id over (so it
-/// never gets one).
-enum Answer<'e> {
-    Result(&'e str),
-    None,
-    Taken,
-}
-
-/// The answer of the call at `i`, from `events[i + 1..end]`: the first
-/// result for its tool id, unless a later call took the id over. Reading:
-/// the board scans the batch rather than keep a record per call, so it
-/// retains nothing per pending call; a batch's commit costs its length
-/// squared in comparisons of tool ids, as a view does.
-fn answer(events: &[Event], i: usize, end: usize) -> Answer<'_> {
-    let Event::Call { tool_id, .. } = &events[i] else { return Answer::None };
-    let mut first = None;
-    for e in &events[i + 1..end] {
-        match e {
-            Event::Call { tool_id: t, .. } if t == tool_id => return Answer::Taken,
-            Event::Result { tool_id: t, text } if t == tool_id && first.is_none() => first = Some(text.as_str()),
-            _ => {}
-        }
-    }
-    first.map_or(Answer::None, Answer::Result)
-}
-
 impl Board {
     /// An empty board of `generation` (§1.2).
     pub fn new(generation: Generation) -> Self {
@@ -308,14 +294,29 @@ impl Board {
     }
 
     fn read_one(&mut self, events: &[Event]) {
+        if self.commits(&events[self.at]) {
+            self.commit(events, self.at);
+        }
+        self.read_event(events);
+    }
+
+    /// Whether reading `e` commits the open batch first: `ResultsEnd`, a
+    /// user message, or a call after a result (the next assistant
+    /// message's).
+    fn commits(&self, e: &Event) -> bool {
+        match e {
+            Event::Call { .. } => self.results,
+            Event::Result { .. } => false,
+            Event::ResultsEnd | Event::User { .. } => true,
+        }
+    }
+
+    /// Reads the next event, its batch committed if it commits one.
+    fn read_event(&mut self, events: &[Event]) {
         let at = self.at;
         let event = &events[at];
         match event {
             Event::Call { name, .. } => {
-                // A call after a result starts the next assistant message.
-                if self.results {
-                    self.commit(events, at);
-                }
                 if block::NAMES.contains(&name.as_str()) {
                     self.calls = true;
                 }
@@ -325,12 +326,8 @@ impl Board {
                 self.results = true;
                 self.cards.apply(event);
             }
-            Event::ResultsEnd => {
-                self.commit(events, at);
-                self.cards.apply(event);
-            }
+            Event::ResultsEnd => self.cards.apply(event),
             Event::User { text } => {
-                self.commit(events, at);
                 self.cards.apply(event);
                 let read = message::read(text);
                 if let Some(e) = &read.edit {
@@ -342,68 +339,18 @@ impl Board {
         self.at += 1;
     }
 
-    /// The open batch's block calls, in call order, onto `state`: every
-    /// call, as if each without its result were unbound (`Commit`), or the
-    /// bound prefix only (`Bound`), or the overlay (`View`). The batch is
-    /// `events[self.open..end]`.
-    ///
-    /// With `stop`, an op's reference: no call after its call, and its call
-    /// through that op only; `true` if that op was reached (its call bound).
-    ///
-    /// `card:` ops resolve against `cards`, the card fold as it is at the
-    /// commit: the batch's results read (§1.7).
-    #[allow(clippy::too_many_arguments)]
-    fn replay(&self, cards: &Fold, state: &mut State, events: &[Event], end: usize, mode: Replay, stop: Option<Pos>) -> bool {
-        let mut pending = false;
-        for i in self.open..end {
-            let Event::Call { tool_id, name, input } = &events[i] else { continue };
-            if !block::NAMES.contains(&name.as_str()) {
-                continue;
-            }
-            if stop.is_some_and(|s| i > s.event) {
-                break;
-            }
-            let batch = block::parse_call(input).ok();
-            let binds = match (&batch, answer(events, i, end)) {
-                (None, _) | (_, Answer::Taken) => false,
-                (Some(b), Answer::Result(text)) => block::Receipt::parse(text).is_some_and(|r| r.binds(b)),
-                (Some(_), Answer::None) => match mode {
-                    Replay::Commit => false,
-                    Replay::Bound => return false,
-                    Replay::View => {
-                        pending = true;
-                        true
-                    }
-                },
-            };
-            let ops = match (&batch, stop) {
-                (Some(b), Some(Pos { event, op: Some(k) })) if event == i => b.ops.get(..=usize::from(k)),
-                (Some(b), _) => Some(&b.ops[..]),
-                (None, _) => None,
-            };
-            match ops {
-                Some(ops) if binds => {
-                    let cx = apply::Cx { call: i, tool_id, cards, pending };
-                    state.call(&cx, ops);
-                    if stop.is_some_and(|s| s.event == i) {
-                        return true;
-                    }
-                }
-                _ => state.unbound(Pos::event(i), pending),
-            }
-        }
-        false
-    }
-
-    /// Commits the open batch, `events[self.open..end]`: the next one
-    /// begins at `end`.
+    /// Commits the open batch, `events[self.open..end]`, replayed to its
+    /// end: the next one begins at `end`.
     fn commit(&mut self, events: &[Event], end: usize) {
         if self.calls {
-            let generation = self.state.generation;
-            let mut state = std::mem::replace(&mut self.state, State::new(generation));
-            self.replay(&self.cards, &mut state, events, end, Replay::Commit, None);
-            self.state = state;
+            let mut all = usize::MAX;
+            Replay::new(self.open, end, Mode::Commit, None).run(&self.cards, &mut self.state, events, &mut all);
         }
+        self.close(end);
+    }
+
+    /// The open batch is committed: the next one begins at `end`.
+    fn close(&mut self, end: usize) {
         self.open = end;
         self.calls = false;
         self.results = false;
@@ -421,20 +368,21 @@ impl Board {
     /// [`Logged::pending`]). With every result in, it is the board the
     /// history will hold. `events` is the history the board read.
     pub fn view(&self, events: &[Event]) -> State {
-        let mut s = self.state.clone();
-        if self.calls {
-            self.replay(&self.cards, &mut s, self.history(events), self.at, Replay::View, None);
-        }
-        s
+        self.replayed(events, Mode::View)
     }
 
     /// The bound board (§3.2): committed, then the open calls up to the
     /// first without its result. A take starts here, never from pending
     /// state.
     pub fn bound(&self, events: &[Event]) -> State {
+        self.replayed(events, Mode::Bound)
+    }
+
+    fn replayed(&self, events: &[Event], mode: Mode) -> State {
         let mut s = self.state.clone();
         if self.calls {
-            self.replay(&self.cards, &mut s, self.history(events), self.at, Replay::Bound, None);
+            let mut all = usize::MAX;
+            Replay::new(self.open, self.at, mode, None).run(&self.cards, &mut s, self.history(events), &mut all);
         }
         s
     }
@@ -452,13 +400,6 @@ impl Board {
     pub fn generation(&self) -> Generation {
         self.state.generation
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Replay {
-    Commit,
-    View,
-    Bound,
 }
 
 /// The op a reference names, read back from the board's input (§1.8: a
@@ -500,19 +441,54 @@ pub enum Target {
 }
 
 /// A board folded to a [`Target`], cooperatively (§1.8): a revision view,
-/// or an evicted outcome's row. [`Refold::step`] reads at most its budget
-/// and at most [`REFOLD_SLICE`] events, so the desk can yield between
-/// slices; it adds the 30 ms clock (D5). The step that reaches the target
-/// also reads the target's batch.
+/// or an evicted outcome's row, in the re-fold scratch.
+///
+/// **Work.** [`Refold::step`] does at most its budget of work, and never
+/// more than [`REFOLD_SLICE`]: one unit for every event it visits, however
+/// it visits it (folding it, looking for the target's batch's end, reading
+/// it into the card fold, a replay's read of it for results, applying its
+/// call). A batch's commit is a replay that pauses with the step and
+/// resumes with the next. So the desk can yield between steps, and adds
+/// the 30 ms clock (D5).
+///
+/// **Extent.** It reads at most the history's first [`REFOLD_MAX`] events,
+/// the target's batch included: an op whose batch ends (or whose result
+/// comes) past them is [`TooFar`], found by the step that gets there.
+///
+/// **One working set.** The board it reads becomes the board at the
+/// target: the target is materialized in place, never cloned, and the card
+/// fold is let go once done. [`Refold::owned_bytes`] counts it all, the
+/// replay's index included, the card fold apart.
 #[derive(Clone, Debug)]
 pub struct Refold<'a> {
     events: &'a [Event],
     target: Target,
     /// The board reads this far, then the target is materialized.
     until: usize,
+    /// The board read so far, then the board at the target.
     board: Board,
-    /// Once done: the board at the target, if the target took effect.
-    done: Option<Option<State>>,
+    work: Work<'a>,
+    /// Events visited so far, every kind of work counted.
+    visited: usize,
+}
+
+/// Where a [`Refold`] is.
+#[derive(Clone, Debug)]
+enum Work<'a> {
+    /// Reading the history up to the target, and the commit of a batch
+    /// under way, if any.
+    Fold(Option<Replay<'a>>),
+    /// An op's revision: its batch's end looked for from `at` (where the
+    /// board would commit it: `ResultsEnd`, a user message, a call after a
+    /// result), `results` once one has been read.
+    End { at: usize, results: bool },
+    /// An op's revision: the card fold reads the target's batch,
+    /// `[at, end)`, as its commit had it.
+    Cards { at: usize, end: usize, mode: Mode },
+    /// The open batch replayed to the target.
+    Target(Replay<'a>),
+    /// Done: whether the target took effect, or too far back.
+    Done(Result<bool, TooFar>),
 }
 
 /// A re-fold past [`REFOLD_MAX`] events: `too far back to show`.
@@ -521,115 +497,171 @@ pub struct TooFar;
 
 impl<'a> Refold<'a> {
     /// A re-fold of `events`, the history the reference is into, to
-    /// `target`.
+    /// `target`: [`TooFar`] at once if the target itself lies past
+    /// [`REFOLD_MAX`] events.
     pub fn to(generation: Generation, events: &'a [Event], target: Target) -> Result<Self, TooFar> {
-        let until = match target {
-            Target::Revision(Pos { event, op: Some(_) }) => event,
-            Target::Revision(Pos { event, op: None }) => event.saturating_add(1),
-            Target::Outcome(_) => events.len(),
-        }
-        .min(events.len());
-        if until > REFOLD_MAX {
+        let (until, extent) = match target {
+            Target::Revision(Pos { event, op: Some(_) }) => (event, event.saturating_add(1)),
+            Target::Revision(Pos { event, op: None }) => (event.saturating_add(1), event.saturating_add(1)),
+            Target::Outcome(_) => (events.len(), events.len()),
+        };
+        if extent.min(events.len()) > REFOLD_MAX {
             return Err(TooFar);
         }
         let mut board = Board::new(generation);
         if let Target::Outcome(at) = target {
             board.state.pinned = Some(at);
         }
-        Ok(Refold { events, target, until, board, done: None })
+        Ok(Refold { events, target, until: until.min(events.len()), board, work: Work::Fold(None), visited: 0 })
     }
 
-    /// Read up to `budget` more events, and never more than
-    /// [`REFOLD_SLICE`]; `true` once done. A step can't be preempted, so the
-    /// desk gives small budgets and checks its 30 ms clock between steps
-    /// (§1.8: a yield every 50,000 events or 30 ms, whichever comes first).
+    /// Does up to `budget` more work, and never more than [`REFOLD_SLICE`]
+    /// (one an event visited): `Ok(true)` once done, [`TooFar`] if the
+    /// target's batch runs past [`REFOLD_MAX`] events. A step can't be
+    /// preempted, so the desk gives small budgets and checks its 30 ms
+    /// clock between steps (§1.8: a yield every 50,000 events or 30 ms,
+    /// whichever comes first).
     pub fn step(&mut self, budget: usize) -> Result<bool, TooFar> {
-        if self.done.is_some() {
-            return Ok(true);
+        let mut left = budget.min(REFOLD_SLICE);
+        let before = left;
+        self.work(&mut left);
+        self.visited += before - left;
+        match self.work {
+            Work::Done(done) => done.map(|_| true),
+            _ => Ok(false),
         }
-        let to = self.until.min(self.board.position().saturating_add(budget.min(REFOLD_SLICE)));
-        self.board.read(&self.events[..to]);
-        if self.board.position() < self.until {
-            return Ok(false);
-        }
-        self.done = Some(self.finish());
-        // One working set (§1.8): the board's was moved into the result,
-        // and the card fold is let go.
-        self.board.cards = Fold::default();
-        Ok(true)
     }
 
-    /// The board at the target, materialized in the board's own working
-    /// set: moved out of it, never cloned.
-    fn finish(&mut self) -> Option<State> {
+    fn work(&mut self, left: &mut usize) {
         let events = self.events;
-        let generation = self.board.state.generation;
-        let take = |b: &mut Board| std::mem::replace(&mut b.state, State::new(generation));
-        match self.target {
-            Target::Revision(at @ Pos { event, op: Some(_) }) => {
-                let Some(Event::Call { name, .. }) = events.get(event) else { return None };
-                if !block::NAMES.contains(&name.as_str()) {
-                    return None;
-                }
-                // The call starts the next batch if a result came before it.
-                if self.board.results {
-                    self.board.commit(events, event);
-                }
-                // Its batch ends where the board would commit it; with no
-                // end yet, only its bound prefix is final.
-                let mut results = false;
-                let mut end = None;
-                for (j, e) in events.iter().enumerate().skip(event + 1) {
-                    match e {
-                        Event::ResultsEnd | Event::User { .. } => end = Some(j),
-                        Event::Call { .. } if results => end = Some(j),
-                        Event::Result { .. } => results = true,
-                        Event::Call { .. } => {}
+        let target = self.target;
+        loop {
+            let b = &mut self.board;
+            let next = match &mut self.work {
+                Work::Done(_) => return,
+                Work::Fold(commit) => {
+                    if let Some(job) = commit {
+                        if job.run(&b.cards, &mut b.state, events, left).is_none() {
+                            return;
+                        }
+                        b.close(job.end);
+                        *commit = None;
                     }
-                    if end.is_some() {
-                        break;
+                    let at = b.at;
+                    // An op's call starts the next batch if a result came
+                    // before it: that batch commits first.
+                    let op = matches!(target, Target::Revision(Pos { op: Some(_), .. }));
+                    if (at < self.until || op && at == self.until && at < events.len()) && b.commits(&events[at]) {
+                        if b.calls {
+                            *commit = Some(Replay::new(b.open, at, Mode::Commit, None));
+                            continue;
+                        }
+                        b.close(at);
+                    }
+                    if at < self.until {
+                        let Some(l) = left.checked_sub(1) else { return };
+                        *left = l;
+                        b.read_event(events);
+                        continue;
+                    }
+                    match target {
+                        Target::Revision(Pos { event, op: Some(_) }) => match events.get(event) {
+                            Some(Event::Call { name, .. }) if block::NAMES.contains(&name.as_str()) => {
+                                Work::End { at: event + 1, results: false }
+                            }
+                            _ => Work::Done(Ok(false)),
+                        },
+                        Target::Revision(Pos { op: None, .. }) if b.calls => {
+                            Work::Target(Replay::new(b.open, self.until, Mode::Bound, None))
+                        }
+                        Target::Outcome(_) if b.calls => Work::Target(Replay::new(b.open, events.len(), Mode::View, None)),
+                        _ => Work::Done(Ok(true)),
                     }
                 }
-                let (end, mode) = end.map_or((events.len(), Replay::Bound), |e| (e, Replay::Commit));
-                // The card fold as the commit has it: the batch read.
-                for e in &events[event..end] {
-                    self.board.cards.apply(e);
+                Work::End { at, results } => loop {
+                    // With no end yet, only its bound prefix is final.
+                    if *at >= events.len() {
+                        break Work::Cards { at: target_event(target), end: events.len(), mode: Mode::Bound };
+                    }
+                    if *at >= REFOLD_MAX {
+                        break Work::Done(Err(TooFar));
+                    }
+                    let Some(l) = left.checked_sub(1) else { return };
+                    *left = l;
+                    let end = match &events[*at] {
+                        Event::ResultsEnd | Event::User { .. } => true,
+                        Event::Call { .. } => *results,
+                        Event::Result { .. } => {
+                            *results = true;
+                            false
+                        }
+                    };
+                    if end {
+                        break Work::Cards { at: target_event(target), end: *at, mode: Mode::Commit };
+                    }
+                    *at += 1;
+                },
+                Work::Cards { at, end, mode } => {
+                    while *at < *end {
+                        let Some(l) = left.checked_sub(1) else { return };
+                        *left = l;
+                        b.cards.apply(&events[*at]);
+                        *at += 1;
+                    }
+                    Work::Target(Replay::new(b.open, *end, *mode, Some(target_at(target))))
                 }
-                let mut s = take(&mut self.board);
-                self.board.replay(&self.board.cards, &mut s, events, end, mode, Some(at)).then_some(s)
-            }
-            Target::Revision(Pos { op: None, .. }) => {
-                let mut s = take(&mut self.board);
-                if self.board.calls {
-                    self.board.replay(&self.board.cards, &mut s, &events[..self.until], self.until, Replay::Bound, None);
+                Work::Target(job) => {
+                    let Some(reached) = job.run(&b.cards, &mut b.state, events, left) else { return };
+                    Work::Done(Ok(reached || !matches!(target, Target::Revision(Pos { op: Some(_), .. }))))
                 }
-                Some(s)
-            }
-            Target::Outcome(_) => {
-                let mut s = take(&mut self.board);
-                if self.board.calls {
-                    self.board.replay(&self.board.cards, &mut s, events, events.len(), Replay::View, None);
+            };
+            if let Work::Done(done) = &next {
+                // One working set (§1.8): the card fold goes, and so does
+                // the board if the target never took effect.
+                b.cards = Fold::default();
+                if *done != Ok(true) {
+                    b.state = State::new(b.state.generation);
                 }
-                Some(s)
             }
+            self.work = next;
         }
     }
 
     /// Once done ([`Refold::step`]): the board at the target. `None` if the
-    /// target never took effect: its call didn't bind, or it is pending.
+    /// target never took effect (its call didn't bind, or it is pending),
+    /// or it was too far back.
     pub fn state(&self) -> Option<&State> {
-        self.done.as_ref()?.as_ref()
-    }
-
-    /// The board read so far.
-    pub fn board(&self) -> &Board {
-        &self.board
+        matches!(self.work, Work::Done(Ok(true))).then_some(&self.board.state)
     }
 
     /// Events folded so far: the next one's position.
     pub fn position(&self) -> usize {
         self.board.position()
     }
+
+    /// Work done so far: events visited, every kind of visit counted
+    /// ([`Refold`]).
+    pub fn visited(&self) -> usize {
+        self.visited
+    }
+
+    /// The replay under way, if any.
+    fn replay(&self) -> Option<&Replay<'a>> {
+        match &self.work {
+            Work::Fold(Some(r)) | Work::Target(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
+fn target_at(target: Target) -> Pos {
+    match target {
+        Target::Revision(at) | Target::Outcome(at) => at,
+    }
+}
+
+fn target_event(target: Target) -> usize {
+    target_at(target).event
 }
 
 #[cfg(test)]

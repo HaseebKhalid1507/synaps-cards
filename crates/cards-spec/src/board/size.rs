@@ -302,12 +302,11 @@ impl Board {
 
 impl Refold<'_> {
     /// What the re-fold scratch owns besides the card fold it reads, in
-    /// owned bytes (§1.8: one at a time, ≤ 1 MiB): the board it reads, and
-    /// the board at its target once done.
+    /// owned bytes (§1.8: one at a time, ≤ 1 MiB): one working set (the
+    /// board it reads, which becomes the board at its target), and its
+    /// replay's index while a batch replays (≤ [`REPLAY_MAX_OWNED`]).
     pub fn owned_bytes(&self) -> usize {
-        size_of::<Self>() - size_of::<Board>() - size_of::<Option<Option<State>>>()
-            + self.board.owned_bytes()
-            + self.state().map_or(0, State::owned_bytes)
+        size_of::<Self>() - size_of::<Board>() + self.board.owned_bytes() + self.replay().map_or(0, |r| r.owned_bytes())
     }
 }
 

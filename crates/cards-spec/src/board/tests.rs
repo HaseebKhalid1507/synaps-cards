@@ -1195,13 +1195,12 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
     }
     let until = 41;
     let mut rf = Refold::to(generation(), &h.events, Target::Revision(Pos::event(until - 1))).unwrap();
-    let mut slices = 0;
-    while !rf.step(7).unwrap() {
-        slices += 1;
-    }
-    assert_eq!(slices, 5);
+    let steps = steps_of(&mut rf, 7).unwrap();
+    // Every step but the last does 7 events' work; a batch's commit is work.
+    assert_eq!(steps, rf.visited().div_ceil(7));
+    assert!(rf.visited() > until, "{}", rf.visited());
     assert_eq!(rf.state(), Some(&Board::fold(generation(), &h.events[..until]).bound(&h.events[..until])));
-    assert_eq!(rf.board().position(), until);
+    assert_eq!(rf.position(), until);
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
     assert!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX - 1))).is_ok());
     assert_eq!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX))).err(), Some(TooFar));
@@ -1433,6 +1432,22 @@ fn a_group_at_its_revision_cap_keeps_its_members_unless_it_ends() {
     assert_eq!(s.block(&r("a")).unwrap().place, Place::Rail(Slot::Upper));
 }
 
+/// Steps `rf` to its end with `budget`, checking each step does at most its
+/// budget of work, and never more than a slice: how many steps.
+fn steps_of(rf: &mut Refold, budget: usize) -> Result<usize, TooFar> {
+    let mut steps = 0;
+    loop {
+        let before = rf.visited();
+        let done = rf.step(budget);
+        steps += 1;
+        let work = rf.visited() - before;
+        assert!(work <= budget.min(REFOLD_SLICE), "a step of {budget} did {work}");
+        if done? {
+            return Ok(steps);
+        }
+    }
+}
+
 /// §1.8 (P3-1): a re-fold's step reads at most [`REFOLD_SLICE`] events,
 /// whatever budget it is given.
 #[test]
@@ -1443,7 +1458,7 @@ fn a_refold_step_reads_at_most_a_slice() {
     let mut read = Vec::new();
     for budget in [0, 1, REFOLD_SLICE, REFOLD_SLICE + 1, usize::MAX, usize::MAX] {
         let done = rf.step(budget).unwrap();
-        read.push((rf.board().position(), done));
+        read.push((rf.position(), done));
     }
     let slices = |k: usize| 1 + k * REFOLD_SLICE;
     assert_eq!(read, [(0, false), (1, false), (slices(1), false), (slices(2), false), (slices(3), false), (n, true)]);
@@ -1700,8 +1715,12 @@ fn the_owned_byte_ceilings_are_derived_and_sum_under_one_mib() {
         + OUTCOMES_MAX * OUTCOME_MAX_OWNED
         + LOG_MAX * RECORD_MAX_BYTES;
     assert!(sum <= WORKING_SET_MAX_BYTES, "{sum}");
+    // The re-fold scratch: one working set, its own fields and its
+    // replay's index (R2-P2-1, R2-P2-2).
+    let scratch = size_of::<Refold>() - size_of::<Board>() + sum + REPLAY_MAX_OWNED;
+    assert!(scratch <= WORKING_SET_MAX_BYTES, "{scratch}");
     println!(
-        "D8 ceilings: block {block} of {BLOCK_MAX_OWNED}, record {record}, line {line}, tombstone {tombstone}, visibility {visibility}, run {run}, outcome {outcome}; sum {sum} of {WORKING_SET_MAX_BYTES}"
+        "D8 ceilings: block {block} of {BLOCK_MAX_OWNED}, record {record}, line {line}, tombstone {tombstone}, visibility {visibility}, run {run}, outcome {outcome}; sum {sum}, the scratch {scratch}, of {WORKING_SET_MAX_BYTES}"
     );
 }
 
@@ -1855,11 +1874,10 @@ fn an_op_targets_binding_tail_is_read_in_slices() {
     let events = binding_tail(REFOLD_SLICE + 10_000);
     let mut rf = Refold::to(generation(), &events, AT_PUT).unwrap();
     assert_eq!(rf.step(0), Ok(false), "a step of 0 does nothing");
+    assert_eq!(rf.visited(), 0);
     assert_eq!(rf.step(1), Ok(false), "a step of 1 reads one event");
-    let mut slices = 1;
-    while !rf.step(REFOLD_SLICE).unwrap() {
-        slices += 1;
-    }
+    assert_eq!(rf.visited(), 1);
+    let slices = steps_of(&mut rf, usize::MAX).unwrap();
     assert!(slices >= 2, "{slices}");
     assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
 }
@@ -1873,16 +1891,14 @@ fn an_op_target_whose_batch_ends_past_the_maximum_is_too_far_back() {
     for (k, far) in [(REFOLD_MAX - 3, false), (REFOLD_MAX - 2, true), (REFOLD_MAX, true)] {
         let events = binding_tail(k);
         let mut rf = Refold::to(generation(), &events, AT_PUT).unwrap();
-        let done = loop {
-            match rf.step(REFOLD_SLICE) {
-                Ok(false) => {}
-                other => break other,
-            }
-        };
+        let done = steps_of(&mut rf, REFOLD_SLICE);
+        assert!(rf.position() <= REFOLD_MAX);
         if far {
             assert_eq!(done, Err(TooFar), "a batch ending at {}", k + 2);
+            assert_eq!(rf.state(), None);
+            assert_eq!(rf.step(REFOLD_SLICE), Err(TooFar), "and it stays so");
         } else {
-            assert_eq!(done, Ok(true));
+            assert!(done.is_ok());
             assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
         }
     }
@@ -1921,6 +1937,84 @@ fn a_refold_pauses_inside_a_long_batchs_commit() {
             }
         }
         assert!(paused > n, "{target:?}: {paused} steps at the commit");
+        // No quadratic replay: a read of the batch for each pass of
+        // REPLAY_IDS calls, and one to apply them.
+        let len = h.events.len();
+        assert!(rf.visited() <= len + (n.div_ceil(REPLAY_IDS) + 1) * len, "{target:?}: {} visits", rf.visited());
         assert_eq!(rf.state().unwrap().blocks().collect::<Vec<_>>(), want.blocks().collect::<Vec<_>>(), "{target:?}");
     }
+}
+
+/// §1.8 (R2-P2-2): an op's revision in a batch of the largest extent: its
+/// end is the last event a re-fold reads, with 1,024 block calls and their
+/// results around ~197,000 other calls. The target is the last block call's
+/// op; its batch replays in passes of REPLAY_IDS calls, each step within
+/// its slice, the scratch under its cap at every step.
+#[test]
+fn an_op_target_in_a_batch_of_the_largest_extent() {
+    let calls = 1_024;
+    let mut h = H::default();
+    h.ops(json!([note("n", "0")]));
+    h.events.push(Event::ResultsEnd);
+    let open = h.events.len();
+    let patches: Vec<(String, Value)> = (1..=calls)
+        .map(|i| {
+            let ops = json!([{"op":"patch","id":"n","set":{"text": i.to_string()}}]);
+            (h.call(ops.clone()), ops)
+        })
+        .collect();
+    let others = REFOLD_MAX - 1 - open - 2 * calls;
+    h.events.extend((0..others).map(|i| Event::Call { tool_id: format!("b{i}"), name: "bash".into(), input: Value::Null }));
+    for (t, ops) in &patches {
+        h.bind(t, ops);
+    }
+    h.events.push(Event::ResultsEnd);
+    assert_eq!(h.events.len(), REFOLD_MAX);
+    let target = Target::Revision(Pos { event: open + calls - 1, op: Some(0) });
+    let mut rf = Refold::to(generation(), &h.events, target).unwrap();
+    let mut most = 0;
+    loop {
+        let before = rf.visited();
+        let done = rf.step(REFOLD_SLICE / 4).unwrap();
+        assert!(rf.visited() - before <= REFOLD_SLICE / 4);
+        most = most.max(rf.owned_bytes());
+        if done {
+            break;
+        }
+    }
+    let s = rf.state().unwrap();
+    assert_eq!(note_text(s, "n"), calls.to_string());
+    assert_eq!(s.block(&r("n")).unwrap().rev as usize, calls + 1);
+    assert!(most <= WORKING_SET_MAX_BYTES, "{most}");
+    let passes = calls.div_ceil(REPLAY_IDS) + 1;
+    assert!(rf.visited() <= (passes + 3) * REFOLD_MAX, "{} visits", rf.visited());
+}
+
+/// D8 (R2-P2-2): a replay's index holds at most REPLAY_IDS tool ids, so
+/// it owns at most REPLAY_MAX_OWNED bytes, however many calls a batch has
+/// and however long their ids, and copies none of them.
+#[test]
+fn a_replays_index_is_bounded() {
+    assert_eq!(REPLAY_MAX_OWNED, 16_912);
+    let mut h = H::default();
+    let long = "x".repeat(4096);
+    for i in 0..3 * REPLAY_IDS {
+        let ops = json!([note(&format!("n{}", i % 30), "x")]);
+        let t = format!("{long}{i}");
+        h.events.push(Event::Call { tool_id: t.clone(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+    }
+    let mut replay = replay::Replay::new(0, h.events.len(), replay::Mode::View, None);
+    let mut state = State::new(generation());
+    let cards = Fold::default();
+    let mut most = 0;
+    loop {
+        let mut budget = 17;
+        let done = replay.run(&cards, &mut state, &h.events, &mut budget);
+        most = most.max(replay.owned_bytes());
+        if done.is_some() {
+            break;
+        }
+    }
+    assert_eq!(most, REPLAY_MAX_OWNED);
+    assert_eq!(state.live(), 30);
 }
