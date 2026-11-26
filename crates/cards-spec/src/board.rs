@@ -65,24 +65,28 @@
 //! 6. re-folds ([`Refold`]) in small steps, the 30 ms clock checked between
 //!    them (a step can't be preempted), one scratch at a time.
 //!
-//! **Decisions (pending Haseeb).** Where the design leaves a contract or
-//! something the user sees open, this module takes a default, marked
-//! `Decision (pending Haseeb), Dn` in the one function that makes it, so a
-//! different answer is a local change:
-//! - D1: on a resolved card no `replace` converted, only `replace` acts
-//!   (`patch`, `collapse`, `move` and `remove` skip: `no block yet`);
-//! - D2: a `replace` without a title keeps the block's;
-//! - D3: a list's and a body's caps are checked per path: the path that
-//!   would pass one is skipped, and the patch's other paths apply;
-//! - D4: a user's skip of a skipped step, or unskip of a todo one, is
+//! **Decisions.** Where the design left a contract or something the user
+//! sees open, B2 took a default, made in one function marked `Decision Dn`.
+//! D2, D4 and D6 read the design as written. D1, D3, D5, D7 and D8 amend
+//! `docs/blocks.md` (each its own commit, so another answer is a local
+//! change); Haseeb's card on them is pending:
+//! - D1 (§1.5): a resolved card has no block until a `replace` converts it,
+//!   so `patch`, `collapse`, `move` and `remove` on it skip (`no block
+//!   yet`);
+//! - D2 (§1.3): a `replace` without a title keeps the block's;
+//! - D3 (§1.4, §1.8): a list's and a body's caps are checked per path: the
+//!   path that would pass one is skipped, and the patch's other paths apply;
+//! - D4 (§3.4): a user's skip of a skipped step, or unskip of a todo one, is
 //!   `unchanged`, not a conflict;
-//! - D5: a `move` with only `at` lands in its block's list, whatever the
-//!   target (a card's into the rail is skipped);
-//! - D6: what overwrites the user's edit (`changed your edit`): the agent's
-//!   `set` of the path, `order` of the list, or `remove` of the item;
-//! - D7: the fold holds a patch to the kinds' maxima only, so a patch may
-//!   remove a plan's last step (1–20 steps is the extension's, on a body);
-//! - D8: §1.8's bytes per entry are payload figures ([`State::owned_bytes`]).
+//! - D5 (§1.2): a `move` with only `at` joins the `after` block's list,
+//!   whatever its target (a card's into the rail is skipped);
+//! - D6 (§3.4): what overwrites the user's edit (`changed your edit`): the
+//!   agent's `set` of the path, `order` of the list, or `remove` of the
+//!   item, each only where it changes the value;
+//! - D7 (§1.5): a stored plan may lose its last step (1–20 is a `put`'s and
+//!   a `replace`'s);
+//! - D8 (§1.8): the caps are owned bytes, container overhead included, and
+//!   §1.8's table gives each owner's ceiling ([`State::owned_bytes`]).
 //!
 //! **Readings** (mechanical, `Reading:` where they're made):
 //! - an assistant message after an assistant message (no results between)
