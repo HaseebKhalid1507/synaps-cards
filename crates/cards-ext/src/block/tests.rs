@@ -125,12 +125,12 @@ fn workers_are_refused() {
         }
     }
     assert_eq!(WORKER, "cards_block: only the main chat has blocks");
-    assert!(blocks.rate.calls.is_empty(), "a worker's call isn't counted");
+    assert_eq!(blocks.rate.len(), 0, "a worker's call isn't counted");
     // A chat under `SYNAPS_HOOK_SESSION_ID=0`: no session, a caller without
     // a parent, keyed by its group.
     let by_group = json!({ "name": "block", "input": input, "session_id": null, "caller": { "actor": ACTOR, "group": GROUP } });
     assert!(blocks.call(&by_group, now).unwrap().starts_with("ok 1 ops"));
-    assert!(blocks.rate.calls.contains_key(&format!("group {GROUP}")));
+    assert!(blocks.rate.window(&format!("group {GROUP}")).is_some());
 }
 
 /// §7: 30 calls a minute. The 31st is refused with §1.6's line, isn't
@@ -153,7 +153,7 @@ fn thirty_calls_a_minute() {
     rate.admit("a", 1, t0 + secs(60)).unwrap();
     assert!(rate.admit("a", 1, t0 + secs(60)).is_err());
     rate.admit("a", 1, t0 + secs(61)).unwrap();
-    assert_eq!(rate.calls["a"].len(), CALLS_PER_MINUTE + 2, "refused calls aren't counted");
+    assert_eq!(rate.window("a").unwrap().len(), CALLS_PER_MINUTE + 2, "refused calls aren't counted");
 }
 
 /// §7: 120 ops a minute, counted with the call's own: a call that would
@@ -195,10 +195,130 @@ fn two_hundred_calls_in_ten_minutes() {
     rate.admit("b", 1, t0 + secs(599)).unwrap();
     rate.admit("a", 1, t0 + secs(600)).unwrap();
     assert!(rate.admit("a", 1, t0 + secs(600)).is_err());
-    assert_eq!(rate.calls["a"].len(), CALLS_PER_TEN_MINUTES);
+    assert_eq!(rate.window("a").unwrap().len(), CALLS_PER_TEN_MINUTES);
+    // At 1190 s only a's call of 600 s is in its window: the other 199
+    // have left, and so has the memory they took.
+    rate.admit("b", 1, t0 + secs(1190)).unwrap();
+    assert_eq!(rate.window("a").unwrap().len(), 1);
+    assert!(rate.window("a").unwrap().capacity() <= 16, "{}", rate.window("a").unwrap().capacity());
     // Ten quiet minutes later both chats are forgotten, and a third starts.
-    rate.admit("c", 1, t0 + secs(1200)).unwrap();
-    assert_eq!(rate.calls.keys().collect::<Vec<_>>(), ["c"]);
+    rate.admit("c", 1, t0 + secs(1800)).unwrap();
+    assert_eq!(rate.len(), 1);
+    assert!(rate.window("c").is_some());
+}
+
+fn busy(s: u64) -> String {
+    format!("cards_block: {CHATS_MAX} other chats used blocks in the last 10 minutes; try again in {s} s")
+}
+
+/// Many chats: at most [`CHATS_MAX`], each with a call in its window. One
+/// more is refused, and not kept, until the chat idle longest has been
+/// quiet ten minutes; the chats kept go on as before, and one that calls
+/// again keeps its place. Quiet, they all leave, and the table gives back
+/// the memory the crowd took.
+#[test]
+fn at_most_chats_max_chats() {
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let name = |i: u64| format!("session chat-{i}");
+    let mut rate = Rate::default();
+    // Chat i calls at i × 100 ms: the last of them at 25.5 s.
+    for i in 0..CHATS_MAX as u64 {
+        rate.admit(&name(i), 1, at(100 * i)).unwrap();
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    let crowd = rate.capacity();
+    assert!(crowd >= CHATS_MAX);
+    // One more, at 30 s: chat-0's call is 30 s old, so its place frees in 570 s.
+    for t in [30_000, 30_001] {
+        assert_eq!(rate.admit("session one-more", 1, at(t)).unwrap_err(), busy(570));
+    }
+    assert_eq!(rate.admit("session one-more", 1, at(599_999)).unwrap_err(), busy(1));
+    assert_eq!(rate.len(), CHATS_MAX, "a refused chat isn't kept");
+    assert!(rate.window("session one-more").is_none());
+    // At 600 s chat-0's call is ten minutes old: it leaves, and one-more takes its place.
+    rate.admit("session one-more", 1, at(600_000)).unwrap();
+    assert!(rate.window(&name(0)).is_none());
+    assert_eq!(rate.admit("session two-more", 1, at(600_000)).unwrap_err(), busy(1));
+    // chat-1, idle longest now, calls again just before its call of 100 ms
+    // leaves: it keeps its place, and chat-2 is the one to leave.
+    rate.admit(&name(1), 1, at(600_050)).unwrap();
+    assert_eq!(rate.admit("session two-more", 1, at(600_100)).unwrap_err(), busy(1));
+    assert_eq!(rate.window(&name(1)).unwrap().len(), 1);
+    rate.admit("session two-more", 1, at(600_200)).unwrap();
+    assert!(rate.window(&name(2)).is_none());
+    assert_eq!(rate.len(), CHATS_MAX);
+    // Every chat kept goes on: its next call is counted beside its first.
+    for i in 3..CHATS_MAX as u64 {
+        rate.admit(&name(i), 1, at(600_200)).unwrap();
+        assert_eq!(rate.window(&name(i)).unwrap().len(), 2);
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    // Ten quiet minutes after the last call, a new chat finds the table
+    // empty, and its memory given back.
+    rate.admit("session later", 1, at(1_200_200)).unwrap();
+    assert_eq!(rate.len(), 1);
+    assert!(rate.capacity() <= 16, "{} after {crowd}", rate.capacity());
+}
+
+/// Chats that come and go: four tables of chats, a call each, at the pace
+/// that keeps [`CHATS_MAX`] in ten minutes. Each is admitted, the table never
+/// holds more, and a chat that comes back after ten quiet minutes starts
+/// over, its own limits as before.
+#[test]
+fn chats_come_and_go() {
+    let t0 = Instant::now();
+    let step = TEN_MINUTES / CHATS_MAX as u32;
+    let mut rate = Rate::default();
+    let mut most = 0;
+    for i in 0..4 * CHATS_MAX as u32 {
+        rate.admit(&format!("session chat-{i}"), 1, t0 + step * i).unwrap_or_else(|e| panic!("chat {i}: {e}"));
+        most = most.max(rate.len());
+    }
+    assert_eq!(most, CHATS_MAX);
+    let mut t = t0 + step * (4 * CHATS_MAX as u32) + TEN_MINUTES;
+    for round in 0..3 {
+        for _ in 0..CALLS_PER_MINUTE {
+            rate.admit("session chat-0", 1, t).unwrap_or_else(|e| panic!("round {round}: {e}"));
+        }
+        assert!(rate.admit("session chat-0", 1, t).is_err(), "round {round}");
+        assert_eq!(rate.len(), 1);
+        assert!(rate.capacity() <= 16, "round {round}: {}", rate.capacity());
+        t += TEN_MINUTES;
+    }
+}
+
+/// No chat escapes its limit through eviction: one that spent its minute
+/// is still refused while every other place fills and more chats knock,
+/// whether it keeps trying or stays quiet, though it is the chat idle
+/// longest. Only its own window lets it call again.
+#[test]
+fn no_chat_escapes_its_limit_through_eviction() {
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let hot = "session hot";
+    let spent = "cards_block: 31 calls in the last minute; batch your ops or patch less";
+    let mut rate = Rate::default();
+    for _ in 0..CALLS_PER_MINUTE {
+        rate.admit(hot, 1, at(0)).unwrap();
+    }
+    for i in 1..CHATS_MAX as u64 {
+        rate.admit(&format!("session other-{i}"), 1, at(100 * i)).unwrap();
+        if i % 16 == 0 {
+            assert_eq!(rate.admit(hot, 1, at(100 * i)).unwrap_err(), spent);
+        }
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    // More chats knock, many times over: each is refused, and hot stays.
+    for i in 0..4 * CHATS_MAX as u64 {
+        assert_eq!(rate.admit(&format!("session knock-{i}"), 1, at(30_000)).unwrap_err(), busy(570));
+    }
+    assert_eq!(rate.window(hot).unwrap().len(), CALLS_PER_MINUTE);
+    assert_eq!(rate.admit(hot, 1, at(59_999)).unwrap_err(), spent);
+    rate.admit(hot, 1, at(60_000)).unwrap();
+    // It comes back to its own count: its ten minutes hold all 31 calls.
+    assert_eq!(rate.window(hot).unwrap().len(), CALLS_PER_MINUTE + 1);
+    assert_eq!(rate.len(), CHATS_MAX);
 }
 
 /// Through the tool: a rate refusal is a JSON-RPC error with its own code;
