@@ -1971,6 +1971,8 @@ fn a_refold_pauses_inside_a_long_batchs_commit() {
         let mut rf = Refold::to(generation(), &h.events, target).unwrap();
         let mut paused = 0;
         while !rf.step(1).unwrap() {
+            // A paused commit is the re-fold's own: it shows no board.
+            assert_eq!(rf.state(), None);
             if rf.position() == commit {
                 paused += 1;
             }
@@ -2196,5 +2198,65 @@ fn a_batch_of_calls_and_their_results_replays_at_its_exact_cost() {
         // The board's commit replays the same batch to the same board.
         h.events.push(Event::ResultsEnd);
         assert_eq!(h.board().bound(&h.events).blocks().collect::<Vec<_>>(), state.blocks().collect::<Vec<_>>());
+    }
+}
+
+/// §1.8 (R3-P3-1): a re-fold's card fold is its own, read as the commit
+/// had it, and let go once the re-fold is done, however it ends. While it
+/// runs it holds the history's card, and the card closed in the target's
+/// batch is resolved, so its conversion takes creation 1 and the target's
+/// tag is the record's. Done (at an op, a message, an outcome, an op whose
+/// call never bound, or too far back), it retains what an empty fold does;
+/// and until then the re-fold shows no board.
+#[test]
+fn a_refolds_card_fold_is_let_go_once_done() {
+    let mut h = H::default();
+    h.ask();
+    h.user("thinking");
+    let ops = json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"900 ms"}}, note("n", "after")]);
+    let b = h.call(ops.clone());
+    let k = h.tool();
+    h.events.push(Event::Call { tool_id: k.clone(), name: "cards_ui".into(), input: json!({"close": "c4f9x2a"}) });
+    h.bind(&b, &ops);
+    h.result(&k, "Card c4f9x2a closed (cards/1).");
+    h.events.push(Event::ResultsEnd);
+    let ok = h.user("ok");
+    let late = h.events.len();
+    h.call(json!([note("late", "x")]));
+    let last = h.user("no result");
+    let s = h.state();
+    let n = s.block(&r("n")).unwrap().clone();
+    assert_eq!(n.creation, 2, "the conversion took 1");
+    let mut far = H::default();
+    far.ask();
+    far.user("thinking");
+    let far_op = Pos { event: far.events.len(), op: Some(0) };
+    far.events.extend(binding_tail(REFOLD_MAX));
+    let empty = Fold::default().retained_estimate();
+    for (events, target, budget, found) in [
+        (&h.events, Target::Revision(n.created), 1, Ok(true)),
+        (&h.events, Target::Revision(ok), 1, Ok(true)),
+        (&h.events, Target::Outcome(last), 1, Ok(true)),
+        (&h.events, Target::Revision(Pos { event: late, op: Some(0) }), 1, Ok(false)),
+        (&far.events, Target::Revision(far_op), REFOLD_SLICE, Err(TooFar)),
+    ] {
+        let mut rf = Refold::to(generation(), events, target).unwrap();
+        let mut most = 0;
+        let done = loop {
+            match rf.step(budget) {
+                Ok(false) => {
+                    assert_eq!(rf.state(), None, "{target:?}: no board while it runs");
+                    most = most.max(rf.board.cards.retained_estimate());
+                }
+                done => break done,
+            }
+        };
+        assert_eq!(done.map(|_| rf.state().is_some()), found, "{target:?}");
+        assert!(most > empty, "{target:?}: it held the card while it ran ({most} of {empty})");
+        assert_eq!(rf.board.cards.retained_estimate(), empty, "{target:?}: let go once done");
+        if let Some(s) = rf.state() {
+            assert_eq!(s.block(&r("card:c4f9x2a")).unwrap().kind, Kind::Note, "{target:?}");
+            assert_eq!(s.block(&r("n")).unwrap().tag, n.tag, "{target:?}");
+        }
     }
 }
