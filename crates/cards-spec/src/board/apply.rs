@@ -54,8 +54,8 @@ impl State {
         }
         match id {
             Ref::Block(_) => Found::NotThere,
-            // Decision (pending Haseeb), D1: an op on a resolved card that no
-            // `replace` converted finds no block (`replace` converts it).
+            // Decision D1 (§1.5): an op on a resolved card that no `replace`
+            // converted finds no block (`replace` converts it).
             Ref::Card(c) => match cards.bound(c).map(|c| c.state) {
                 None | Some(CardState::Plain) => Found::NotThere,
                 Some(CardState::Pending | CardState::Open) => Found::CardOpen,

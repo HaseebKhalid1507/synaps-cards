@@ -1534,3 +1534,27 @@ fn a_restore_applies_on_its_incarnation_only() {
     let at = h.user(&restore);
     assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Gone);
 }
+
+/// Decision D1 (§1.5, amended): until a `replace` converts it, a resolved
+/// card has no block. Every other op skips, marked `no block yet`, and the
+/// card fold's card is untouched.
+#[test]
+fn only_a_replace_acts_on_an_unconverted_card() {
+    let mut h = H::default();
+    h.ask();
+    h.answer();
+    h.ops(json!([
+        {"op":"patch","id":"card:c4f9x2a","set":{"title":"x"}},
+        {"op":"collapse","id":"card:c4f9x2a"},
+        {"op":"move","id":"card:c4f9x2a"},
+        {"op":"remove","id":"card:c4f9x2a"},
+    ]));
+    let s = h.state();
+    assert_eq!(outcomes(&s, "card:c4f9x2a"), vec![Outcome::Skipped(Why::NoBlock); 4]);
+    assert_eq!((s.live(), s.creations()), (0, 0));
+    assert_eq!(h.board().cards().bound(&card_id()).unwrap().state, crate::fold::State::Answered);
+    h.ops(json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"Went with 900 ms"}}, {"op":"collapse","id":"card:c4f9x2a"}]));
+    let s = h.state();
+    assert_eq!(outcomes(&s, "card:c4f9x2a")[4..], [Outcome::Applied, Outcome::Applied]);
+    assert!(s.block(&r("card:c4f9x2a")).unwrap().collapsed);
+}

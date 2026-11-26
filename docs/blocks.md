@@ -288,6 +288,8 @@ So "a question that becomes its answer" works like this:
 
 Ops on a card apply only once it is resolved (answered, skipped, closed or replaced in the card fold). On an open card they are skipped: the agent closes it first (design §1.4 `close`). Cards don't go to the rail, or into groups, in v1.
 
+**A resolved card has no block until a `replace` converts it** (decision D1, settled at B2). Only `replace` acts on an unconverted card. A `patch`, `collapse`, `move` or `remove` naming it is skipped and marked `no block yet`, and the card stays as the card fold draws it: its row, its receipt, its own fold. Once converted, `card:<id>` is a block like any other, and every op acts on it. A `remove` then ends the block; the card stays resolved, and a later `replace` converts it again as a new incarnation.
+
 ### 1.6 The result, the binding, refusals
 
 - **Success** is one line of ≤ 64 bytes: `ok 3 ops (blocks/1 #3f9a1c2e4b5d6f70)`.
