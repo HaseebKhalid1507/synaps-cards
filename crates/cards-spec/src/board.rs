@@ -543,20 +543,20 @@ impl<'a> Refold<'a> {
     /// [`REFOLD_SLICE`]; `true` once done. A step can't be preempted, so the
     /// desk gives small budgets and checks its 30 ms clock between steps
     /// (§1.8: a yield every 50,000 events or 30 ms, whichever comes first).
-    pub fn step(&mut self, budget: usize) -> bool {
+    pub fn step(&mut self, budget: usize) -> Result<bool, TooFar> {
         if self.done.is_some() {
-            return true;
+            return Ok(true);
         }
         let to = self.until.min(self.board.position().saturating_add(budget.min(REFOLD_SLICE)));
         self.board.read(&self.events[..to]);
         if self.board.position() < self.until {
-            return false;
+            return Ok(false);
         }
         self.done = Some(self.finish());
         // One working set (§1.8): the board's was moved into the result,
         // and the card fold is let go.
         self.board.cards = Fold::default();
-        true
+        Ok(true)
     }
 
     /// The board at the target, materialized in the board's own working
@@ -624,6 +624,11 @@ impl<'a> Refold<'a> {
     /// The board read so far.
     pub fn board(&self) -> &Board {
         &self.board
+    }
+
+    /// Events folded so far: the next one's position.
+    pub fn position(&self) -> usize {
+        self.board.position()
     }
 }
 

@@ -749,7 +749,7 @@ fn a_refold_owns_one_working_set() {
     for target in [Target::Outcome(Pos::event(last)), Target::Revision(Pos::event(last))] {
         let mut rf = Refold::to(generation(), &events, target).unwrap();
         let mut most = rf.owned_bytes();
-        while !rf.step(1000) {
+        while !rf.step(1000).unwrap() {
             most = most.max(rf.owned_bytes());
         }
         most = most.max(rf.owned_bytes());
@@ -838,7 +838,7 @@ fn every_record_refolds_to_its_revision() {
         let s = Board::fold(generation(), &events).bound(&events);
         for rec in s.records() {
             let mut rf = Refold::to(generation(), &events, Target::Revision(rec.at)).unwrap();
-            while !rf.step(REFOLD_SLICE) {}
+            while !rf.step(REFOLD_SLICE).unwrap() {}
             let at = rf.state().unwrap_or_else(|| panic!("case {case}: {rec:?} re-folds"));
             let b = at.blocks().find(|b| b.tag == rec.tag).unwrap_or_else(|| panic!("case {case}: {rec:?} is live there"));
             assert_eq!(b.rev, rec.rev, "case {case}: {rec:?}");
@@ -995,7 +995,7 @@ fn the_board_the_overlay_and_the_scratch_stay_under_their_caps_together() {
     let rec = overlay.records().next().unwrap().clone();
     let mut rf = Refold::to(generation(), &events, Target::Revision(rec.at)).unwrap();
     let mut most = rf.owned_bytes();
-    while !rf.step(1000) {
+    while !rf.step(1000).unwrap() {
         most = most.max(rf.owned_bytes());
     }
     let scratch = rf.state().unwrap();

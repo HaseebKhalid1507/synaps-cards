@@ -1196,7 +1196,7 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
     let until = 41;
     let mut rf = Refold::to(generation(), &h.events, Target::Revision(Pos::event(until - 1))).unwrap();
     let mut slices = 0;
-    while !rf.step(7) {
+    while !rf.step(7).unwrap() {
         slices += 1;
     }
     assert_eq!(slices, 5);
@@ -1242,7 +1242,7 @@ fn note_text(s: &State, id: &str) -> String {
 
 fn refold(events: &[Event], target: Target) -> Option<State> {
     let mut rf = Refold::to(generation(), events, target).unwrap();
-    while !rf.step(REFOLD_SLICE) {}
+    while !rf.step(REFOLD_SLICE).unwrap() {}
     rf.state().cloned()
 }
 
@@ -1442,7 +1442,7 @@ fn a_refold_step_reads_at_most_a_slice() {
     let mut rf = Refold::to(generation(), &events, Target::Revision(Pos::event(n - 1))).unwrap();
     let mut read = Vec::new();
     for budget in [0, 1, REFOLD_SLICE, REFOLD_SLICE + 1, usize::MAX, usize::MAX] {
-        let done = rf.step(budget);
+        let done = rf.step(budget).unwrap();
         read.push((rf.board().position(), done));
     }
     let slices = |k: usize| 1 + k * REFOLD_SLICE;
@@ -1830,4 +1830,97 @@ fn the_committed_board_keeps_no_spare_capacity() {
     let s = b.committed();
     assert_eq!(s.blocks().count(), 5);
     assert_eq!(s.owned_by_owner()[0], s.clone().owned_by_owner()[0], "blocks and their lists");
+}
+
+/// A block call at 0 that binds after `k` other calls of its batch: the
+/// put, `k` bash calls, its result, `ResultsEnd` (at `k + 2`).
+fn binding_tail(k: usize) -> Vec<Event> {
+    let ops = json!([note("n", "x")]);
+    let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    let mut events = vec![Event::Call { tool_id: "t0".into(), name: "cards_block".into(), input: json!({ "ops": ops }) }];
+    events.extend((0..k).map(|i| Event::Call { tool_id: format!("b{i}"), name: "bash".into(), input: Value::Null }));
+    events.push(Event::Result { tool_id: "t0".into(), text: receipt });
+    events.push(Event::ResultsEnd);
+    events
+}
+
+const AT_PUT: Target = Target::Revision(Pos { event: 0, op: Some(0) });
+
+/// §1.8 (R2-P2-2): an op's revision reads its batch's tail, to the result
+/// that binds it and the batch's end, under the same budget: a step of 0
+/// reads nothing, a step of 1 one event, and a tail longer than a slice
+/// takes more than one step.
+#[test]
+fn an_op_targets_binding_tail_is_read_in_slices() {
+    let events = binding_tail(REFOLD_SLICE + 10_000);
+    let mut rf = Refold::to(generation(), &events, AT_PUT).unwrap();
+    assert_eq!(rf.step(0), Ok(false), "a step of 0 does nothing");
+    assert_eq!(rf.step(1), Ok(false), "a step of 1 reads one event");
+    let mut slices = 1;
+    while !rf.step(REFOLD_SLICE).unwrap() {
+        slices += 1;
+    }
+    assert!(slices >= 2, "{slices}");
+    assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
+}
+
+/// §1.8 (R2-P2-2): a re-fold reads at most [`REFOLD_MAX`] events, the
+/// target's batch included: a batch that ends (`ResultsEnd`) at the last
+/// event it may read re-folds; one that ends later, or whose result comes
+/// later, is too far back, found while reading the tail.
+#[test]
+fn an_op_target_whose_batch_ends_past_the_maximum_is_too_far_back() {
+    for (k, far) in [(REFOLD_MAX - 3, false), (REFOLD_MAX - 2, true), (REFOLD_MAX, true)] {
+        let events = binding_tail(k);
+        let mut rf = Refold::to(generation(), &events, AT_PUT).unwrap();
+        let done = loop {
+            match rf.step(REFOLD_SLICE) {
+                Ok(false) => {}
+                other => break other,
+            }
+        };
+        if far {
+            assert_eq!(done, Err(TooFar), "a batch ending at {}", k + 2);
+        } else {
+            assert_eq!(done, Ok(true));
+            assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
+        }
+    }
+}
+
+/// §1.8 (R2-P2-2): a re-fold pauses inside a long batch's commit, and
+/// gets the same board: 2,000 block calls, then their results, then a user
+/// message, a step of 1 at a time, to that message's revision and to an
+/// outcome there.
+#[test]
+fn a_refold_pauses_inside_a_long_batchs_commit() {
+    let n = 2_000;
+    let mut h = H::default();
+    h.ops(json!([note("n", "0")]));
+    h.user("go");
+    let calls: Vec<(String, Value)> = (1..=n)
+        .map(|i| {
+            let ops = json!([{"op":"patch","id":"n","set":{"text": i.to_string()}}]);
+            (h.call(ops.clone()), ops)
+        })
+        .collect();
+    for (t, ops) in &calls {
+        h.bind(t, ops);
+    }
+    h.events.push(Event::ResultsEnd);
+    let commit = h.events.len() - 1;
+    let last = h.user("done");
+    let want = Board::fold(generation(), &h.events).bound(&h.events);
+    assert_eq!(want.block(&r("n")).unwrap().rev as usize, n + 1);
+    for target in [Target::Revision(last), Target::Outcome(last)] {
+        let mut rf = Refold::to(generation(), &h.events, target).unwrap();
+        let mut paused = 0;
+        while !rf.step(1).unwrap() {
+            if rf.position() == commit {
+                paused += 1;
+            }
+        }
+        assert!(paused > n, "{target:?}: {paused} steps at the commit");
+        assert_eq!(rf.state().unwrap().blocks().collect::<Vec<_>>(), want.blocks().collect::<Vec<_>>(), "{target:?}");
+    }
 }
