@@ -9,12 +9,13 @@
 //! `docs/blocks.md`): a batch of block ops validated, or refused. It needs
 //! only `tools.register`: no hooks, no conversation access. One process
 //! serves every session of a daemon, so the only state, the rate counters,
-//! is kept per chat.
+//! is kept per chat, in tables bounded across chats ([`chats`]).
 //!
 //! The exit code is 0 at the end of input or after `shutdown`, and 1 when
 //! the input broke off mid-frame (the host then starts it again).
 
 mod block;
+mod chats;
 mod rpc;
 mod tool;
 
