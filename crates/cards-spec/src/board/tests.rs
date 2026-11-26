@@ -1226,3 +1226,101 @@ fn a_compaction_empties_the_board_and_a_queued_carrier_counts_in_the_next() {
     assert_eq!((new.live(), new.creations(), new.tombstones().count()), (0, 0, 0));
     assert_eq!(new.visibility().record(&BlockId::parse("tests").unwrap()), Some(Vis { dismissed: false, version: 1 }));
 }
+
+// §3.6, §1.8 (P2-2): a re-fold materializes the revision a record points
+// to, and an evicted outcome.
+
+fn note_text(s: &State, id: &str) -> String {
+    match &s.block(&r(id)).expect("live").body {
+        Body::Note(n) => n.text.clone(),
+        b => panic!("not a note: {b:?}"),
+    }
+}
+
+fn refold(events: &[Event], target: Target) -> Option<State> {
+    let mut rf = Refold::to(generation(), events, target).unwrap();
+    while !rf.step(REFOLD_SLICE) {}
+    rf.state()
+}
+
+#[test]
+fn a_refold_reads_every_revision_of_a_multi_op_call() {
+    let mut h = H::default();
+    let ops = json!([
+        note("n", "A"),
+        {"op":"patch","id":"n","set":{"text":"B"}},
+        {"op":"patch","id":"n","set":{"text":"C"}},
+        {"op":"replace","id":"n","kind":"note","body":{"text":"X"}},
+        {"op":"patch","id":"n","set":{"text":"Y"}},
+        {"op":"remove","id":"n"},
+    ]);
+    h.ops(ops);
+    h.user("next");
+    let s = h.state();
+    let records: Vec<Record> = s.records().cloned().collect();
+    let texts: Vec<(u32, String)> = records
+        .iter()
+        .map(|rec| {
+            let at = refold(&h.events, Target::Revision(rec.at)).expect("a bound call's op");
+            let b = at.block(&r("n")).expect("live at its revision");
+            assert_eq!((b.tag, b.rev), (rec.tag, rec.rev));
+            (b.rev, note_text(&at, "n"))
+        })
+        .collect();
+    let want: Vec<(u32, String)> = [(1, "A"), (2, "B"), (3, "C"), (1, "X"), (2, "Y")].iter().map(|(r, t)| (*r, t.to_string())).collect();
+    assert_eq!(texts, want);
+}
+
+#[test]
+fn a_refold_reads_a_batch_whose_results_came_in_reverse() {
+    let first = json!([note("n", "A"), {"op":"patch","id":"n","set":{"text":"B"}}]);
+    let second = json!([{"op":"patch","id":"n","set":{"text":"C"}}]);
+    let failed = json!([{"op":"patch","id":"n","set":{"text":"never"}}]);
+    let mut h = H::default();
+    let t1 = h.call(first.clone());
+    let t2 = h.call(failed.clone());
+    let t3 = h.call(second.clone());
+    h.bind(&t3, &second);
+    h.result(&t2, "Tool execution was cancelled.");
+    h.bind(&t1, &first);
+    h.events.push(Event::ResultsEnd);
+    h.user("next");
+    let at = |call: usize, op: u8| refold(&h.events, Target::Revision(Pos { event: call, op: Some(op) }));
+    assert_eq!(note_text(&at(0, 0).unwrap(), "n"), "A");
+    assert_eq!(note_text(&at(0, 1).unwrap(), "n"), "B");
+    assert_eq!(at(1, 0), None, "an unbound call has no revision");
+    assert_eq!(note_text(&at(2, 0).unwrap(), "n"), "C");
+    // A batch still open: its bound prefix only.
+    let open = &h.events[..4];
+    assert_eq!(refold(open, Target::Revision(Pos { event: 0, op: Some(0) })), None, "pending: no revision yet");
+}
+
+#[test]
+fn a_refold_reads_a_users_revision() {
+    let mut h = H::default();
+    h.ops(json!([note("n", "A")]));
+    let e = h.edit("n", 1, json!({"set":{"text":"mine"}}));
+    h.ops(json!([{"op":"patch","id":"n","set":{"text":"theirs"}}]));
+    h.user("next");
+    let rec = h.state().records().find(|r| r.at == e).cloned().unwrap();
+    let at = refold(&h.events, Target::Revision(rec.at)).unwrap();
+    assert_eq!((note_text(&at, "n"), at.block(&r("n")).unwrap().rev), ("mine".to_string(), 2));
+}
+
+#[test]
+fn a_refold_keeps_the_outcome_it_was_asked_for() {
+    let mut h = H::default();
+    h.ops(json!([note("n", "A"), note("m", "B")]));
+    let first = h.edit("n", 1, json!({"set":{"text":"mine"}}));
+    for i in 0..OUTCOMES_MAX {
+        h.edit("m", 1 + u32::try_from(i).unwrap(), json!({"set":{"text":format!("m{i}")}}));
+    }
+    // The agent overwrites the first hand-back's path after its outcome went.
+    h.ops(json!([{"op":"patch","id":"n","set":{"text":"theirs"}}]));
+    h.user("next");
+    assert!(h.state().outcome(first).is_none(), "evicted");
+    let s = refold(&h.events, Target::Outcome(first)).unwrap();
+    let o = s.outcome(first).expect("kept for the request");
+    assert_eq!((o.result, o.codes.as_slice()), (EditResult::Applied, [Code::Overwritten].as_slice()));
+    assert_eq!(s.outcomes().count(), OUTCOMES_MAX);
+}

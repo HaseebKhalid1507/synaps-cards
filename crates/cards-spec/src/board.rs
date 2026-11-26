@@ -466,6 +466,25 @@ impl<'a> Refold<'a> {
     pub fn board(&self) -> &Board {
         &self.board
     }
+
+    /// Interim (fail first): a target read as a prefix through its event.
+    pub fn to(generation: Generation, events: &'a [Event], target: Target) -> Result<Self, TooFar> {
+        let (Target::Revision(p) | Target::Outcome(p)) = target;
+        let until = if matches!(target, Target::Outcome(_)) { events.len() } else { p.event + 1 };
+        Self::new(generation, events, until)
+    }
+
+    /// Interim: the view at the prefix.
+    pub fn state(&self) -> Option<State> {
+        Some(self.board.view(self.events))
+    }
+}
+
+/// What a re-fold materializes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Revision(Pos),
+    Outcome(Pos),
 }
 
 #[cfg(test)]
