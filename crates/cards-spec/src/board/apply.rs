@@ -781,11 +781,14 @@ fn append(b: &mut Block, p: &Path, a: &Appended) -> Result<bool, PathWhy> {
             Ok(true)
         }
         (Body::Metric(m), Appended::Series(new), None) => {
+            // An append rolls off the oldest (§1.5). It changed the block if
+            // the series it leaves differs (§1.4: semantic equality), so a
+            // full series that rolls back to itself is no revision.
+            let before = m.series.clone();
             m.series.extend(new.iter().copied());
-            // An append rolls off the oldest (§1.5).
             let over = m.series.len().saturating_sub(crate::block::SERIES_MAX);
             m.series.drain(..over);
-            Ok(true)
+            Ok(m.series != before)
         }
         _ => Err(PathWhy::NotKind),
     }
