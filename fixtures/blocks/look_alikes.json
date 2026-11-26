@@ -199,8 +199,22 @@
       "edit": null
     },
     {
-      "about": "a card can't be edited",
+      "about": "a card's block (replace card:<id> made it, §1.5) is edited as card:<id>; whether the card has one is B2's to find, by of",
       "text": "[block card:c4f9x2a edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": {
+        "id": "card:c4f9x2a",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
+    },
+    {
+      "about": "a card id that isn't one (card: and capitals)",
+      "text": "[block card:C4F9X2A edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
       "edit": null
     },
     {

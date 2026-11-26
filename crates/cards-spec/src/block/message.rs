@@ -48,8 +48,16 @@
 //!   and pass the overlap rule; [`Edit::admit`] checks them against the
 //!   block's kind where the message lands.
 //!
-//! **Reading:** a `card:<id>` block can't be edited: line 1's id is a block
-//! id (§3.3's pattern has no `:`).
+//! **A card's block** (§3.3, amended at B1). `replace card:<id>` gives a
+//! resolved card its first block incarnation (§1.5), a block like any
+//! other, so the user edits it as `[block card:<id> edited rN]`: line 1's
+//! id is a [`Ref`]. The grammar can't tell whether the card has a block,
+//! and doesn't pretend to: the fold (B2) admits an edit only where `of` is
+//! the tag of the id's live incarnation (§3.3's admission), and an open or
+//! unconverted card has no incarnation, so no tag names it and the edit
+//! applies nothing, as on a removed block. [`Edit::card`] names the card
+//! so B2 can say so in the edit's outcome. Answering a card is never a
+//! block edit: that is the card's own message (`[card <id>] …`, design §3).
 
 use super::*;
 use crate::sanitize::{cut_chars, ui_sanitize};
@@ -208,7 +216,8 @@ pub fn split(text: &str) -> (&str, Trailer) {
 /// A user's edit of one block (§3.3): what line 1 names and line 2 says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edit {
-    pub id: BlockId,
+    /// A block, or a card's block (`card:<id>`, module docs).
+    pub id: Ref,
     /// `rN`: the revision of incarnation `of` the user edited from.
     pub base: u32,
     /// The incarnation's tag.
@@ -235,7 +244,8 @@ impl Edit {
     /// and line 2 within [`EDIT_PATCH_MAX_BYTES`]. So what [`build`] writes
     /// from it reads back. The desk's hand-back (D8) and restore (§3.6)
     /// build here.
-    pub fn new(id: BlockId, base: u32, of: Tag, parts: &Value) -> Result<Self, Error> {
+    pub fn new(id: impl Into<Ref>, base: u32, of: Tag, parts: &Value) -> Result<Self, Error> {
+        let id = id.into();
         if !(1..=REVISIONS_MAX).contains(&base) {
             return Err(Error::new("base", format!("must be a revision from 1 to {REVISIONS_MAX}")));
         }
@@ -249,6 +259,15 @@ impl Edit {
             return Err(Error::new("parts", format!("over {EDIT_PATCH_MAX_BYTES} bytes (got {n}); hand back fewer changes at once")));
         }
         Ok(edit)
+    }
+
+    /// The card, when this edits a card's block: B2 admits it only if
+    /// `replace card:<id>` made one, and `of` is its live incarnation's tag.
+    pub fn card(&self) -> Option<&CardId> {
+        match &self.id {
+            Ref::Card(id) => Some(id),
+            Ref::Block(_) => None,
+        }
     }
 
     /// Line 2, compact.
@@ -298,7 +317,7 @@ pub fn parse(body: &str) -> Option<Edit> {
         return None;
     }
     let (id, rest) = line1.strip_prefix("[block ")?.split_once(" edited r")?;
-    let id = BlockId::parse(id)?;
+    let id = Ref::parse(id)?;
     let (base, rest) = decimal(rest)?;
     let rest = rest.strip_prefix("] ")?;
     if base > REVISIONS_MAX || rest.is_empty() {

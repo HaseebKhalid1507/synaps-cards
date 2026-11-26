@@ -284,6 +284,7 @@ So "a question that becomes its answer" works like this:
 1. `cards_ui` asks.
 2. The answer comes back as today.
 3. `{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"Lock wait set to 900 ms"}}` turns the question into its outcome. That is the card's first block incarnation. The card fold's receipt stays, drawn as the block's first line, and one `[` away.
+4. The user edits that block like any other, named `card:c4f9x2a` (§3.3). The question itself is never edited: an open or unconverted card has no block incarnation, so no edit can name one, and it is answered as a card (design §3).
 
 Ops on a card apply only once it is resolved (answered, skipped, closed or replaced in the card fold). On an open card they are skipped: the agent closes it first (design §1.4 `close`). Cards don't go to the rail, or into groups, in v1.
 
@@ -606,7 +607,8 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 ```
 
 - **Line 1, for people.**
-  - It matches `^\[block ([a-z][a-z0-9_-]{0,23}) edited r([1-9][0-9]{0,3})\] `, then the block's title (or its id), then ` → `.
+  - It matches `^\[block ([a-z][a-z0-9_-]{0,23}|card:c[a-z0-9]{6}) edited r([1-9][0-9]{0,3})\] `, then the block's title (or its id), then ` → `.
+  - **A card's block** is named `card:<id>`: the block incarnation that `replace card:<id>` made (§1.5, step 3). Its `of` is that incarnation's tag. An open or unconverted card has no incarnation, so no tag names it, and an edit naming it applies nothing, like one naming a removed block (admission, below). Answering a card stays the card's own message (`[card <id>] …`, design §3).
   - After that comes a summary of pieces joined by ` · `. Each piece is cut at 40 characters, and the line is at most 200 characters, sanitized (design §3.3's rules).
   - There is one verb. A restore is an edit whose summary says `back to rN` (§3.6).
   - `rN` is the **base**: the revision of incarnation `of` that the user edited from. It tells the agent what the user saw.

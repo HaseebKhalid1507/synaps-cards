@@ -147,6 +147,12 @@ pub enum Ref {
     Card(CardId),
 }
 
+impl From<BlockId> for Ref {
+    fn from(id: BlockId) -> Self {
+        Ref::Block(id)
+    }
+}
+
 impl Ref {
     pub fn parse(s: &str) -> Option<Self> {
         match s.strip_prefix("card:") {

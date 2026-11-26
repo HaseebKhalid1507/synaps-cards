@@ -656,7 +656,7 @@ fn split_reads_only_final_notice_lines() {
 fn edit(parts: Value) -> Edit {
     let o = parts.as_object().unwrap();
     Edit {
-        id: BlockId::parse("plan").unwrap(),
+        id: BlockId::parse("plan").unwrap().into(),
         base: 4,
         of: Tag::parse("bab3b9916631463b1935420c710c9287").unwrap(),
         parts: parse_parts(o, "", Author::User).unwrap(),
@@ -737,7 +737,9 @@ fn edit_look_alikes_are_ordinary_text() {
         l1.replace("r4", "r0") + "\n" + l2,
         l1.replace("r4", "r04") + "\n" + l2,
         l1.replace("r4", "r10000") + "\n" + l2,
-        l1.replace("[block plan", "[block card:c4f9x2a") + "\n" + l2,
+        l1.replace("[block plan", "[block card:C4F9X2A") + "\n" + l2,
+        l1.replace("[block plan", "[block card:plan") + "\n" + l2,
+        l1.replace("[block plan", "[block card:") + "\n" + l2,
         l1.replace("edited", "changed") + "\n" + l2,
         "[block plan edited r4] \n".to_string() + l2,
         format!("{l1}\u{7}\n{l2}"),
@@ -755,6 +757,38 @@ fn edit_look_alikes_are_ordinary_text() {
     let at = |n: usize| format!("[block plan edited r4] {}\n{l2}", "x".repeat(n - 23));
     assert!(message::parse(&at(200)).is_some() && message::parse(&at(201)).is_none());
     assert!(message::parse(&format!("[block plan edited r9999] T → x\n{l2}")).is_some());
+}
+
+/// §3.3 (amended): a card's block, made by `replace card:<id>` (§1.5), is
+/// edited like any block, as `card:<id>`. Its `of` is the tag of that
+/// incarnation, so an open or unconverted card, which has none, can't be
+/// named by one: B2 applies nothing there. The answer stays the card's own.
+#[test]
+fn a_cards_block_is_edited_as_card_id() {
+    let card = Ref::parse("card:c4f9x2a").unwrap();
+    // The replace that converts it, and the tag of the incarnation it makes.
+    let b = call(json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"Lock wait set to 900 ms"}}])).unwrap();
+    let Op::Replace(r) = &b.ops[0] else { unreachable!() };
+    assert_eq!((&r.id, r.kind), (&card, Kind::Note));
+    let generation = Generation::of(&json!({"role":"user","content":"hi"}));
+    let of = Tag::new(&generation, &card, 3, "call_1", 0);
+    let e = Edit::new(card.clone(), 1, of, &json!({"set":{"text":"Lock wait set to 1200 ms"}})).unwrap();
+    assert_eq!(e.card().map(|c| c.as_str()), Some("c4f9x2a"));
+    assert_eq!(e.admit(Kind::Note), Ok(()));
+    let text = message::build(&e, &Summary { title: Some("Lock wait"), back_to: None, pieces: vec!["text “Lock wait set to 1200 ms”"] });
+    assert_eq!(
+        text,
+        format!(
+            "[block card:c4f9x2a edited r1] Lock wait → text “Lock wait set to 1200 ms”\n{{\"of\":\"{of}\",\"set\":{{\"text\":\"Lock wait set to 1200 ms\"}}}}"
+        )
+    );
+    assert_eq!(message::parse(&text).as_ref(), Some(&e));
+    // No title: the line names it by its ref.
+    let line1 = message::build(&e, &Summary::default());
+    assert!(line1.starts_with("[block card:c4f9x2a edited r1] card:c4f9x2a → "), "{line1}");
+    // A block's edit names no card; a card's answer is no block edit.
+    assert_eq!(edit(json!({"set":{"text":"x"}})).card(), None);
+    assert_eq!(message::parse("[card c4f9x2a] Which approach? → Refactor the parser\n{\"choice\":\"Refactor the parser\"}"), None);
 }
 
 /// A label of `b` bytes (1 to 400) in at most 100 characters.

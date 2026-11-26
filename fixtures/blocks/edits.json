@@ -138,6 +138,23 @@
       "text": "[block findings edited r2] Findings → title “What we know” · text “Two readers…”\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"text\":\"Two readers race.\\nThe lock fixes it.\",\"title\":\"What we know\"}}"
     },
     {
+      "about": "a card's block: replace card:c4f9x2a made its first incarnation (tags.json), and the user edits that note as card:c4f9x2a",
+      "section": "§1.5, §3.3",
+      "id": "card:c4f9x2a",
+      "base": 1,
+      "of": "2f64d13467bbe7a7b50134cccd39d708",
+      "title": "Lock wait",
+      "pieces": [
+        "text “Lock wait set to 1200 ms”"
+      ],
+      "parts": {
+        "set": {
+          "text": "Lock wait set to 1200 ms"
+        }
+      },
+      "text": "[block card:c4f9x2a edited r1] Lock wait → text “Lock wait set to 1200 ms”\n{\"of\":\"2f64d13467bbe7a7b50134cccd39d708\",\"set\":{\"text\":\"Lock wait set to 1200 ms\"}}"
+    },
+    {
       "about": "pieces sanitized, then cut at 40 characters each",
       "id": "plan",
       "base": 7,

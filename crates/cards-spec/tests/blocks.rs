@@ -115,7 +115,7 @@ fn block_tags() {
 }
 
 fn edit_of(c: &Value) -> Edit {
-    let id = BlockId::parse(c["id"].as_str().unwrap()).unwrap();
+    let id = Ref::parse(c["id"].as_str().unwrap()).unwrap();
     let of = Tag::parse(c["of"].as_str().unwrap()).unwrap();
     Edit::new(id, c["base"].as_u64().unwrap() as u32, of, &c["parts"]).unwrap_or_else(|e| panic!("{}: {e}", c["about"]))
 }
