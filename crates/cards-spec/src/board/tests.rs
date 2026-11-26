@@ -999,6 +999,9 @@ fn a_call_without_a_result_in_the_next_message_never_binds() {
         assert!(!v.block(&r("b")).expect("t2 binds").pending, "{what}");
         assert_eq!(board.bound(&events), v, "{what}: nothing is pending");
         assert_eq!(v.log().next().unwrap().outcome, Outcome::Unbound, "{what}");
+        // A re-fold ends its batch at the same place: no revision to show.
+        let t1 = events.iter().position(|e| matches!(e, Event::Call { tool_id, .. } if tool_id == "t1")).unwrap();
+        assert_eq!(refold(&events, Target::Revision(Pos { event: t1, op: Some(0) })), None, "{what}");
     }
 }
 
@@ -1768,4 +1771,63 @@ fn a_refold_resolves_cards_as_the_commit_did() {
     assert_eq!(n.creation, 2, "the conversion took 1");
     let at = refold(&h.events, Target::Revision(n.created)).unwrap();
     assert_eq!(at.block(&r("n")).unwrap().tag, n.tag);
+}
+
+/// §1.7: a call's first result is its answer, as in the card fold. A second
+/// result for the same tool id (a cancel's paired result, then the real one
+/// arriving late in the same message) changes nothing, either way round.
+#[test]
+fn a_calls_first_result_is_its_answer() {
+    let ops = json!([note("n", "x")]);
+    let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    for (first, second, binds) in [("Tool execution was cancelled.", receipt.as_str(), false), (receipt.as_str(), "error: boom", true)] {
+        let mut h = H::default();
+        let t = h.call(ops.clone());
+        h.result(&t, first);
+        h.result(&t, second);
+        h.events.push(Event::ResultsEnd);
+        h.user("next");
+        assert_eq!(h.state().block(&r("n")).is_some(), binds, "{first:?} then {second:?}");
+    }
+}
+
+/// A hand-built stream without `ResultsEnd`: a call after a result starts the
+/// next batch, in a re-fold as in the fold, so the earlier call keeps its
+/// result even when the target takes its tool id over.
+#[test]
+fn a_refold_starts_the_targets_batch_where_the_fold_did() {
+    let put = json!([note("n", "a")]);
+    let patch = json!([{"op":"patch","id":"n","set":{"text":"b"}}]);
+    let receipt = |ops: &Value| block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    let call = |ops: &Value| Event::Call { tool_id: "t1".into(), name: "cards_block".into(), input: json!({ "ops": ops }) };
+    let events = vec![
+        call(&put),
+        Event::Result { tool_id: "t1".into(), text: receipt(&put) },
+        call(&patch),
+        Event::Result { tool_id: "t1".into(), text: receipt(&patch) },
+        Event::User { text: "next".into() },
+    ];
+    let s = Board::fold(generation(), &events).bound(&events);
+    let n = s.block(&r("n")).unwrap();
+    assert_eq!(n.rev, 2);
+    let at = refold(&events, Target::Revision(Pos { event: 2, op: Some(0) })).expect("the patch's revision");
+    assert_eq!(at.block(&r("n")).map(|b| (b.tag, b.rev)), Some((n.tag, 2)));
+}
+
+/// D8: the committed board gives back what its strings and lists hold past
+/// their length after every change, so it owns what a clone of it does (a
+/// view or a bound board is a clone, so only the committed board shows it).
+#[test]
+fn the_committed_board_keeps_no_spare_capacity() {
+    let mut h = H::default();
+    let ids: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+    let steps: Vec<&str> = ids.iter().map(String::as_str).collect();
+    h.ops(json!([put_plan("plan", &steps), note("a", "1"), note("b", "2"), note("c", "3"), note("d", "4")]));
+    let gone: Vec<String> = ids[..15].iter().map(|i| format!("steps.{i}")).collect();
+    h.ops(json!([{"op":"patch","id":"plan","remove":gone,"set":{"steps.s19.label":"x"}}]));
+    h.user("next");
+    let b = Board::fold(generation(), &h.events);
+    let s = b.committed();
+    assert_eq!(s.blocks().count(), 5);
+    assert_eq!(s.owned_by_owner()[0], s.clone().owned_by_owner()[0], "blocks and their lists");
 }
