@@ -99,7 +99,9 @@
 //! - D7 (§1.5): a stored plan may lose its last step (1–20 is a `put`'s and
 //!   a `replace`'s);
 //! - D8 (§1.8): the caps are owned bytes, container overhead included, and
-//!   §1.8's table gives each owner's ceiling ([`State::owned_bytes`]).
+//!   §1.8's table gives each owner's ceiling ([`State::owned_bytes`]); no
+//!   past body is kept (the 192 KiB cache is gone): a past revision is the
+//!   re-fold scratch's board ([`Refold::owned_bytes`], under its own MiB).
 //!
 //! **Readings** (mechanical, `Reading:` where they're made):
 //! - an assistant message after an assistant message (no results between)

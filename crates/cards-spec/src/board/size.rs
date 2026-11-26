@@ -16,7 +16,10 @@
 //! and a log line, [`VISIBILITY_MAX_OWNED`], [`RUN_MAX_OWNED`] and
 //! [`OUTCOME_MAX_OWNED`]. At their counts they sum under
 //! [`WORKING_SET_MAX_BYTES`]; the open batch is a range of the history (no
-//! bytes per call), and a run is keyed by its call's position (no tool id).
+//! bytes per call), a run is keyed by its call's position (no tool id), and
+//! no past body is kept: a revision view is the re-fold scratch's one
+//! working set ([`Refold::owned_bytes`]), which with its replay's index
+//! ([`REPLAY_MAX_OWNED`]) sums under the same MiB.
 
 use std::mem::size_of;
 
