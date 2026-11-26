@@ -215,8 +215,10 @@
     2. else a nonempty `session_id` is a chat;
     3. else a `caller` with a nonempty `group` is a chat, keyed by that group. A chat under the `SYNAPS_HOOK_SESSION_ID=0` kill switch sends a `null` `session_id` but keeps its `caller`, so a `null` session alone doesn't mean a worker;
     4. else the call is refused. A host that sends neither (one before 0.10.3 sends no `session_id`) has a real chat's cards refused too: fail-closed, because nothing there tells a worker from a chat.
-  - `cards_ui: 6 cards in the last 10 minutes; ask in plain text` (§5.5).
-- **Ids** are `c` plus 6 random `[a-z0-9]`. The extension never mints one twice while it runs: a draw that names an id it already minted draws again. One process serves every chat, so a session's ids are unique for the process's life, and across a restart (§1.6) unique in practice (36^6 ids). Nothing relies on them being secret (§5.2).
+  - `cards_ui: 6 cards in the last 10 minutes; ask in plain text` (§5.5);
+  - `cards_ui: 256 other chats showed cards in the last 10 minutes; ask in plain text`, past the counter's 256 chats (§5.5);
+  - `cards_ui: every card id is taken until the extension restarts; ask in plain text`, past the last id (below).
+- **Ids** are `c` plus 6 `[a-z0-9]` that look random. The extension never mints one twice while it runs, and remembers no id to make it so: the n-th id is the n-th value of a permutation of the 36^6 ids, keyed when the process starts. A permutation never repeats a value. Past the last id a card is refused, not shown under a used id; at §5.5's pace in all 256 chats (1,536 cards in 10 minutes) a process would need 27 years to get there. One process serves every chat, so a session's ids are unique for the process's life, and across a restart (§1.6), under new keys, unique in practice (36^6 ids). Nothing relies on them being secret (§5.2).
 
 **Description** (the v3.4 draft, adjusted; P4 tunes it):
 
@@ -470,7 +472,7 @@ The surviving answer lands in the compacted history as plain text, and the card 
 
 ## 4. Durability (Q4)
 
-**The extension stores nothing.** Its only state is in memory, and a restart resets it: the per-chat rate counter (§5.5), acceptable for a spam brake, and the ids it has minted (§1.5). The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
+**The extension stores nothing.** Its only state is in memory, and a restart resets it: the per-chat rate counter (§5.5), acceptable for a spam brake, and how many ids it has minted (§1.5). Both are bounded: the counter keeps at most 256 chats, and an id costs nothing to remember. The protocol's "write state to disk promptly" advice (`protocol.md:1124`) has nothing to apply to.
 
 **The session journal is the only store.** The card is the stored `tool_use` plus its `tool_result`, and the answer is a stored user message.
 
@@ -555,6 +557,7 @@ Resend itself is checked on local evidence only (§3.5). It can repeat an answer
 ### 5.5 Rate limits
 
 - **The extension:** 3 creates per chat per minute, and 6 per 10 minutes. A chat is its `session_id`, or its `group` when that is `null` (§1.5). Past that, it returns a teaching error.
+  - The counter is bounded across chats, not only in each: it keeps at most 256 chats. A chat leaves when its last card is 10 minutes old, so the chats idle longest leave first, and never sooner. No chat with a card in its window is evicted, so other chats can't buy it a fresh budget. While all 256 have one, a new chat's card is refused until the chat idle longest leaves (§1.5's line). The memory a crowd took is given back once the table is a quarter full.
 - **The desk:** one answer in flight per card, and repeat presses are ignored.
 - **Skips.** A skip is a message the agent reads. The description tells it not to re-ask.
 

@@ -106,7 +106,7 @@ fn every_result_ends_with_the_whole_trailer() {
     for (name, f) in fixtures("valid").into_iter().filter(|(_, f)| f.get("close").is_none()) {
         for wait in [false, true] {
             let (doc, _) = create(&f["input"]);
-            let id = ids.mint();
+            let id = ids.mint().unwrap();
             let text = result_text(&id, &doc, wait);
             let lines: Vec<&str> = text.split('\n').collect();
             assert!(text.len() <= RESULT_MAX_BYTES, "{name}");
@@ -246,9 +246,9 @@ fn three_a_minute_and_six_in_ten() {
     }
     rate.admit("a", t0 + secs(600)).unwrap();
     rate.admit("a", t0 + secs(700)).unwrap();
-    assert!(!rate.shown.contains_key("b"), "a chat with nothing in the last 10 minutes is forgotten");
+    assert!(rate.window("b").is_none(), "a chat with nothing in the last 10 minutes is forgotten");
     // At 700 s the cards of 1 s, 2 s and 60 s have left: 130, 200, 600, 700.
-    assert_eq!(rate.shown["a"].len(), 4);
+    assert_eq!(rate.window("a").unwrap().len(), 4);
 
     // Through the tool: the refusal is a JSON-RPC error, and a close still
     // answers.
@@ -264,12 +264,6 @@ fn three_a_minute_and_six_in_ten() {
     assert!(cards.call(&other_chat, t0 + secs(30)).is_ok());
 }
 
-/// Ids from a script of draws; drawing past its end fails the test.
-fn scripted<const N: usize>(draws: [u64; N]) -> Ids {
-    let mut draws = draws.into_iter();
-    Ids::drawing(move || draws.next().expect("drew past the script"))
-}
-
 #[test]
 fn an_id_is_c_and_its_draws_six_lowest_base_36_digits() {
     let pairs =
@@ -282,22 +276,201 @@ fn an_id_is_c_and_its_draws_six_lowest_base_36_digits() {
     assert_eq!(firsts, "abcdefghijklmnopqrstuvwxyz0123456789");
 }
 
-/// A draw that names an id already minted draws again (§1.5): 7 and 36^6 + 7
-/// both name `chaaaaa`, so the second id is 8's.
+/// The ids remember nothing per id: `Ids` owns no allocation (it has
+/// nothing to drop), so the millionth id costs what the first did.
 #[test]
-fn a_repeated_id_draws_again() {
-    let mut ids = scripted([7, 7, 36u64.pow(6) + 7, 8, 0]);
-    assert_eq!(ids.mint().as_str(), "chaaaaa");
-    assert_eq!(ids.mint().as_str(), "ciaaaaa");
-    assert_eq!(ids.mint().as_str(), "caaaaaa");
+fn ids_remember_nothing() {
+    assert!(!std::mem::needs_drop::<Ids>());
+    assert!(std::mem::size_of::<Ids>() <= 48, "{}", std::mem::size_of::<Ids>());
 }
 
-/// The default draw: well-formed ids, never repeated, whatever it draws.
+/// What makes the ids unique: [`permute`] is a permutation of `0..n` for
+/// every key, checked whole on small domains (2, 4, 6 and 8 bits, `n` from
+/// 1 to the whole domain), the code the 36^6 ids go through.
+#[test]
+fn the_permutation_is_one() {
+    let keyss = [[0; 4], [1, 2, 3, 4], [u64::MAX, 0x9e37_79b9_7f4a_7c15, 7, 36u64.pow(6)]];
+    for half in 1..=4 {
+        let all = 1u64 << (2 * half);
+        for n in [1, 2, 3, all / 2 + 1, all - 1, all] {
+            for keys in keyss {
+                let mut got: Vec<u64> = (0..n).map(|x| permute(&keys, half, n, x)).collect();
+                got.sort_unstable();
+                assert!(got.iter().copied().eq(0..n), "half {half}, n {n}, keys {keys:?}: {got:?}");
+            }
+        }
+    }
+}
+
+/// The n-th id is the permutation's n-th value over the 36^6 ids, under the
+/// process's keys: the same keys mint the same ids, and none twice.
+#[test]
+fn ids_follow_their_keys_and_never_repeat() {
+    let keys = [1, 2, 3, 4];
+    let mut ids = Ids::keyed(keys);
+    let first: Vec<String> = (0..3).map(|_| ids.mint().unwrap().as_str().to_string()).collect();
+    // Computed apart from this code (permute and id_of transcribed to Python), not read back from it.
+    assert_eq!(first, ["cob7j63", "clm8gjv", "cgv82qn"]);
+    let mut again = Ids::keyed(keys);
+    for (n, id) in first.iter().enumerate() {
+        assert_eq!(again.mint().unwrap().as_str(), id);
+        assert_eq!(Ids::id_of(permute(&keys, 16, IDS, n as u64)).as_str(), id);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = Ids::keyed([0x5eed, 0, u64::MAX, 36]);
+    for n in 0..200_000 {
+        assert!(seen.insert(ids.mint().unwrap()), "id {n} repeated");
+    }
+}
+
+/// The last id: after all 36^6, `mint` has none, and a card is refused (not
+/// counted) rather than shown under an id already used. A process would
+/// need decades of 256 chats at §5.5's pace to get there.
+#[test]
+fn the_last_id_is_the_last() {
+    let mut ids = Ids::keyed([1, 2, 3, 4]);
+    ids.next = IDS - 1;
+    assert!(!ids.spent());
+    assert_eq!(ids.mint().unwrap().as_str(), "cbekukj");
+    assert!(ids.spent());
+    assert_eq!(ids.mint(), None);
+    assert_eq!(ids.mint(), None);
+
+    let mut cards = Cards::default();
+    cards.ids.next = IDS;
+    let input = json!({ "question": "Ship it?", "options": ["Yes", "No"] });
+    for _ in 0..PER_MINUTE + 1 {
+        assert_eq!(cards.call(&chat(&input), Instant::now()).unwrap_err(), Refusal { code: REFUSED, message: SPENT.into() });
+    }
+    assert_eq!(SPENT, "cards_ui: every card id is taken until the extension restarts; ask in plain text");
+    assert_eq!(cards.rate.len(), 0, "a refused card isn't counted");
+    assert!(cards.call(&chat(&json!({ "close": "c4f9x2a" })), Instant::now()).is_ok());
+}
+
+/// The default ids: well-formed, and never repeated.
 #[test]
 fn the_default_ids_are_well_formed_and_do_not_repeat() {
     let mut ids = Ids::default();
-    let minted: Vec<CardId> = (0..5000).map(|_| ids.mint()).collect();
+    let minted: Vec<CardId> = (0..5000).map(|_| ids.mint().unwrap()).collect();
     let distinct: std::collections::HashSet<&CardId> = minted.iter().collect();
     assert_eq!(distinct.len(), minted.len());
     assert!(minted.iter().all(|id| CardId::parse(id.as_str()).as_ref() == Some(id)));
+}
+
+fn busy() -> String {
+    format!("cards_ui: {CHATS_MAX} other chats showed cards in the last 10 minutes; ask in plain text")
+}
+
+/// Many chats: at most [`CHATS_MAX`], each with a card in its window. One
+/// more is refused, and not kept, until the chat idle longest has been
+/// quiet ten minutes; the chats kept go on as before, and one that shows a
+/// card again keeps its place. Quiet, they all leave, and the table gives
+/// back the memory the crowd took. Through the tool, the refusal is a
+/// JSON-RPC error, and a close still answers.
+#[test]
+fn at_most_chats_max_chats() {
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let name = |i: u64| format!("session chat-{i}");
+    let mut rate = Rate::default();
+    for i in 0..CHATS_MAX as u64 {
+        rate.admit(&name(i), at(100 * i)).unwrap();
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    let crowd = rate.capacity();
+    assert!(crowd >= CHATS_MAX);
+    for t in [30_000, 599_999] {
+        assert_eq!(rate.admit("session one-more", at(t)).unwrap_err(), busy());
+    }
+    assert_eq!(rate.len(), CHATS_MAX, "a refused chat isn't kept");
+    assert!(rate.window("session one-more").is_none());
+    // At 600 s chat-0's card is ten minutes old: it leaves, and one-more takes its place.
+    rate.admit("session one-more", at(600_000)).unwrap();
+    assert!(rate.window(&name(0)).is_none());
+    assert_eq!(rate.admit("session two-more", at(600_000)).unwrap_err(), busy());
+    // chat-1, idle longest now, shows a card just before its first leaves:
+    // it keeps its place, and chat-2 is the one to leave.
+    rate.admit(&name(1), at(600_050)).unwrap();
+    assert_eq!(rate.admit("session two-more", at(600_100)).unwrap_err(), busy());
+    assert_eq!(rate.window(&name(1)).unwrap().len(), 1);
+    rate.admit("session two-more", at(600_200)).unwrap();
+    assert!(rate.window(&name(2)).is_none());
+    // Every chat kept goes on: its next card is counted beside its first.
+    for i in 3..CHATS_MAX as u64 {
+        rate.admit(&name(i), at(600_200)).unwrap();
+        assert_eq!(rate.window(&name(i)).unwrap().len(), 2);
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    rate.admit("session later", at(1_200_200)).unwrap();
+    assert_eq!(rate.len(), 1);
+    assert!(rate.capacity() <= 16, "{} after {crowd}", rate.capacity());
+
+    let mut cards = Cards::default();
+    let input = json!({ "question": "Ship it?", "options": ["Yes", "No"] });
+    let in_chat = |s: String, input: &Value| json!({ "name": "ui", "input": input, "session_id": s, "cwd": null });
+    for i in 0..CHATS_MAX as u64 {
+        cards.call(&in_chat(format!("s{i}"), &input), t0).unwrap();
+    }
+    assert_eq!(cards.call(&in_chat("new".into(), &input), t0).unwrap_err(), Refusal { code: REFUSED, message: busy() });
+    assert!(cards.call(&in_chat("new".into(), &json!({ "close": "c4f9x2a" })), t0).is_ok());
+    assert!(cards.call(&in_chat("s7".into(), &input), t0).is_ok(), "a chat kept still shows cards");
+}
+
+/// Chats that come and go: four tables of chats, a card each, at the pace
+/// that keeps [`CHATS_MAX`] in ten minutes. Each is admitted, the table
+/// never holds more, and a chat that comes back after ten quiet minutes
+/// starts over, the table small again.
+#[test]
+fn chats_come_and_go() {
+    let t0 = Instant::now();
+    let step = TEN_MINUTES / CHATS_MAX as u32;
+    let mut rate = Rate::default();
+    let mut most = 0;
+    for i in 0..4 * CHATS_MAX as u32 {
+        rate.admit(&format!("session chat-{i}"), t0 + step * i).unwrap_or_else(|e| panic!("chat {i}: {e}"));
+        most = most.max(rate.len());
+    }
+    assert_eq!(most, CHATS_MAX);
+    let mut t = t0 + step * (4 * CHATS_MAX as u32) + TEN_MINUTES;
+    for round in 0..3 {
+        for _ in 0..PER_MINUTE {
+            rate.admit("session chat-0", t).unwrap_or_else(|e| panic!("round {round}: {e}"));
+        }
+        assert!(rate.admit("session chat-0", t).is_err(), "round {round}");
+        assert_eq!(rate.len(), 1);
+        assert!(rate.capacity() <= 16, "round {round}: {}", rate.capacity());
+        t += TEN_MINUTES;
+    }
+}
+
+/// No chat escapes its limit through eviction: one that spent its minute
+/// is still refused while every other place fills and more chats knock,
+/// whether it keeps trying or stays quiet, though it is the chat idle
+/// longest. Only its own window lets it show a card again.
+#[test]
+fn no_chat_escapes_its_limit_through_eviction() {
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let hot = "session hot";
+    let spent = "cards_ui: 3 cards in the last minute; ask in plain text";
+    let mut rate = Rate::default();
+    for _ in 0..PER_MINUTE {
+        rate.admit(hot, at(0)).unwrap();
+    }
+    for i in 1..CHATS_MAX as u64 {
+        rate.admit(&format!("session other-{i}"), at(100 * i)).unwrap();
+        if i % 16 == 0 {
+            assert_eq!(rate.admit(hot, at(100 * i)).unwrap_err(), spent);
+        }
+    }
+    assert_eq!(rate.len(), CHATS_MAX);
+    for i in 0..4 * CHATS_MAX as u64 {
+        assert_eq!(rate.admit(&format!("session knock-{i}"), at(30_000)).unwrap_err(), busy());
+    }
+    assert_eq!(rate.window(hot).unwrap().len(), PER_MINUTE);
+    assert_eq!(rate.admit(hot, at(59_999)).unwrap_err(), spent);
+    rate.admit(hot, at(60_000)).unwrap();
+    // It comes back to its own count: its ten minutes hold all 4 cards.
+    assert_eq!(rate.window(hot).unwrap().len(), PER_MINUTE + 1);
+    assert_eq!(rate.len(), CHATS_MAX);
 }

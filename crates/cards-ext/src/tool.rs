@@ -2,16 +2,18 @@
 //! calls, validate with cards-spec, mint an id, and return at once with the
 //! result text (§1.5). Nothing waits for the answer, which comes later as a
 //! user message and never through here. The only state is the rate counter
-//! (§5.5) and the ids minted so far (§1.5).
+//! (§5.5), bounded across chats ([`crate::chats`]), and how many ids have
+//! been minted (§1.5).
 
 use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hasher};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cards_spec::sanitize::cut_chars;
 use cards_spec::{CardDoc, CardId, DefaultChoice, Envelope, FIELD_LABEL_MAX, Input, OPTION_LABEL_MAX, parse_input};
 use serde_json::{Value, json};
+
+use crate::chats::{CHATS_MAX, Chats};
 
 /// The tool's name as the extension declares it. The host namespaces it
 /// `cards:ui`, and the model sees `cards_ui` (`protocol.md`, "Registered tool
@@ -29,12 +31,16 @@ const WAIT: &str = "You can't continue without it: end your turn now; the answer
 pub const INVALID_PARAMS: i64 = -32602;
 pub const REFUSED: i64 = -32000;
 pub const WORKER: &str = "cards_ui: only the main chat can show cards";
+/// Past the last of the 36^6 ids ([`Ids`]): never in practice, but never an
+/// id twice.
+pub const SPENT: &str = "cards_ui: every card id is taken until the extension restarts; ask in plain text";
 
 /// §5.5: cards shown per chat.
 pub const PER_MINUTE: usize = 3;
 pub const PER_TEN_MINUTES: usize = 6;
 const MINUTE: Duration = Duration::from_secs(60);
-const TEN_MINUTES: Duration = Duration::from_secs(600);
+#[cfg(test)]
+const TEN_MINUTES: Duration = crate::chats::KEPT;
 
 /// A tool call refused: the JSON-RPC error the host hands the model as the
 /// call's output (`Extension error: <message>`), with no envelope, so the
@@ -83,8 +89,12 @@ impl Cards {
         match parse_input(params.get("input").unwrap_or(&Value::Null)).map_err(|e| Refusal::invalid(e.to_string()))? {
             Input::Close(card) => Ok(Envelope::closed(card).to_string()),
             Input::Create { doc, wait } => {
+                if self.ids.spent() {
+                    return Err(Refusal::refused(SPENT.to_string()));
+                }
                 self.rate.admit(&chat, now).map_err(Refusal::refused)?;
-                Ok(result_text(&self.ids.mint(), &doc, wait))
+                let id = self.ids.mint().expect("not spent: checked before the rate");
+                Ok(result_text(&id, &doc, wait))
             }
         }
     }
@@ -155,74 +165,81 @@ pub fn result_text(card: &CardId, doc: &CardDoc, wait: bool) -> String {
     lines.join("\n")
 }
 
-/// §5.5's counter: cards shown per chat in the last minute and the last ten.
-/// In memory: a restarted process starts it again, which only errs lenient.
+/// §5.5's counter: cards shown per chat in the last minute and the last ten,
+/// in a [`Chats`] table, bounded across chats as well as in each: a new chat
+/// that finds all [`CHATS_MAX`] places held by chats with a card in their
+/// windows is refused, and no chat is evicted early, so none escapes its
+/// limit. In memory: a restarted process starts it again, which only errs
+/// lenient.
 #[derive(Default)]
 pub struct Rate {
-    shown: HashMap<String, VecDeque<Instant>>,
+    shown: Chats<()>,
 }
 
 impl Rate {
     /// Count one more card for `chat` at `now`, or say why not. A refused
     /// card isn't counted.
     pub fn admit(&mut self, chat: &str, now: Instant) -> Result<(), String> {
-        self.shown.retain(|_, times| {
-            while times.front().is_some_and(|&t| now.saturating_duration_since(t) >= TEN_MINUTES) {
-                times.pop_front();
-            }
-            !times.is_empty()
-        });
-        let times = self.shown.entry(chat.to_string()).or_default();
+        let place = self.shown.at(chat, now);
+        let times = place.entries();
         if times.len() >= PER_TEN_MINUTES {
             return Err(format!("cards_ui: {PER_TEN_MINUTES} cards in the last 10 minutes; ask in plain text"));
         }
-        if times.iter().filter(|&&t| now.saturating_duration_since(t) < MINUTE).count() >= PER_MINUTE {
+        if times.iter().filter(|&&(t, ())| now.saturating_duration_since(t) < MINUTE).count() >= PER_MINUTE {
             return Err(format!("cards_ui: {PER_MINUTE} cards in the last minute; ask in plain text"));
         }
-        times.push_back(now);
-        Ok(())
+        place.push(()).map_err(|_| format!("cards_ui: {CHATS_MAX} other chats showed cards in the last 10 minutes; ask in plain text"))
     }
 }
 
-/// Card ids (§1.5): `c` and 6 of `[a-z0-9]`, never the same twice while
-/// the extension runs: a draw that names an id already minted draws again.
-/// One process serves every chat, so a session's ids are unique for the
-/// process's life; a restart starts a fresh set, and across one they are
-/// unique in practice (36^6 ids). Not secret (§5.2), so the default draw,
-/// std's randomly keyed hasher over a counter and the clock, is enough.
-/// The set grows by one id per card, which §5.5 caps at 36 an hour a chat.
+/// How many card ids there are: `c` and 6 of `[a-z0-9]`.
+pub const IDS: u64 = 36u64.pow(6);
+
+/// Card ids (§1.5), never the same twice while the extension runs, with
+/// nothing remembered to make it so: the n-th id is [`permute`]'s n-th
+/// value over the 36^6 ids, under keys drawn when the process starts. A
+/// permutation never repeats a value, so the first 36^6 ids are all
+/// different, and past them [`Ids::mint`] has none ([`SPENT`]): at §5.5's
+/// pace in all [`CHATS_MAX`] chats, 1,536 cards in 10 minutes, a process
+/// would need 27 years to get there. A restart draws new keys, so across one
+/// the ids are unique in practice (36^6 ids), as drawn ids were. Not secret
+/// (§5.2): the keys only make the ids look drawn.
 pub struct Ids {
-    draw: Box<dyn FnMut() -> u64>,
-    minted: HashSet<CardId>,
+    keys: [u64; 4],
+    next: u64,
 }
 
 impl Default for Ids {
     fn default() -> Self {
         let keys = RandomState::new();
-        let mut n = 0u64;
-        Ids::drawing(move || {
+        let clock = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        Ids::keyed(std::array::from_fn(|round| {
             let mut h = keys.build_hasher();
-            h.write_u64(n);
-            h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-            n += 1;
+            h.write_usize(round);
+            h.write_u128(clock);
             h.finish()
-        })
+        }))
     }
 }
 
 impl Ids {
-    /// Ids from `draw`'s values, each read as [`Ids::id_of`] reads it.
-    pub fn drawing(draw: impl FnMut() -> u64 + 'static) -> Self {
-        Ids { draw: Box::new(draw), minted: HashSet::new() }
+    /// The ids under `keys`, from the first.
+    pub fn keyed(keys: [u64; 4]) -> Self {
+        Ids { keys, next: 0 }
     }
 
-    pub fn mint(&mut self) -> CardId {
-        loop {
-            let id = Self::id_of((self.draw)());
-            if self.minted.insert(id.clone()) {
-                return id;
-            }
-        }
+    /// Whether all [`IDS`] have been minted.
+    pub fn spent(&self) -> bool {
+        self.next >= IDS
+    }
+
+    /// The next id, or none once [`spent`](Ids::spent).
+    pub fn mint(&mut self) -> Option<CardId> {
+        let n = self.next;
+        (n < IDS).then(|| {
+            self.next += 1;
+            Self::id_of(permute(&self.keys, 16, IDS, n))
+        })
     }
 
     /// `c`, then `v`'s 6 lowest base-36 digits, lowest first, `a`–`z` for
@@ -235,6 +252,53 @@ impl Ids {
             v /= 36;
         }
         CardId::parse(&id).expect("c and 6 of [a-z0-9]")
+    }
+}
+
+/// A keyed permutation of `0..n`, for `n` up to `2^(2·half)`: a Feistel
+/// network on `2·half` bits, one round a key, which is a permutation of
+/// `0..2^(2·half)` whatever its round function; then walked until it lands
+/// in `0..n` (cycle walking), which keeps it one of `0..n`: `x`'s cycle comes
+/// back to `x`, so the walk ends, and the value it ends on is reached from
+/// `x` alone. Ids use `half` 16: 2^32 values for the 36^6 ids, so a walk is
+/// two steps on average.
+fn permute(keys: &[u64], half: u32, n: u64, x: u64) -> u64 {
+    debug_assert!(x < n && n <= 1 << (2 * half));
+    let mask = (1u64 << half) - 1;
+    let mut y = x;
+    loop {
+        let (mut l, mut r) = (y >> half, y & mask);
+        for &k in keys {
+            (l, r) = (r, l ^ (mix(k ^ r) & mask));
+        }
+        y = (l << half) | r;
+        if y < n {
+            return y;
+        }
+    }
+}
+
+/// The round function, splitmix64's finalizer: any function keeps the
+/// network a permutation; this one only makes the ids look drawn.
+fn mix(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+#[cfg(test)]
+impl Rate {
+    fn window(&self, chat: &str) -> Option<&std::collections::VecDeque<(Instant, ())>> {
+        self.shown.window(chat)
+    }
+
+    fn len(&self) -> usize {
+        self.shown.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.shown.capacity()
     }
 }
 
