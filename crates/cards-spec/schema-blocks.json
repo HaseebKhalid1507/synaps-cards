@@ -12,7 +12,7 @@
           "op": {"enum": ["put", "patch", "replace", "collapse", "merge", "move", "remove"]},
           "id": {"type": "string", "description": "^[a-z][a-z0-9_-]{0,23}$, or card:<id> for a finished card"},
           "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
-          "kind": {"enum": ["plan", "status", "diff", "note", "metric", "file"]},
+          "kind": {"enum": ["plan", "status", "diff", "note", "metric", "file"], "description": "put and replace both give it"},
           "title": {"type": "string", "maxLength": 80},
           "target": {"enum": ["transcript", "rail"]},
           "slot": {"enum": ["upper", "end"]},

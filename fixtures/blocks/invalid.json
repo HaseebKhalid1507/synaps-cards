@@ -682,19 +682,20 @@
       "error": "ops[0].at.before: unknown key; at takes after"
     },
     {
-      "about": "replace: no kind (a body means nothing without one)",
+      "about": "§1.3 (amended at B1): a replace with no kind is refused, even to keep the block's (Shady's example)",
+      "section": "§1.3",
       "input": {
         "ops": [
           {
             "op": "replace",
-            "id": "hyp",
+            "id": "n",
             "body": {
-              "text": "x"
+              "text": "Corrected conclusion"
             }
           }
         ]
       },
-      "error": "ops[0].kind: required: plan, status, diff, note, metric or file"
+      "error": "ops[0].kind: required, even to keep the block's: plan, status, diff, note, metric or file"
     },
     {
       "about": "replace: a placement",

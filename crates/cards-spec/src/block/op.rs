@@ -18,9 +18,9 @@
 //! default (`open:false`, `run:false`) is as if absent.
 //!
 //! **Readings:**
-//! - `replace` needs `kind`, even to keep the block's kind: the extension
-//!   validates bodies without state, and a body means nothing without its
-//!   kind (§1.3 says "a new kind or title if given");
+//! - `replace` needs `kind`, even to keep the block's kind (§1.3, amended
+//!   at B1 from "a new kind or title if given"): the extension validates
+//!   bodies without state, and a body means nothing without its kind;
 //! - `merge` names 1 to 8 `ids`, since `into` may be a live group that the
 //!   members join; a new group with fewer than 2 is the fold's to skip;
 //! - `collapse` with `run` takes no `open`, and a `summary` only with `run`;
@@ -168,11 +168,14 @@ pub(crate) fn parse(v: &Value, path: &str) -> Result<Op, Error> {
     })
 }
 
-fn kind(o: &Map<String, Value>, path: &str) -> Result<Kind, Error> {
+/// `kind`, which `put` and `replace` both need: `replace` names it even to
+/// keep the block's (§1.3).
+fn kind(o: &Map<String, Value>, path: &str, replace: bool) -> Result<Kind, Error> {
     let p = join(path, "kind");
     let kinds = "plan, status, diff, note, metric or file";
     let Some(v) = o.get("kind") else {
-        return Err(Error::new(p, format!("required: {kinds}")));
+        let keep = if replace { ", even to keep the block's" } else { "" };
+        return Err(Error::new(p, format!("required{keep}: {kinds}")));
     };
     match v.as_str().and_then(Kind::parse) {
         Some(Kind::Group) => Err(Error::new(p, "a group is made by merge")),
@@ -245,7 +248,7 @@ fn put(o: &Map<String, Value>, path: &str) -> Result<Put, Error> {
         Ok(Ref::Card(_)) => return Err(Error::new(p, "a card is made by cards_ui; replace a finished card instead")),
         _ => block_id(o.get("id"), &p)?,
     };
-    let kind = kind(o, path)?;
+    let kind = kind(o, path, false)?;
     let title = title(o, path)?;
     let (target, slot) = place(o, path)?;
     let target = target.unwrap_or(if slot.is_some() { Target::Rail } else { Target::Transcript });
@@ -265,7 +268,7 @@ fn patch(o: &Map<String, Value>, path: &str) -> Result<Patch, Error> {
 fn replace(o: &Map<String, Value>, path: &str) -> Result<Replace, Error> {
     known(o, &["op", "id", "kind", "title", "body", "why"], path, "a replace takes id, kind, title, body and why")?;
     let id = reference(o.get("id"), &join(path, "id"))?;
-    let kind = kind(o, path)?;
+    let kind = kind(o, path, true)?;
     let title = title(o, path)?;
     let body = body(o, path, kind)?;
     let why = optional(o, "why", path, WHY_MAX)?;

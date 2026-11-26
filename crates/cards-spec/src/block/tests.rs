@@ -441,8 +441,13 @@ fn collapse_merge_move_remove_replace() {
     assert_eq!(ok(json!([{"op":"move","id":"plan"}]))[0], json!({"op":"move","id":"plan"}));
     assert_eq!(refused(json!([{"op":"move","id":"card:c4f9x2a","target":"rail"}])), "ops[0].target: cards don't go to the rail");
     ok(json!([{"op":"move","id":"card:c4f9x2a","at":{"after":"plan"}}]));
+    // §1.3 (amended): replace names its kind, even to keep it.
     assert_eq!(
-        refused(json!([{"op":"replace","id":"hyp","body":{"text":"x"}}])),
+        refused(json!([{"op":"replace","id":"n","body":{"text":"Corrected conclusion"}}])),
+        "ops[0].kind: required, even to keep the block's: plan, status, diff, note, metric or file"
+    );
+    assert_eq!(
+        refused(json!([{"op":"put","id":"n","body":{"text":"x"}}])),
         "ops[0].kind: required: plan, status, diff, note, metric or file"
     );
     assert_eq!(
