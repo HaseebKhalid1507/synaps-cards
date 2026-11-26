@@ -454,11 +454,6 @@ impl State {
             self.skip(at, Did::Move, id, Why::Dismissed);
             return;
         }
-        let to_rail = m.slot.is_some() || m.target == Some(Target::Rail);
-        if matches!(id, Ref::Card(_)) && to_rail {
-            self.skip(at, Did::Move, id, Why::Rail);
-            return;
-        }
         let dest: Option<Place> = match (m.target, m.slot) {
             (_, Some(s)) => Some(Place::Rail(s)),
             (Some(Target::Rail), None) => Some(Place::Rail(Slot::Upper)),
@@ -477,6 +472,12 @@ impl State {
             },
             None => None,
         };
+        let place = after.as_ref().map_or_else(|| dest.expect("a place"), |(p, _)| *p);
+        // A card stays in the transcript (§1.5), however `at` would place it.
+        if matches!(id, Ref::Card(_)) && matches!(place, Place::Rail(_)) {
+            self.skip(at, Did::Move, id, Why::Rail);
+            return;
+        }
         let b = &self.blocks[id];
         let was = (b.place, b.group.clone(), self.lists.get(&b.place).and_then(|l| l.iter().position(|r| r == id)));
         // Leave the list (or the group's members), land, then let a group
@@ -487,7 +488,6 @@ impl State {
         } else {
             self.unlist(id);
         }
-        let place = after.as_ref().map_or_else(|| dest.expect("a place"), |(p, _)| *p);
         let index = match &after {
             Some((p, x)) => self.lists.get(p).and_then(|l| l.iter().position(|r| r == x)).map_or(self.end_of(*p), |i| i + 1),
             None => self.end_of(place),
