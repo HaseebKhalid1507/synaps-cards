@@ -25,9 +25,11 @@
 //!   members join; a new group with fewer than 2 is the fold's to skip;
 //! - `collapse` with `run` takes no `open`, and a `summary` only with `run`;
 //! - `card:<id>` may be named by `patch`, `replace`, `collapse`, `remove`,
-//!   `move` in the transcript and `at.after`. A `put`, a `merge` (cards don't
-//!   join groups, §1.5) and a `move` to the rail (cards don't go there) name
-//!   blocks only.
+//!   `move` in the transcript, `at.after` and a `merge`'s `ids`. A card
+//!   can't join a group (§1.5), but a member that can't is the fold's to
+//!   skip, one by one (§1.3), never the call's to refuse: the other members
+//!   and the other ops still land. A `put`, a merge's `into` and a `move`
+//!   to the rail (cards don't go there) name blocks only.
 
 use serde::ser::SerializeMap;
 
@@ -112,13 +114,14 @@ pub struct Collapse {
     pub summary: Option<String>,
 }
 
-/// Group blocks into `into`, one level deep (§1.3).
+/// Group blocks into `into`, one level deep (§1.3). `ids` keeps every
+/// member as named, a card too: the fold skips the ones that can't join.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Merge {
     pub into: BlockId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    pub ids: Vec<BlockId>,
+    pub ids: Vec<Ref>,
 }
 
 /// Re-place a block (§1.2): with no target, slot or at, here.
@@ -312,8 +315,8 @@ fn merge(o: &Map<String, Value>, path: &str) -> Result<Merge, Error> {
     let Some(v) = o.get("ids") else {
         return Err(Error::new(p, format!("required: the 1 to {IDS_MAX} blocks to group")));
     };
-    let ids = id_list(v, &p, block_id)?;
-    if let Some(i) = ids.iter().position(|id| *id == into) {
+    let ids = id_list(v, &p, reference)?;
+    if let Some(i) = ids.iter().position(|id| id.block() == Some(&into)) {
         return Err(Error::new(format!("{p}[{i}]"), "is into; a group can't be its own member"));
     }
     Ok(Merge { into, title, ids })

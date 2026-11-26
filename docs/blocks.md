@@ -200,6 +200,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
   - any other live block: the merge is skipped.
   `into` listed in `ids` is refused by the extension.
 - **Each member** must be a live block that isn't a group, a card, dismissed, or already in a group, and must be in the group's target and, in the rail, its slot. Others are skipped one by one. A new group left with fewer than 2 members is skipped whole.
+  - So `ids` may name `card:<id>`: the extension takes it like any reference, and the fold skips it as a member that doesn't qualify. The call is refused only for a malformed id, an id listed twice, or `into` among the `ids`. `into` names a block, never a card.
 - **2 to 8 members.** Members count toward the 32 live blocks, and so does the group. The group's header counts its members: `3 blocks`.
 - **Membership is by id.** It survives the member's `patch` and `replace`, and ends at its `remove` or `move`. A group left with one member dissolves: that member takes the group's place, and the group's incarnation ends with a tombstone.
 - **On the group itself:**

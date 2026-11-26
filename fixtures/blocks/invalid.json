@@ -767,19 +767,37 @@
       "error": "ops[0].ids: give id or ids, not both"
     },
     {
-      "about": "merge: a card as a member",
+      "about": "merge: a card as into (into names a block; a card among the ids is the fold's to skip)",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "card:c4f9x2a",
+            "ids": [
+              "a",
+              "b"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].into: \"card:c4f9x2a\" names a card; only a block can be here"
+    },
+    {
+      "about": "merge: a card listed twice among the ids",
       "input": {
         "ops": [
           {
             "op": "merge",
             "into": "g",
             "ids": [
+              "card:c4f9x2a",
+              "a",
               "card:c4f9x2a"
             ]
           }
         ]
       },
-      "error": "ops[0].ids[0]: \"card:c4f9x2a\" names a card; only a block can be here"
+      "error": "ops[0].ids[2]: \"card:c4f9x2a\" is listed twice"
     },
     {
       "about": "merge: no ids",

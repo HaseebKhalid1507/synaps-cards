@@ -1822,6 +1822,47 @@
       "result": "ok 1 ops (blocks/1 #86f7c01c42d566b9)"
     },
     {
+      "about": "§1.3: merge with a card among its members: the fold skips the card, one by one, and the collapse still stands",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "g",
+            "ids": [
+              "a",
+              "card:c4f9x2a",
+              "b"
+            ]
+          },
+          {
+            "op": "collapse",
+            "id": "n"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "g",
+            "ids": [
+              "a",
+              "card:c4f9x2a",
+              "b"
+            ]
+          },
+          {
+            "op": "collapse",
+            "id": "n",
+            "open": false
+          }
+        ]
+      },
+      "digest": "1f186191d7ebc489",
+      "result": "ok 2 ops (blocks/1 #1f186191d7ebc489)"
+    },
+    {
       "about": "a proposal's hunk with a blank context line and a tab",
       "input": {
         "ops": [

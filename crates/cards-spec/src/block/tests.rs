@@ -412,11 +412,31 @@ fn collapse_merge_move_remove_replace() {
     assert_eq!(refused(json!([{"op":"remove","ids":["a","b","a"]}])), "ops[0].ids[2]: \"a\" is listed twice");
     assert_eq!(refused(json!([{"op":"remove","ids":[]}])), "ops[0].ids: at least 1 id");
     assert_eq!(refused(json!([{"op":"merge","into":"g","ids":["a","g"]}])), "ops[0].ids[1]: is into; a group can't be its own member");
-    assert_eq!(
-        refused(json!([{"op":"merge","into":"g","ids":["card:c4f9x2a"]}])),
-        "ops[0].ids[0]: \"card:c4f9x2a\" names a card; only a block can be here"
-    );
     ok(json!([{"op":"merge","into":"g","ids":["a"]}]));
+    // A card among the members is the fold's to skip (§1.3), not the call's
+    // to refuse: the merge keeps it, in place, and the next op stands.
+    let v = ok(json!([{"op":"merge","into":"g","ids":["a","card:c4f9x2a","b"]},{"op":"collapse","id":"n"}]));
+    assert_eq!(v[0], json!({"op":"merge","into":"g","ids":["a","card:c4f9x2a","b"]}));
+    let Ok(b) = call(json!([{"op":"merge","into":"g","ids":["card:c4f9x2a"]}])) else { panic!() };
+    let Op::Merge(m) = &b.ops[0] else { panic!() };
+    assert_eq!(m.ids, [Ref::parse("card:c4f9x2a").unwrap()]);
+    // Still refused: a card as into, a member twice, a malformed one, into among them.
+    assert_eq!(
+        refused(json!([{"op":"merge","into":"card:c4f9x2a","ids":["a"]}])),
+        "ops[0].into: \"card:c4f9x2a\" names a card; only a block can be here"
+    );
+    assert_eq!(
+        refused(json!([{"op":"merge","into":"g","ids":["card:c4f9x2a","a","card:c4f9x2a"]}])),
+        "ops[0].ids[2]: \"card:c4f9x2a\" is listed twice"
+    );
+    assert_eq!(
+        refused(json!([{"op":"merge","into":"g","ids":["a","card:C4F9X2A"]}])),
+        "ops[0].ids[1]: \"card:C4F9X2A\" must be a block id (^[a-z][a-z0-9_-]{0,23}$) or card:<card id> for a finished card"
+    );
+    assert_eq!(
+        refused(json!([{"op":"merge","into":"g","ids":["card:c4f9x2a","g"]}])),
+        "ops[0].ids[1]: is into; a group can't be its own member"
+    );
     assert_eq!(ok(json!([{"op":"move","id":"m","slot":"end"}]))[0], json!({"op":"move","id":"m","target":"rail","slot":"end"}));
     assert_eq!(ok(json!([{"op":"move","id":"plan"}]))[0], json!({"op":"move","id":"plan"}));
     assert_eq!(refused(json!([{"op":"move","id":"card:c4f9x2a","target":"rail"}])), "ops[0].target: cards don't go to the rail");
