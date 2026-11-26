@@ -1204,6 +1204,10 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
     assert!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX - 1))).is_ok());
     assert_eq!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX))).err(), Some(TooFar));
+    // An op's call is read too.
+    let op = |event| Target::Revision(Pos { event, op: Some(0) });
+    assert!(Refold::to(generation(), &many, op(REFOLD_MAX - 1)).is_ok());
+    assert_eq!(Refold::to(generation(), &many, op(REFOLD_MAX)).err(), Some(TooFar));
 }
 
 /// §1.9, §5.2: a compaction starts a new generation with an empty board; a
@@ -1908,6 +1912,10 @@ fn an_op_targets_binding_tail_is_read_in_slices() {
     let slices = steps_of(&mut rf, usize::MAX).unwrap();
     assert!(slices >= 2, "{slices}");
     assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
+    // Its batch's end looked for, its card fold read, the batch read for
+    // results: each event once; then the target's call applied.
+    let k = events.len() - 1;
+    assert_eq!(rf.visited(), 3 * k + 1);
 }
 
 /// §1.8 (R2-P2-2): a re-fold reads at most [`REFOLD_MAX`] events, the
@@ -1925,7 +1933,10 @@ fn an_op_target_whose_batch_ends_past_the_maximum_is_too_far_back() {
             assert_eq!(done, Err(TooFar), "a batch ending at {}", k + 2);
             assert_eq!(rf.state(), None);
             assert_eq!(rf.step(REFOLD_SLICE), Err(TooFar), "and it stays so");
+            // Every event it may read after the call, each looked at once.
+            assert_eq!(rf.visited(), REFOLD_MAX - 1);
         } else {
+            assert_eq!(rf.visited(), 3 * (k + 2) + 1);
             assert!(done.is_ok());
             assert_eq!(rf.state().unwrap().block(&r("n")).unwrap().rev, 1);
         }
@@ -2045,4 +2056,42 @@ fn a_replays_index_is_bounded() {
     }
     assert_eq!(most, REPLAY_MAX_OWNED);
     assert_eq!(state.live(), 30);
+    // A pass reads the rest of the batch, then applies its calls: one pass
+    // for REPLAY_IDS calls, two for one more.
+    for (n, work) in [(REPLAY_IDS, 2 * REPLAY_IDS), (REPLAY_IDS + 1, (REPLAY_IDS + 1) + REPLAY_IDS + 1 + 1)] {
+        let events = &h.events[..n];
+        let mut budget = usize::MAX;
+        let mut state = State::new(generation());
+        assert_eq!(replay::Replay::new(0, n, replay::Mode::View, None).run(&cards, &mut state, events, &mut budget), Some(false));
+        assert_eq!(usize::MAX - budget, work, "{n} calls");
+    }
+    // The scratch counts its replay's index: paused in a pass's read, its
+    // board as it was, its index full.
+    let events = &h.events[..REPLAY_IDS + 44];
+    let target = Target::Outcome(Pos::event(events.len()));
+    let fresh = Refold::to(generation(), events, target).unwrap().owned_bytes();
+    let mut rf = Refold::to(generation(), events, target).unwrap();
+    assert_eq!(rf.step(events.len()), Ok(false));
+    assert_eq!(rf.step(events.len() - 1), Ok(false));
+    assert_eq!(rf.owned_bytes(), fresh + REPLAY_MAX_OWNED);
+}
+
+/// §1.8: a re-fold whose target never took effect (its call unbound)
+/// keeps nothing once done.
+#[test]
+fn a_refold_that_finds_nothing_keeps_nothing() {
+    let mut h = H::default();
+    for i in 0..20 {
+        h.ops(json!([note(&format!("n{i}"), "x")]));
+        h.user("go on");
+    }
+    let at = h.events.len();
+    h.call(json!([note("late", "x")]));
+    h.user("no result");
+    let target = Target::Revision(Pos { event: at, op: Some(0) });
+    let fresh = Refold::to(generation(), &h.events, target).unwrap().owned_bytes();
+    let mut rf = Refold::to(generation(), &h.events, target).unwrap();
+    steps_of(&mut rf, 5).unwrap();
+    assert_eq!(rf.state(), None);
+    assert_eq!(rf.owned_bytes(), fresh);
 }
