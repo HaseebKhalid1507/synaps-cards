@@ -191,6 +191,24 @@ impl Owned for Logged {
     }
 }
 
+impl Owned for Open {
+    fn heap(&self) -> usize {
+        // A lower bound for the parsed batch: its normalized JSON.
+        self.tool_id.heap() + self.batch.as_ref().map_or(0, |b| b.preimage().len())
+    }
+}
+
+impl Board {
+    /// What the board retains besides the card fold, in owned bytes: the
+    /// committed working set and the open batch.
+    pub fn owned_bytes(&self) -> usize {
+        size_of::<Board>() - size_of::<State>()
+            + self.state.owned_bytes()
+            + self.open.capacity() * size_of::<Open>()
+            + self.open.iter().map(Owned::heap).sum::<usize>()
+    }
+}
+
 impl State {
     /// The working set's owned bytes (§1.8): at most
     /// [`WORKING_SET_MAX_BYTES`], an invariant the property tests check.

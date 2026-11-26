@@ -611,3 +611,49 @@ fn adversarial_streams_stay_under_one_mib() {
     eprintln!("adversarial working set: {total} bytes; by owner {:?}", s.owned_by_owner());
     assert!(total <= WORKING_SET_MAX_BYTES, "{total}");
 }
+
+/// §1.8 (P1-1): the open batch holds no copy of its calls, neither while a
+/// burst of calls waits for its results nor once they commit.
+#[test]
+fn a_burst_of_pending_calls_retains_no_copy_of_them() {
+    let long = format!("toolu_{}", "x".repeat(250));
+    let put = json!([{"op":"put","id":"n","kind":"note","body":{"text":"n"}}]);
+    let patch = json!([{"op":"patch","id":"n","set":{"text": "y".repeat(1500)}}]);
+    let receipt = |ops: &Value| block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    let mut events = vec![
+        Event::Call { tool_id: "t0".into(), name: "cards_block".into(), input: json!({ "ops": put }) },
+        Event::Result { tool_id: "t0".into(), text: receipt(&put) },
+        Event::User { text: "go".into() },
+    ];
+    for k in 0..2_000 {
+        events.push(Event::Call { tool_id: format!("{long}{k}"), name: "cards_block".into(), input: json!({ "ops": patch }) });
+    }
+    let mut b = Board::new(generation());
+    b.read(&events);
+    let pending = b.owned_bytes() - b.committed().owned_bytes();
+    for k in 0..2_000 {
+        events.push(Event::Result { tool_id: format!("{long}{k}"), text: receipt(&patch) });
+    }
+    events.push(Event::User { text: "next".into() });
+    b.read(&events);
+    let committed = b.owned_bytes() - b.committed().owned_bytes();
+    assert!(pending <= 1024 && committed <= 1024, "beyond the committed state: {pending} bytes pending, {committed} once committed");
+    assert!(b.owned_bytes() <= WORKING_SET_MAX_BYTES);
+}
+
+/// §1.8 (P1-1): a run title keeps no copy of its call's tool id, however
+/// long the provider made it.
+#[test]
+fn a_run_title_keeps_no_copy_of_a_long_tool_id() {
+    let long = "t".repeat(1 << 20);
+    let ops = json!([{"op":"collapse","run":true,"summary":"Ran the tests"}]);
+    let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+    let events = vec![
+        Event::Call { tool_id: long.clone(), name: "cards_block".into(), input: json!({ "ops": ops }) },
+        Event::Result { tool_id: long, text: receipt },
+        Event::User { text: "ok".into() },
+    ];
+    let mut b = Board::new(generation());
+    b.read(&events);
+    assert!(b.owned_bytes() < 64 * 1024, "{} bytes", b.owned_bytes());
+}

@@ -199,6 +199,18 @@ impl Board {
         b
     }
 
+    /// Reads every event of `events` past [`Board::position`].
+    pub fn read(&mut self, events: &[Event]) {
+        for e in &events[self.at.min(events.len())..] {
+            self.apply(e);
+        }
+    }
+
+    /// The committed board: the history's fold before the open batch.
+    pub fn committed(&self) -> &State {
+        &self.state
+    }
+
     /// Read one more event.
     pub fn apply(&mut self, event: &Event) {
         let at = self.at;
