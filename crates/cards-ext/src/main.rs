@@ -6,11 +6,13 @@
 //! sees as `cards_ui`, and answers each `tool.call` at once ([`tool`]): a
 //! card that is showing, or a refusal. It needs only `tools.register`: no
 //! hooks, no conversation access. One process serves every session of a
-//! daemon, so the only state, the rate counter, is kept per chat.
+//! daemon, so the only state, the rate counter, is kept per chat, in a
+//! table bounded across chats ([`chats`]).
 //!
 //! The exit code is 0 at the end of input or after `shutdown`, and 1 when
 //! the input broke off mid-frame (the host then starts it again).
 
+mod chats;
 mod rpc;
 mod tool;
 
