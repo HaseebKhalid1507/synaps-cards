@@ -1621,3 +1621,20 @@ fn a_move_by_at_alone_joins_the_after_blocks_list() {
     assert_eq!(last(&s, "card:c4f9x2a"), Outcome::Skipped(Why::Rail));
     assert!(matches!(s.block(&r("card:c4f9x2a")).unwrap().place, Place::Transcript(_)));
 }
+
+/// Decision D7 (§1.5, amended): a stored plan may lose its last step, and
+/// one patch can swap every step (remove is its first phase, append its
+/// second); creating a plan still takes 1 to 20.
+#[test]
+fn a_stored_plan_may_be_empty_but_a_new_one_may_not() {
+    let mut h = H::default();
+    h.ops(json!([put_plan("plan", &["fix"])]));
+    h.ops(json!([{"op":"patch","id":"plan","remove":["steps.fix"],"append":{"steps":[{"id":"next","label":"Next"}]}}]));
+    assert_eq!(steps(&h.state(), "plan"), [("next".to_string(), "todo".to_string())]);
+    h.ops(json!([{"op":"patch","id":"plan","remove":["steps.next"]}]));
+    let s = h.state();
+    assert!(steps(&s, "plan").is_empty());
+    assert_eq!((s.block(&r("plan")).unwrap().rev, last(&s, "plan")), (3, Outcome::Applied));
+    assert!(block::parse_call(&json!({"ops":[{"op":"put","id":"p2","kind":"plan","body":{"steps":[]}}]})).is_err());
+    assert!(block::parse_call(&json!({"ops":[{"op":"replace","id":"plan","kind":"plan","body":{"steps":[]}}]})).is_err());
+}

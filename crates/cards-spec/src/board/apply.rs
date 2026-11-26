@@ -650,8 +650,8 @@ pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, Pat
 /// stop, a hunk kept) are stored state no agent writes.
 ///
 /// Decision D3 (§1.4, §1.8): checked per path, so the path that would pass
-/// a cap is the one skipped. Decision D7: the maxima only, so a patch may
-/// remove a plan's last step (1–20 is a put's).
+/// a cap is the one skipped. Decision D7 (§1.5): the maxima only, so a
+/// stored plan may lose its last step (1–20 is a put's and a replace's).
 pub fn check_stored(body: &Body) -> Result<(), PathWhy> {
     use crate::block::{DIFF_LINES_MAX, HUNKS_MAX, PLAN_STEPS_MAX};
     match body {
