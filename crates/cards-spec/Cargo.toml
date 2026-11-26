@@ -9,7 +9,11 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
+# float_roundtrip: a number reads back as serde_json wrote it, every digit.
+# Without it, a 17-digit number can parse one bit off (0.0012000000000000001
+# as 0.0012), so normalizing is no fixed point, and a build where another
+# crate turns it on would write other bytes, and another digest.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2.workspace = true
 
 [features]

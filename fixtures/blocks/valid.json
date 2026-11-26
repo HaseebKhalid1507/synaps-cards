@@ -1592,6 +1592,41 @@
       "result": "ok 1 ops (blocks/1 #8d64494a208f7de3)"
     },
     {
+      "about": "17 significant digits read back exactly: serde_json reads numbers correctly rounded (float_roundtrip)",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "m",
+            "append": {
+              "series": [
+                0.0012000000000000001,
+                0.30000000000000004,
+                -123456789.12345679
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "m",
+            "append": {
+              "series": [
+                0.0012000000000000001,
+                0.30000000000000004,
+                -123456789.12345679
+              ]
+            }
+          }
+        ]
+      },
+      "digest": "6375ee04e01eebf1",
+      "result": "ok 1 ops (blocks/1 #6375ee04e01eebf1)"
+    },
+    {
       "about": "a file patched; a note's text keeps its line breaks; a group's title",
       "input": {
         "ops": [

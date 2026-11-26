@@ -400,6 +400,17 @@ fn numbers_are_canonical() {
         "ops[0].append.series[0]: must be a number between -10^15 and 10^15 (got 1000000000000000.0)"
     );
     assert!(Num::parse(&json!(-999999999999999.9)).is_some() && Num::parse(&json!("1")).is_none());
+    // 17 digits, read from text, back as written: every build reads a number
+    // correctly rounded (serde_json's float_roundtrip), so normalizing is a
+    // fixed point, and the desk's build and the extension's agree.
+    let text = r#"{"ops":[{"op":"patch","id":"m","append":{"series":[0.0012000000000000001,0.30000000000000004,-123456789.12345679]}}]}"#;
+    let b = parse_call(&crate::decode_json(text).unwrap()).unwrap();
+    let Op::Patch(p) = &b.ops[0] else { unreachable!() };
+    let Some(Appended::Series(xs)) = p.parts.append.values().next() else { unreachable!() };
+    assert_eq!(xs.iter().map(|x| x.get()).collect::<Vec<_>>(), [0.00012 * 10.0, 0.1 + 0.2, -123456789.12345679]);
+    let bytes = b.preimage();
+    assert!(String::from_utf8(bytes.clone()).unwrap().contains("[0.0012000000000000001,0.30000000000000004,-123456789.12345679]"));
+    assert_eq!(parse_call(&crate::decode_json(std::str::from_utf8(&bytes).unwrap()).unwrap()), Ok(b));
 }
 
 #[test]
