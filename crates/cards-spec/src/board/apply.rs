@@ -650,7 +650,7 @@ pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, Pat
 /// a patch can pass (list counts, a diff's lines, the byte cap) and the
 /// rules across its fields that B1 checks on a whole body: a status's text
 /// is one line, and a diff draws hunks or the session's edits, not both.
-/// The fold checks it after every path ([`path`]); it doesn't re-run an
+/// The fold checks it after every path, all or nothing; it doesn't re-run an
 /// agent's validation on the body, since the user's own decisions (a step's
 /// stop, a hunk kept) are stored state no agent writes.
 ///

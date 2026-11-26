@@ -31,8 +31,11 @@
 //!   each under §1.8's cap with its stated eviction ([`State::owned_bytes`]
 //!   counts them, and [`Board::owned_bytes`] everything the board keeps but
 //!   the card fold, which [`Board::card_fold_bytes`] reports apart).
-//! - **Re-folding** ([`Refold`]): a board up to a past position, in slices
-//!   of [`REFOLD_SLICE`] events, refused past [`REFOLD_MAX`].
+//! - **Re-folding** ([`Refold`]): the board at a revision record's
+//!   reference, op by op ([`Target::Revision`]: its batch's binding read
+//!   from its results, the card fold as the commit had it), or the whole
+//!   history keeping one hand-back's outcome ([`Target::Outcome`]); in
+//!   slices of at most [`REFOLD_SLICE`] events, refused past [`REFOLD_MAX`].
 //!
 //! **References** ([`Pos`]) are positions in the board's input: an event's
 //! index, and an op's index in its call. The board never copies the history:
@@ -99,7 +102,12 @@
 //!   the 65th id skips the list's whole path;
 //! - a new group sits at its first member that qualifies;
 //! - a group's membership is its body, so a join or a leave is a revision
-//!   of it;
+//!   of it; at 9,999 revisions a member's move or remove that would revise
+//!   it is skipped (`its group is at 9,999 revisions`), and one that ends a
+//!   group of two still applies;
+//! - a series append changes the block only if the series it leaves
+//!   differs; a status's `text` is folded to one line before it is
+//!   compared ([`check_stored`] holds every stored body to B1's rules);
 //! - a `remove` of an absent id logs `no change`; a `collapse` to the state
 //!   it has logs `no change` but still marks the agent's latest fold;
 //! - an edit of an id with no live block is `the block is gone`; of another
@@ -109,7 +117,8 @@
 //! - only the user's last writes are kept: a path the agent wrote last has
 //!   no entry;
 //! - no past body is materialized: a past revision is a [`Refold`] to its
-//!   reference (§1.8's re-fold scratch, the desk's).
+//!   reference (§1.8's re-fold scratch, the desk's); a record of a call that
+//!   never bound, or is still pending, has no revision to show.
 
 use std::collections::{BTreeMap, VecDeque};
 
