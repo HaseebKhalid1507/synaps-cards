@@ -398,7 +398,7 @@ The surviving answer lands in the compacted history as plain text, and the card 
 - **One answer per card in flight.** While a card's entry is sending, queued, held or checking, another press does nothing.
 - **Bounds.** It lives in the desk process, keyed by session, with at most 32 entries per session. Admission never fails. A new entry evicts the oldest entry that is "in the chat" first, then the oldest unconfirmed one, then the oldest of any state. An evicted card shows the fold's state, as it would on any other desk, with no Resend.
 - **Matching** is by exact text. Two identical answers count as one, which is harmless because they say the same thing.
-- **What drops an entry.** The card closes, is replaced or leaves the fold, a **superseding** answer appears, or the entry is evicted. A superseding answer is one later than ours in the fold, or, with ours absent, an answer that isn't in `seen` (rules 2 and 4). Our own answer appearing never drops the entry; it moves it to "in the chat", so the values survive a daemon crash before the save.
+- **What drops an entry.** The card closes, is replaced or leaves the fold, a **superseding** answer appears, or the entry is evicted. A superseding answer is one later than ours in the fold, or, with ours absent, an answer that isn't in `seen` (rules 2 and 4). Our own answer appearing never drops the entry; it moves it to "in the chat", so the values survive a daemon crash before the save. The desk may also drop one entry itself (`Memo::forget`), when it knows more than `seen`. For example, a change's `seen` may count an answer the desk knows a turn's end lost, so another desk's copy of it reads as that one. No other entry moves.
 
 | State | Entered on | The card shows | Leaves on |
 |---|---|---|---|
@@ -409,7 +409,7 @@ The surviving answer lands in the compacted history as plain text, and the card 
 | in the chat | `SteeringDelivered` with our text, or rule 2 | The receipt | A superseding answer, a close or gone: dropped. A later settled history without it (a crash before the save): checking |
 | unconfirmed | The settle rule | The values, one line of cause, and **Resend** if the gate below holds | Resend: sending. On a settled view, rules 1–4: closed, replaced or gone: dropped; ours in F: in the chat; Q ours: queued or held; superseded: dropped. Rules 5 and 6 don't run again, so the cause stays |
 | not sent | `Refused`, `NotAttached`, a reload `Error` | "Not sent: <reason> · Retry" | Retry: sending |
-| dropped | A close, replaced, gone, superseded, evicted | The fold's state, with no Resend | — |
+| dropped | A close, replaced, gone, superseded, evicted, or forgotten by the desk | The fold's state, with no Resend | — |
 
 **The notice is a hint, not a receipt.** A "steering queue full" notice names no input and goes to every client. So it moves each of that Live's entries in sending to checking, and does nothing more.
 
