@@ -190,21 +190,69 @@ fn state_sugar_is_set_on_the_main_list() {
     assert_eq!(v[0], json!({"op":"patch","id":"plan","set":{"steps.fix.state":"done","steps.test.state":"doing"}}));
     // The same patch written out is the same normalized op.
     assert_eq!(ok(json!([{"op":"patch","id":"plan","set":{"steps.test.state":"doing","steps.fix.state":"done"}}])), v);
-    let v = ok(json!([{"op":"patch","id":"d","state":{"h1":"kept"}}]));
-    assert_eq!(v[0]["set"], json!({"hunks.h1.state":"kept"}));
     assert_eq!(
         refused(json!([{"op":"patch","id":"p","state":{"fix":"finished"}}])),
-        "ops[0].state.fix: \"finished\" is not a plan state (todo, doing, done, failed, skipped) or a hunk state (open, kept, dropped)"
-    );
-    assert_eq!(
-        refused(json!([{"op":"patch","id":"p","state":{"fix":"done","h1":"kept"}}])),
-        "ops[0].state: mixes plan states and hunk states; tick one list per patch"
+        "ops[0].state.fix: \"finished\" is not a plan state (todo, doing, done, failed, skipped)"
     );
     // §1.6's example refusal, exactly.
     assert_eq!(
         refused(json!([{"op":"remove","id":"x"},{"op":"patch","id":"plan","state":{"fix":"done"},"set":{"steps.fix.state":"failed"}}])),
         "ops[1]: \"steps.fix.state\" is named twice (state and set)"
     );
+}
+
+/// §3.4: a hunk's keep or drop is the user's. The agent writes a hunk
+/// `open` (in a put, a replace or an append) and never sets its state: not
+/// by `set`, not by sugar, not even back to `open`. The user's edit keeps
+/// and drops.
+#[test]
+fn a_hunks_keep_or_drop_is_the_users() {
+    let teach = "a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)";
+    let hunk = |state: &str| json!({"id":"h1","lines":["+x"],"state":state});
+    let diff = |state: &str| json!({"file":"f","state":"proposed","hunks":[hunk(state)]});
+    for w in ["kept", "dropped"] {
+        let user = format!("\"{w}\" is the user's keep or drop; an agent's hunk is open, so leave state out");
+        assert_eq!(refused(json!([{"op":"patch","id":"d","set":{"hunks.h1.state":w}}])), format!("ops[0].set.\"hunks.h1.state\": {teach}"));
+        assert_eq!(refused(json!([{"op":"patch","id":"d","state":{"h1":w}}])), format!("ops[0].state.h1: {teach}"));
+        assert_eq!(refused(json!([{"op":"put","id":"d","kind":"diff","body":diff(w)}])), format!("ops[0].body.hunks[0].state: {user}"));
+        assert_eq!(refused(json!([{"op":"replace","id":"d","kind":"diff","body":diff(w)}])), format!("ops[0].body.hunks[0].state: {user}"));
+        assert_eq!(refused(json!([{"op":"patch","id":"d","append":{"hunks":[hunk(w)]}}])), format!("ops[0].append.hunks[0].state: {user}"));
+    }
+    // Not even back to open, and not beside a plan's tick.
+    assert_eq!(
+        refused(json!([{"op":"patch","id":"d","set":{"hunks.h1.state":"open"}}])),
+        format!("ops[0].set.\"hunks.h1.state\": {teach}")
+    );
+    assert_eq!(refused(json!([{"op":"patch","id":"x","state":{"fix":"done","h1":"kept"}}])), format!("ops[0].state.h1: {teach}"));
+    assert_eq!(
+        refused(json!([{"op":"put","id":"d","kind":"diff","body":diff("applied")}])),
+        "ops[0].body.hunks[0].state: \"applied\" is not a hunk state; an agent's hunk is open, so leave state out"
+    );
+    // An agent's hunk is open, given or not; the rest of a diff stays the agent's.
+    for v in [
+        ok(json!([{"op":"put","id":"d","kind":"diff","body":diff("open")}])),
+        ok(json!([{"op":"put","id":"d","kind":"diff","body":{"file":"f","state":"proposed","hunks":[{"id":"h1","lines":["+x"]}]}}])),
+    ] {
+        assert_eq!(v[0]["body"]["hunks"][0]["state"], "open");
+    }
+    let v = ok(
+        json!([{"op":"patch","id":"d","append":{"hunks":[hunk("open")],"hunks.h2.lines":["+y"]},"set":{"state":"written","hunks.h2.at":"f()"}}]),
+    );
+    assert_eq!(v[0]["append"]["hunks"][0]["state"], "open");
+    let p = Path::parse("hunks.h1.state").unwrap();
+    assert_eq!(set_spec(Kind::Diff, Author::Agent, &p), Some(Spec::UserOnly { teach }));
+    // The user keeps and drops, by an edit; never opens.
+    let e = edit(json!({"set":{"hunks.h1.state":"kept","hunks.h2.state":"dropped"}}));
+    assert_eq!(e.admit(Kind::Diff), Ok(()));
+    assert!(e.admit(Kind::Plan).is_err());
+    let text = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["keep h1", "drop h2"] });
+    assert_eq!(message::parse(&text).as_ref(), Some(&e));
+    let of = Tag::parse("bab3b9916631463b1935420c710c9287").unwrap();
+    let open = Edit::new(BlockId::parse("d").unwrap(), 1, of, &json!({"set":{"hunks.h1.state":"open"}})).unwrap_err();
+    assert_eq!(open.to_string(), "set.\"hunks.h1.state\": \"open\" is not a keep or a drop (kept, dropped)");
+    // The fold's per-path check says the same: a keep fits the user's diff, not the agent's.
+    assert!(e.parts.fits(Kind::Diff, Author::User).is_ok());
+    assert_eq!(e.parts.fits(Kind::Diff, Author::Agent).unwrap_err().to_string(), format!("hunks.h1.state: {teach}"));
 }
 
 /// §1.4's overlap rule, every clause.

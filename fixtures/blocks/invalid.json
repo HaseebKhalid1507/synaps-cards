@@ -356,7 +356,7 @@
       "error": "ops[0].set.state: \"finished\" is not a state of a status (working, waiting, blocked, done), a diff (editing, proposed, written, reverted), a metric (ok, warn, bad, neutral) or a file (reading, editing, written, done)"
     },
     {
-      "about": "state sugar mixing a plan's and a diff's",
+      "about": "state sugar keeping a hunk beside a plan's tick: a hunk's state is the user's (§3.4)",
       "input": {
         "ops": [
           {
@@ -369,7 +369,7 @@
           }
         ]
       },
-      "error": "ops[0].state: mixes plan states and hunk states; tick one list per patch"
+      "error": "ops[0].state.h1: a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
     },
     {
       "about": "an empty patch",
@@ -401,7 +401,7 @@
       "error": "ops[0].set.steps: \"steps\" is a list: append to it, remove its items or order it"
     },
     {
-      "about": "a field set twice across set and the sugar, on a diff",
+      "about": "a hunk's state named twice, by set and by sugar: the overlap rule speaks before the kind",
       "input": {
         "ops": [
           {
@@ -1091,7 +1091,128 @@
           }
         ]
       },
-      "error": "ops[0].body.hunks[0].state: \"applied\" is not a hunk state (open, kept, dropped)"
+      "error": "ops[0].body.hunks[0].state: \"applied\" is not a hunk state; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "§3.4: an agent keeps a hunk by set (the keep is the user's)",
+      "section": "§3.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "set": {
+              "hunks.h1.state": "kept"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"hunks.h1.state\": a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent sets a hunk back to open: not its path either",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "set": {
+              "hunks.h1.state": "open"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"hunks.h1.state\": a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent drops a hunk by state sugar",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "state": {
+              "h1": "dropped"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].state.h1: a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent puts a diff with a hunk kept",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].state: \"kept\" is the user's keep or drop; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "an agent replaces a diff with a hunk dropped",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "dropped"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].state: \"dropped\" is the user's keep or drop; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "an agent appends a hunk kept",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "append": {
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].append.hunks[0].state: \"kept\" is the user's keep or drop; an agent's hunk is open, so leave state out"
     },
     {
       "about": "note: no text",

@@ -10,7 +10,10 @@
 //! **Normalized parts.** `append`, `order` and `set` are maps in byte order
 //! of their paths; `remove` keeps its order. `state` sugar becomes `set`
 //! (`{"fix":"done"}` is `{"steps.fix.state":"done"}`, the list read from the
-//! words: plan states and hunk states share none). A string is sanitized as
+//! words: plan states and hunk states share none). A hunk's state is the
+//! user's keep or drop (§3.4), so no kind takes it from the agent, by `set`
+//! or by sugar: an agent's hunk is `open` when it writes one, and to
+//! withdraw one it removes it. A string is sanitized as
 //! its field is, except that `text` keeps its line breaks: it is a note's
 //! (many lines) or a status's (one), and only the fold knows which, so the
 //! fold folds a status's. Normalizing never depends on the kind, so every
@@ -127,6 +130,10 @@ pub enum Spec {
     },
     /// `{"n":…,"of":…}`.
     Progress,
+    /// The user's alone (§3.4): an agent's write is refused with `teach`.
+    UserOnly {
+        teach: &'static str,
+    },
 }
 
 const fn one_line(min: usize, max: usize) -> Spec {
@@ -142,6 +149,9 @@ macro_rules! words {
 /// The user's states for a step (a skip, an unskip) and a hunk (§3.4).
 const USER_STEP_STATES: &[&str] = &["todo", "skipped"];
 const USER_HUNK_STATES: &[&str] = &["kept", "dropped"];
+
+/// Why an agent can't set a hunk's state.
+const HUNK_DECISION: &str = "a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)";
 
 /// What `set` may give `path` on a block of `kind`, written by `author`; `None`
 /// if it may not set it at all. The agent's paths are the kinds' fields
@@ -162,7 +172,7 @@ pub fn set_spec(kind: Kind, author: Author, path: &Path) -> Option<Spec> {
             (Diff, "file", false, None) => one_line(1, DIFF_FILE_MAX),
             (Diff, "state", false, None) => words!(DiffState),
             (Diff, "hunks", true, Some("at")) => one_line(0, HUNK_AT_MAX),
-            (Diff, "hunks", true, Some("state")) => words!(HunkState),
+            (Diff, "hunks", true, Some("state")) => Spec::UserOnly { teach: HUNK_DECISION },
             (Note, "text", false, None) => Spec::NoteText,
             (Metric, "label", false, None) => one_line(1, METRIC_LABEL_MAX),
             (Metric, "value", false, None) => one_line(1, METRIC_VALUE_MAX),
@@ -255,6 +265,7 @@ impl Spec {
             },
             Spec::Whole { min, max } => SetValue::Whole(whole(v, path, min, max)?),
             Spec::Progress => SetValue::Progress(progress(v, path)?),
+            Spec::UserOnly { teach } => return Err(Error::new(path, teach)),
         })
     }
 }
@@ -542,38 +553,24 @@ pub(crate) fn parse_parts(o: &Map<String, Value>, path: &str, author: Author) ->
     }
     if agent && let Some(v) = o.get("state") {
         let p = join(path, "state");
-        let mut lists: BTreeSet<&str> = BTreeSet::new();
         for (k, w) in sorted(object(v, &p, "{item id: state}")?) {
             let at = join(&p, &key_path(k));
             let Some(item) = ItemId::parse(k) else {
                 return Err(Error::new(at, "not an item id"));
             };
+            // A hunk's words are the user's: the kind refuses them (`Spec::UserOnly`).
             let list = match w.as_str() {
                 Some(s) if StepState::parse(s).is_some() => "steps",
                 Some(s) if HunkState::parse(s).is_some() => "hunks",
                 _ => {
-                    return Err(Error::new(
-                        at,
-                        format!(
-                            "{} is not {} ({}) or {} ({})",
-                            json_quote(w),
-                            StepState::WHAT,
-                            StepState::ALL.join(", "),
-                            HunkState::WHAT,
-                            HunkState::ALL.join(", ")
-                        ),
-                    ));
+                    return Err(Error::new(at, format!("{} is not {} ({})", json_quote(w), StepState::WHAT, StepState::ALL.join(", "))));
                 }
             };
-            lists.insert(list);
             let sp = Path::of(list, item.as_str(), "state");
             if set.iter().any(|e| e.path() == &sp) {
                 return Err(Error::new(path, format!("{} is named twice (state and set)", quote(sp.as_str()))));
             }
             set.push(Entry { raw: Raw::Set(sp, w), at });
-        }
-        if lists.len() > 1 {
-            return Err(Error::new(p, "mixes plan states and hunk states; tick one list per patch"));
         }
     }
     set.sort_by(|a, b| a.path().cmp(b.path()));

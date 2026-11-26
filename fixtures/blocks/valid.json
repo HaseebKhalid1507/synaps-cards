@@ -852,7 +852,7 @@
       "result": "ok 3 ops (blocks/1 #7e2e65427e46eac6)"
     },
     {
-      "about": "every state of every kind",
+      "about": "every state of every kind an agent writes (a hunk's is open: kept and dropped are the user's, §3.4)",
       "input": {
         "ops": [
           {
@@ -975,20 +975,6 @@
                     "+x"
                   ],
                   "state": "open"
-                },
-                {
-                  "id": "kept",
-                  "lines": [
-                    "+x"
-                  ],
-                  "state": "kept"
-                },
-                {
-                  "id": "dropped",
-                  "lines": [
-                    "+x"
-                  ],
-                  "state": "dropped"
                 }
               ]
             }
@@ -1167,20 +1153,6 @@
                     "+x"
                   ],
                   "state": "open"
-                },
-                {
-                  "id": "kept",
-                  "lines": [
-                    "+x"
-                  ],
-                  "state": "kept"
-                },
-                {
-                  "id": "dropped",
-                  "lines": [
-                    "+x"
-                  ],
-                  "state": "dropped"
                 }
               ]
             }
@@ -1231,8 +1203,8 @@
           }
         ]
       },
-      "digest": "709ce1a100bc521b",
-      "result": "ok 14 ops (blocks/1 #709ce1a100bc521b)"
+      "digest": "dab19065741a105d",
+      "result": "ok 14 ops (blocks/1 #dab19065741a105d)"
     },
     {
       "about": "file states, a whole-number line",
@@ -1447,7 +1419,7 @@
       "result": "ok 2 ops (blocks/1 #12cfbae832d8ad1d)"
     },
     {
-      "about": "a diff patched: hunks appended, lines appended, a hunk removed, hunks ordered, a hunk kept by state sugar",
+      "about": "a diff patched: hunks appended, lines appended, a hunk removed, hunks ordered, fields set (never a hunk's state: §3.4)",
       "input": {
         "ops": [
           {
@@ -1476,9 +1448,6 @@
                 "h4",
                 "h1"
               ]
-            },
-            "state": {
-              "h1": "kept"
             },
             "set": {
               "hunks.h2.at": "rotate() end",
@@ -1520,15 +1489,14 @@
             ],
             "set": {
               "file": "crates/relay/src/lib.rs",
-              "hunks.h1.state": "kept",
               "hunks.h2.at": "rotate() end",
               "state": "proposed"
             }
           }
         ]
       },
-      "digest": "81ad7d93435798cc",
-      "result": "ok 1 ops (blocks/1 #81ad7d93435798cc)"
+      "digest": "416bdee093e7fbff",
+      "result": "ok 1 ops (blocks/1 #416bdee093e7fbff)"
     },
     {
       "about": "a metric patched: its series appended (canonical numbers), its value and was",

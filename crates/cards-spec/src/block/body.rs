@@ -10,6 +10,9 @@
 //! - defaults: a step's `state` is `todo`, a hunk's `open`, a status's
 //!   `working`, a metric's `neutral`. A diff and a file give their `state`:
 //!   neither has a neutral one;
+//! - an agent's hunk (in a `put`, a `replace` or an `append`) is `open`:
+//!   `kept` and `dropped` are the user's decisions (§3.4), so an agent
+//!   that writes one is refused;
 //! - a hunk's `at` is one line of at most [`HUNK_AT_MAX`] characters, and a
 //!   hunk has 1 to [`DIFF_LINES_MAX`] lines; a diff line is one line, `""`
 //!   allowed (a blank context line);
@@ -495,9 +498,23 @@ pub(crate) fn hunk(v: &Value, path: &str) -> Result<Hunk, Error> {
         return Err(Error::new(p, "required: the hunk's lines"));
     };
     let lines = diff_lines(v, &p, 1)?;
-    let state =
-        parse_state(o.get("state"), &join(path, "state"), HunkState::ALL, HunkState::WHAT, HunkState::parse, Some(HunkState::Open))?;
+    let state = agent_hunk_state(o.get("state"), &join(path, "state"))?;
     Ok(Hunk { id, at, lines, state })
+}
+
+/// An agent's hunk is `open`, given or by default: a keep or a drop is
+/// the user's to give (§3.4).
+fn agent_hunk_state(v: Option<&Value>, path: &str) -> Result<HunkState, Error> {
+    match v.map(|v| (v, v.as_str().and_then(HunkState::parse))) {
+        None | Some((_, Some(HunkState::Open))) => Ok(HunkState::Open),
+        Some((v, Some(_))) => Err(Error::new(
+            path,
+            format!("{} is the user's keep or drop; an agent's hunk is open, so leave state out", crate::doc::json_quote(v)),
+        )),
+        Some((v, None)) => {
+            Err(Error::new(path, format!("{} is not a hunk state; an agent's hunk is open, so leave state out", crate::doc::json_quote(v))))
+        }
+    }
 }
 
 /// `min..=120` diff lines, each one line of at most 160 characters.
