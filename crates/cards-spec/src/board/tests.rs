@@ -1429,3 +1429,19 @@ fn a_group_at_its_revision_cap_keeps_its_members_unless_it_ends() {
     assert!(s.block(&r("p")).is_none());
     assert_eq!(s.block(&r("a")).unwrap().place, Place::Rail(Slot::Upper));
 }
+
+/// §1.8 (P3-1): a re-fold's step reads at most [`REFOLD_SLICE`] events,
+/// whatever budget it is given.
+#[test]
+fn a_refold_step_reads_at_most_a_slice() {
+    let n = 3 * REFOLD_SLICE + 20_001;
+    let events: Vec<Event> = (0..n).map(|i| Event::Call { tool_id: format!("t{i}"), name: "bash".into(), input: Value::Null }).collect();
+    let mut rf = Refold::to(generation(), &events, Target::Revision(Pos::event(n - 1))).unwrap();
+    let mut read = Vec::new();
+    for budget in [0, 1, REFOLD_SLICE, REFOLD_SLICE + 1, usize::MAX, usize::MAX] {
+        let done = rf.step(budget);
+        read.push((rf.board().position(), done));
+    }
+    let slices = |k: usize| 1 + k * REFOLD_SLICE;
+    assert_eq!(read, [(0, false), (1, false), (slices(1), false), (slices(2), false), (slices(3), false), (n, true)]);
+}
