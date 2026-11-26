@@ -270,7 +270,7 @@ impl State {
 
     /// The agent wrote `p` on `b`: it is the last writer now. Over a path the
     /// user wrote last, that edit's key is overwritten, and the header says
-    /// so (§3.4 step 6). Decision (pending Haseeb), D6: a `set` of the path,
+    /// so (§3.4 step 6). Decision D6: a `set` of the path,
     /// an `order` of the list, or a `remove` of the item overwrites.
     fn agent_wrote(&mut self, b: &mut Block, p: &Path) {
         let users: Vec<(Path, Writer)> = if p.item().is_some() && p.field().is_none() {
@@ -597,7 +597,7 @@ impl State {
     }
 }
 
-/// Decision (pending Haseeb), D2: a `replace` without a title keeps the
+/// Decision D2: a `replace` without a title keeps the
 /// block's ("a new title if given", §1.3).
 fn replaced_title(old: Option<String>, new: Option<String>) -> Option<String> {
     new.or(old)

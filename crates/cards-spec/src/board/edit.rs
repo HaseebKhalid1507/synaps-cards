@@ -212,8 +212,8 @@ fn guarded_set(b: &mut Block, p: &Path, v: &SetValue) -> Code {
             }
             if f == "state" {
                 // A skip applies to a todo step, an unskip to a skipped one;
-                // otherwise there is nothing to do. Decision (pending
-                // Haseeb), D4: that is `unchanged`, not a conflict.
+                // otherwise there is nothing to do. Decision D4: that
+                // is `unchanged`, not a conflict.
                 let want = match v {
                     SetValue::Text(w) => StepState::parse(w),
                     _ => None,
