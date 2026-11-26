@@ -681,3 +681,24 @@ fn the_card_fold_is_reported_apart_from_the_working_set() {
     assert_eq!(b.owned_bytes(), small.owned_bytes() + (b.committed().owned_bytes() - small.committed().owned_bytes()));
     assert!(b.card_fold_bytes() > 100 * small.card_fold_bytes() / 2, "{} vs {}", b.card_fold_bytes(), small.card_fold_bytes());
 }
+
+/// §3.6, §1.8 (P2-2): every revision record a board keeps re-folds to its
+/// revision: the incarnation it names, at that number.
+#[test]
+fn every_record_refolds_to_its_revision() {
+    let mut r = Rng(0x2e40_1d00);
+    let mut checked = 0;
+    for case in 0..25 {
+        let (events, _) = history_of(&mut r, 25, true);
+        let s = Board::fold(generation(), &events).bound(&events);
+        for rec in s.records() {
+            let mut rf = Refold::to(generation(), &events, Target::Revision(rec.at)).unwrap();
+            while !rf.step(REFOLD_SLICE) {}
+            let at = rf.state().unwrap_or_else(|| panic!("case {case}: {rec:?} re-folds"));
+            let b = at.blocks().find(|b| b.tag == rec.tag).unwrap_or_else(|| panic!("case {case}: {rec:?} is live there"));
+            assert_eq!(b.rev, rec.rev, "case {case}: {rec:?}");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 500, "{checked}");
+}

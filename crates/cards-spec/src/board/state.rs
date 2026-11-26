@@ -21,6 +21,8 @@ pub struct State {
     /// Applying a pending call's ops (the overlay): everything they touch is
     /// marked.
     pub(crate) pending: bool,
+    /// A re-fold's requested outcome ([`Target::Outcome`]): never evicted.
+    pub(crate) pinned: Option<Pos>,
 }
 
 /// A live block: the id's slot (place, group, fold) and its current
@@ -436,6 +438,7 @@ impl State {
             outcomes: VecDeque::new(),
             log: VecDeque::new(),
             pending: false,
+            pinned: None,
         }
     }
 

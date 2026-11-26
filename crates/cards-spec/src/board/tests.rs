@@ -1191,7 +1191,7 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
         h.user("go on");
     }
     let until = 41;
-    let mut rf = Refold::new(generation(), &h.events, until).unwrap();
+    let mut rf = Refold::to(generation(), &h.events, Target::Revision(Pos::event(until - 1))).unwrap();
     let mut slices = 0;
     while !rf.step(7) {
         slices += 1;
@@ -1200,8 +1200,8 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
     assert_eq!(rf.board().view(&h.events[..until]), Board::fold(generation(), &h.events[..until]).view(&h.events[..until]));
     assert_eq!(rf.board().position(), until);
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
-    assert!(Refold::new(generation(), &many, REFOLD_MAX).is_ok());
-    assert_eq!(Refold::new(generation(), &many, REFOLD_MAX + 1).err(), Some(TooFar));
+    assert!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX - 1))).is_ok());
+    assert_eq!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX))).err(), Some(TooFar));
 }
 
 /// §1.9, §5.2: a compaction starts a new generation with an empty board; a
@@ -1240,7 +1240,7 @@ fn note_text(s: &State, id: &str) -> String {
 fn refold(events: &[Event], target: Target) -> Option<State> {
     let mut rf = Refold::to(generation(), events, target).unwrap();
     while !rf.step(REFOLD_SLICE) {}
-    rf.state()
+    rf.state().cloned()
 }
 
 #[test]

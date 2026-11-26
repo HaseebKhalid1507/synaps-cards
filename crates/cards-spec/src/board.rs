@@ -313,15 +313,18 @@ impl Board {
     /// call, as if each without its result were unbound (`Commit`), or the
     /// bound prefix only (`Bound`), or the overlay (`View`). The batch is
     /// `events[self.open..end]`.
-    fn replay(&self, state: &mut State, events: &[Event], end: usize, mode: Replay) {
-        if !self.calls {
-            return;
-        }
+    ///
+    /// With `stop`, an op's reference: no call after its call, and its call
+    /// through that op only; `true` if that op was reached (its call bound).
+    fn replay(&self, state: &mut State, events: &[Event], end: usize, mode: Replay, stop: Option<Pos>) -> bool {
         let mut pending = false;
         for i in self.open..end {
             let Event::Call { tool_id, name, input } = &events[i] else { continue };
             if !block::NAMES.contains(&name.as_str()) {
                 continue;
+            }
+            if stop.is_some_and(|s| i > s.event) {
+                break;
             }
             let batch = block::parse_call(input).ok();
             let binds = match (&batch, answer(events, i, end)) {
@@ -329,21 +332,30 @@ impl Board {
                 (Some(b), Answer::Result(text)) => block::Receipt::parse(text).is_some_and(|r| r.binds(b)),
                 (Some(_), Answer::None) => match mode {
                     Replay::Commit => false,
-                    Replay::Bound => return,
+                    Replay::Bound => return false,
                     Replay::View => {
                         pending = true;
                         true
                     }
                 },
             };
-            match batch {
-                Some(batch) if binds => {
+            let ops = match (&batch, stop) {
+                (Some(b), Some(Pos { event, op: Some(k) })) if event == i => b.ops.get(..=usize::from(k)),
+                (Some(b), _) => Some(&b.ops[..]),
+                (None, _) => None,
+            };
+            match ops {
+                Some(ops) if binds => {
                     let cx = apply::Cx { call: i, tool_id, cards: &self.cards, pending };
-                    state.call(&cx, &batch.ops);
+                    state.call(&cx, ops);
+                    if stop.is_some_and(|s| s.event == i) {
+                        return true;
+                    }
                 }
                 _ => state.unbound(Pos::event(i), pending),
             }
         }
+        false
     }
 
     /// Commits the open batch, `events[self.open..end]`: the next one
@@ -352,7 +364,7 @@ impl Board {
         if self.calls {
             let generation = self.state.generation;
             let mut state = std::mem::replace(&mut self.state, State::new(generation));
-            self.replay(&mut state, events, end, Replay::Commit);
+            self.replay(&mut state, events, end, Replay::Commit, None);
             self.state = state;
         }
         self.open = end;
@@ -373,7 +385,9 @@ impl Board {
     /// history will hold. `events` is the history the board read.
     pub fn view(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
-        self.replay(&mut s, self.history(events), self.at, Replay::View);
+        if self.calls {
+            self.replay(&mut s, self.history(events), self.at, Replay::View, None);
+        }
         s
     }
 
@@ -382,7 +396,9 @@ impl Board {
     /// state.
     pub fn bound(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
-        self.replay(&mut s, self.history(events), self.at, Replay::Bound);
+        if self.calls {
+            self.replay(&mut s, self.history(events), self.at, Replay::Bound, None);
+        }
         s
     }
 
@@ -430,15 +446,35 @@ pub fn edit_at(events: &[Event], at: Pos) -> Option<Edit> {
     message::read(text).edit
 }
 
-/// A board folded up to a past position, cooperatively (§1.8): a revision
-/// view, or an evicted outcome's row. [`Refold::step`] reads at most a
-/// budget of events, so the desk can yield between slices (it adds its own
-/// 30 ms clock).
+/// What a re-fold materializes (§1.8's scratch).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// A revision (§3.6): the board right after the op or the user message
+    /// at this reference took effect, a [`Record`]'s `at`. An op's call is
+    /// read as its batch commits it: every call before it in the batch, its
+    /// binding read from its result wherever that lies in the next message,
+    /// then its own ops through this one, and nothing after. A user
+    /// message's is the board after its edit and notices.
+    Revision(Pos),
+    /// A hand-back's outcome (§3.7), `at` the user message's: the whole
+    /// history, keeping that outcome however many later hand-backs come, so
+    /// the agent's later writes mark it as they would have.
+    Outcome(Pos),
+}
+
+/// A board folded to a [`Target`], cooperatively (§1.8): a revision view,
+/// or an evicted outcome's row. [`Refold::step`] reads at most a budget of
+/// events, so the desk can yield between slices (it adds its own 30 ms
+/// clock); the step that reaches the target also reads the target's batch.
 #[derive(Clone, Debug)]
 pub struct Refold<'a> {
     events: &'a [Event],
+    target: Target,
+    /// The board reads this far, then the target is materialized.
     until: usize,
     board: Board,
+    /// Once done: the board at the target, if the target took effect.
+    done: Option<Option<State>>,
 }
 
 /// A re-fold past [`REFOLD_MAX`] events: `too far back to show`.
@@ -446,45 +482,85 @@ pub struct Refold<'a> {
 pub struct TooFar;
 
 impl<'a> Refold<'a> {
-    /// A re-fold of `events` up to (not including) `until`.
-    pub fn new(generation: Generation, events: &'a [Event], until: usize) -> Result<Self, TooFar> {
-        let until = until.min(events.len());
+    /// A re-fold of `events`, the history the reference is into, to
+    /// `target`.
+    pub fn to(generation: Generation, events: &'a [Event], target: Target) -> Result<Self, TooFar> {
+        let until = match target {
+            Target::Revision(Pos { event, op: Some(_) }) => event,
+            Target::Revision(Pos { event, op: None }) => event.saturating_add(1),
+            Target::Outcome(_) => events.len(),
+        }
+        .min(events.len());
         if until > REFOLD_MAX {
             return Err(TooFar);
         }
-        Ok(Refold { events, until, board: Board::new(generation) })
+        let mut board = Board::new(generation);
+        if let Target::Outcome(at) = target {
+            board.state.pinned = Some(at);
+        }
+        Ok(Refold { events, target, until, board, done: None })
     }
 
-    /// Read up to `budget` more events; `true` once it has reached `until`.
+    /// Read up to `budget` more events; `true` once done.
     pub fn step(&mut self, budget: usize) -> bool {
+        if self.done.is_some() {
+            return true;
+        }
         let to = self.until.min(self.board.position().saturating_add(budget));
         self.board.read(&self.events[..to]);
-        self.board.position() == self.until
+        if self.board.position() < self.until {
+            return false;
+        }
+        self.done = Some(self.finish());
+        true
     }
 
-    /// The board so far.
+    fn finish(&mut self) -> Option<State> {
+        let events = self.events;
+        match self.target {
+            Target::Revision(at @ Pos { event, op: Some(_) }) => {
+                let Some(Event::Call { name, .. }) = events.get(event) else { return None };
+                if !block::NAMES.contains(&name.as_str()) {
+                    return None;
+                }
+                // The call starts the next batch if a result came before it.
+                if self.board.results {
+                    self.board.commit(events, event);
+                }
+                // Its batch ends where the board would commit it; with no
+                // end yet, only its bound prefix is final.
+                let mut results = false;
+                let mut end = None;
+                for (j, e) in events.iter().enumerate().skip(event + 1) {
+                    match e {
+                        Event::ResultsEnd | Event::User { .. } => end = Some(j),
+                        Event::Call { .. } if results => end = Some(j),
+                        Event::Result { .. } => results = true,
+                        Event::Call { .. } => {}
+                    }
+                    if end.is_some() {
+                        break;
+                    }
+                }
+                let (end, mode) = end.map_or((events.len(), Replay::Bound), |e| (e, Replay::Commit));
+                let mut s = self.board.state.clone();
+                self.board.replay(&mut s, events, end, mode, Some(at)).then_some(s)
+            }
+            Target::Revision(Pos { op: None, .. }) => Some(self.board.bound(&events[..self.until])),
+            Target::Outcome(_) => Some(self.board.view(events)),
+        }
+    }
+
+    /// Once done ([`Refold::step`]): the board at the target. `None` if the
+    /// target never took effect: its call didn't bind, or it is pending.
+    pub fn state(&self) -> Option<&State> {
+        self.done.as_ref()?.as_ref()
+    }
+
+    /// The board read so far.
     pub fn board(&self) -> &Board {
         &self.board
     }
-
-    /// Interim (fail first): a target read as a prefix through its event.
-    pub fn to(generation: Generation, events: &'a [Event], target: Target) -> Result<Self, TooFar> {
-        let (Target::Revision(p) | Target::Outcome(p)) = target;
-        let until = if matches!(target, Target::Outcome(_)) { events.len() } else { p.event + 1 };
-        Self::new(generation, events, until)
-    }
-
-    /// Interim: the view at the prefix.
-    pub fn state(&self) -> Option<State> {
-        Some(self.board.view(self.events))
-    }
-}
-
-/// What a re-fold materializes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Target {
-    Revision(Pos),
-    Outcome(Pos),
 }
 
 #[cfg(test)]

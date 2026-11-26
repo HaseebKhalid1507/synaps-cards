@@ -124,7 +124,14 @@ impl State {
         self.logged(at, Author::User, Did::Edit, Some(id), outcome);
     }
 
+    /// The latest [`OUTCOMES_MAX`]: the oldest goes first, unless a re-fold
+    /// asked for it ([`Target::Outcome`]).
     fn keep_outcome(&mut self, o: EditOutcome) {
+        if self.outcomes.len() >= OUTCOMES_MAX
+            && let Some(i) = self.outcomes.iter().position(|k| Some(k.at) != self.pinned)
+        {
+            self.outcomes.remove(i);
+        }
         push_capped(&mut self.outcomes, o, OUTCOMES_MAX);
     }
 
