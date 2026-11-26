@@ -165,6 +165,29 @@ pub fn fold<'a>(events: impl IntoIterator<Item = &'a Event>) -> Fold {
 }
 
 impl Fold {
+    /// What the fold retains, in bytes: an estimate, inline sizes plus the
+    /// strings it owns, a card's doc counted as its JSON. It grows with the
+    /// history's cards (the board reports it apart from its working set:
+    /// `Board::card_fold_bytes`).
+    pub fn retained_estimate(&self) -> usize {
+        use std::mem::size_of;
+        let card = |c: &Card| {
+            c.tool_id.capacity()
+                + c.doc.as_ref().map_or(0, |d| serde_json::to_vec(d).map_or(0, |v| v.len()))
+                + c.answers.capacity() * size_of::<Answered>()
+                + c.answers.iter().map(|a| a.text.capacity()).sum::<usize>()
+        };
+        let entry = |key: usize, value: usize| key + value + size_of::<u64>();
+        size_of::<Fold>()
+            + self.cards.capacity() * size_of::<Card>()
+            + self.cards.iter().map(card).sum::<usize>()
+            + self.closes.capacity() * size_of::<Close>()
+            + self.closes.iter().map(|c| c.tool_id.capacity()).sum::<usize>()
+            + self.calls.capacity() * entry(size_of::<String>(), size_of::<Slot>())
+            + self.calls.keys().map(String::capacity).sum::<usize>()
+            + self.bound.capacity() * entry(size_of::<CardId>(), size_of::<usize>())
+    }
+
     /// Read one more event.
     pub fn apply(&mut self, event: &Event) {
         let at = self.at;

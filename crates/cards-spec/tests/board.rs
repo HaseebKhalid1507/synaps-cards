@@ -236,7 +236,6 @@ fn history_of(r: &mut Rng, turns: usize, complete: bool) -> (Vec<Event>, Vec<std
             };
             calls.push((t, input, name));
         }
-        let start = events.len();
         for (t, input, name) in &calls {
             events.push(Event::Call { tool_id: t.clone(), name: (*name).into(), input: input.clone() });
         }
@@ -264,9 +263,7 @@ fn history_of(r: &mut Rng, turns: usize, complete: bool) -> (Vec<Event>, Vec<std
             events.push(Event::Result { tool_id: t.clone(), text });
         }
         blocks.push(from..events.len());
-        for e in &events[start..] {
-            board.apply(e);
-        }
+        board.read(&events);
         if r.chance(75) {
             let text = if r.chance(10) {
                 // A card answer.
@@ -274,11 +271,10 @@ fn history_of(r: &mut Rng, turns: usize, complete: bool) -> (Vec<Event>, Vec<std
                 let a = cards_spec::parse_answer(&doc, &json!({"choice": "900 ms"})).unwrap();
                 cards_spec::message::build(&CardId::parse(CARD).unwrap(), &doc, &cards_spec::Reply::Answer(a))
             } else {
-                user_text(r, &board.bound())
+                user_text(r, &board.bound(&events))
             };
-            let e = Event::User { text };
-            board.apply(&e);
-            events.push(e);
+            events.push(Event::User { text });
+            board.read(&events);
         }
     }
     (events, blocks)
@@ -334,11 +330,11 @@ fn random_histories_keep_the_caps_at_every_event() {
     for case in 0..40 {
         let (events, _) = history(&mut r, 60);
         let mut b = Board::new(generation());
-        for (i, e) in events.iter().enumerate() {
-            b.apply(e);
-            let v = b.view();
+        for i in 0..events.len() {
+            b.read(&events[..=i]);
+            let v = b.view(&events);
             check(&v, &format!("case {case} event {i}"));
-            check(&b.bound(), &format!("case {case} event {i} (bound)"));
+            check(&b.bound(&events), &format!("case {case} event {i} (bound)"));
             ops = ops.max(v.log().count());
         }
     }
@@ -356,12 +352,10 @@ fn any_split_of_a_history_folds_to_the_whole() {
             // A reattach: the history up to k, then the rest as it comes.
             let mut b = Board::fold(generation(), &events[..k]);
             let again = b.clone();
-            for e in &events[k..] {
-                b.apply(e);
-            }
-            assert_eq!(b.view(), whole.view(), "case {case} split at {k}");
-            assert_eq!(b.bound(), whole.bound(), "case {case} split at {k}");
-            assert_eq!(again.view(), Board::fold(generation(), &events[..k]).view(), "case {case}");
+            b.read(&events);
+            assert_eq!(b.view(&events), whole.view(&events), "case {case} split at {k}");
+            assert_eq!(b.bound(&events), whole.bound(&events), "case {case} split at {k}");
+            assert_eq!(again.view(&events), Board::fold(generation(), &events[..k]).view(&events[..k]), "case {case}");
         }
     }
 }
@@ -383,21 +377,23 @@ fn the_overlay_at_a_turns_end_is_the_history_fold_and_the_reattach_fold() {
         let mut hist = Board::new(generation());
         let mut stream = Board::new(generation());
         let mut ends = blocks.iter().map(|b| b.end).peekable();
-        for (i, (h, l)) in events.iter().zip(&live).enumerate() {
-            hist.apply(h);
-            stream.apply(l);
+        for i in 0..events.len() {
+            hist.read(&events[..=i]);
+            stream.read(&live[..=i]);
             if ends.peek() == Some(&(i + 1)) {
                 ends.next();
                 // The turn's end: every result in. The overlay is what the
                 // history holds once the turn lands (an empty message
                 // commits and changes nothing), and what a reattach folds.
-                let overlay = stream.view();
-                assert_eq!(overlay, hist.view(), "case {case} event {i}");
-                assert_eq!(overlay, stream.bound(), "case {case} event {i}: nothing pending");
+                let overlay = stream.view(&live);
+                assert_eq!(overlay, hist.view(&events), "case {case} event {i}");
+                assert_eq!(overlay, stream.bound(&live), "case {case} event {i}: nothing pending");
                 let mut landed = hist.clone();
-                landed.apply(&Event::User { text: String::new() });
-                assert_eq!(overlay, landed.view(), "case {case} event {i}");
-                assert_eq!(overlay, Board::fold(generation(), &events[..=i]).view(), "case {case} event {i}");
+                let mut with = events[..=i].to_vec();
+                with.push(Event::User { text: String::new() });
+                landed.read(&with);
+                assert_eq!(overlay, landed.view(&with), "case {case} event {i}");
+                assert_eq!(overlay, Board::fold(generation(), &events[..=i]).view(&events[..=i]), "case {case} event {i}");
                 assert!(overlay.log().all(|l| !l.pending));
                 checked += 1;
             }
@@ -416,21 +412,26 @@ fn a_pending_call_draws_what_its_binding_will_and_none_if_it_doesnt() {
         let Ok(batch) = block::parse_call(&json!({ "ops": ops })) else { continue };
         let call = Event::Call { tool_id: "toolu_live".into(), name: "cards_block".into(), input: json!({ "ops": ops }) };
         let mut pending = before.clone();
-        pending.apply(&call);
-        let v = pending.view();
+        let mut with = events.clone();
+        with.push(call);
+        pending.read(&with);
+        let v = pending.view(&with);
         check(&v, &format!("case {case} pending"));
         // Bound, it draws the same, unmarked; unbound, nothing of it.
         let mut bound = pending.clone();
-        bound.apply(&Event::Result { tool_id: "toolu_live".into(), text: batch.receipt().to_string() });
-        let b = bound.view();
+        let mut bound_events = with.clone();
+        bound_events.push(Event::Result { tool_id: "toolu_live".into(), text: batch.receipt().to_string() });
+        bound.read(&bound_events);
+        let b = bound.view(&bound_events);
         let unmark = |s: &State| {
             format!("{:?}", s.blocks().map(|b| (&b.id, &b.body, &b.title, b.rev, b.tag, b.place, &b.group)).collect::<Vec<_>>())
         };
         assert_eq!(unmark(&v), unmark(&b), "case {case}");
-        assert_eq!(pending.bound(), before.view(), "case {case}: a take never starts from pending state");
+        assert_eq!(pending.bound(&with), before.view(&events), "case {case}: a take never starts from pending state");
         let mut unbound = pending.clone();
-        unbound.apply(&Event::Result { tool_id: "toolu_live".into(), text: "Tool execution was cancelled.".into() });
-        assert_eq!(unmark(&unbound.view()), unmark(&before.view()), "case {case}");
+        with.push(Event::Result { tool_id: "toolu_live".into(), text: "Tool execution was cancelled.".into() });
+        unbound.read(&with);
+        assert_eq!(unmark(&unbound.view(&with)), unmark(&before.view(&events)), "case {case}");
     }
 }
 
@@ -458,7 +459,7 @@ fn unbound_and_cancelled_creates_leave_their_patches_nothing() {
             Event::Call { tool_id: "t2".into(), name: "cards:block".into(), input: json!({ "ops": patch }) },
             Event::Result { tool_id: "t2".into(), text: block::parse_call(&json!({ "ops": patch })).unwrap().receipt().to_string() },
         ];
-        let s = Board::fold(generation(), &events).view();
+        let s = Board::fold(generation(), &events).view(&events);
         assert_eq!((s.live(), s.creations()), (0, 0), "{result}");
         let lines: Vec<Outcome> = s.log().map(|l| l.outcome.clone()).collect();
         assert_eq!(lines, [Outcome::Unbound, Outcome::Skipped(Why::NotThere), Outcome::NoChange], "{result}");
@@ -472,7 +473,7 @@ fn overlapping_paths_never_apply() {
         Event::Call { tool_id: "t1".into(), name: "cards_block".into(), input: json!({ "ops": plan }) },
         Event::Result { tool_id: "t1".into(), text: block::parse_call(&json!({ "ops": plan })).unwrap().receipt().to_string() },
     ];
-    let before = Board::fold(generation(), &base).view();
+    let before = Board::fold(generation(), &base).view(&base);
     let tag = before.block(&Ref::parse("plan").unwrap()).unwrap().tag;
     // The agent's: the extension refuses, so the call never binds.
     for patch in [
@@ -492,7 +493,7 @@ fn overlapping_paths_never_apply() {
     ] {
         let mut events = base.clone();
         events.push(Event::User { text: format!("[block plan edited r1] plan → x\n{line2}") });
-        let s = Board::fold(generation(), &events).view();
+        let s = Board::fold(generation(), &events).view(&events);
         assert_eq!(s.blocks().collect::<Vec<_>>(), before.blocks().collect::<Vec<_>>(), "{line2}");
         assert_eq!(s.outcomes().count(), 0, "{line2}");
     }
@@ -525,7 +526,7 @@ fn adversarial_streams_stay_under_one_mib() {
         };
         call(&mut events, ops);
     }
-    let state = |events: &[Event]| Board::fold(generation(), events).view();
+    let state = |events: &[Event]| Board::fold(generation(), events).view(events);
     let s = state(&events);
     assert_eq!(s.live(), 32);
     assert!(s.blocks().all(|b| b.body.bytes() > b.kind.max_bytes() * 3 / 4), "near their caps");
@@ -656,4 +657,23 @@ fn a_run_title_keeps_no_copy_of_a_long_tool_id() {
     let mut b = Board::new(generation());
     b.read(&events);
     assert!(b.owned_bytes() < 64 * 1024, "{} bytes", b.owned_bytes());
+    assert_eq!(b.view(&events).run(0), Some("Ran the tests"));
+}
+
+/// §1.8 (P1-1): the board reports the card fold apart. Every card of the
+/// history is the card fold's, as before blocks; none of it is the board's.
+#[test]
+fn the_card_fold_is_reported_apart_from_the_working_set() {
+    let mut events = Vec::new();
+    let Input::Create { doc, wait } = parse_input(&ask()).unwrap() else { unreachable!() };
+    for k in 0..300 {
+        let t = format!("toolu_card_{k:04}");
+        events.push(Event::Call { tool_id: t.clone(), name: "cards_ui".into(), input: ask() });
+        events.push(Event::Result { tool_id: t, text: Envelope::showing(CardId::parse(CARD).unwrap(), &doc, wait).to_string() });
+        events.push(Event::User { text: "next".into() });
+    }
+    let small = Board::fold(generation(), &events[..3]);
+    let b = Board::fold(generation(), &events);
+    assert_eq!(b.owned_bytes(), small.owned_bytes() + (b.committed().owned_bytes() - small.committed().owned_bytes()));
+    assert!(b.card_fold_bytes() > 100 * small.card_fold_bytes() / 2, "{} vs {}", b.card_fold_bytes(), small.card_fold_bytes());
 }

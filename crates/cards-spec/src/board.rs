@@ -3,8 +3,9 @@
 //! holding the same history draws the same blocks.
 //!
 //! [`Board`] reads the card fold's [`Event`]s ([`crate::fold::events`] keeps
-//! a block call's input and its result), one at a time, and wraps the card
-//! fold ([`Board::cards`]): `card:<id>` ops resolve against it.
+//! a block call's input and its result) from the history the desk keeps
+//! ([`Board::read`]), and wraps the card fold ([`Board::cards`]): `card:<id>`
+//! ops resolve against it.
 //!
 //! - **Commit at the result** (§1.7): a block call's ops take effect at the
 //!   call's position, once its result binds ([`block::Receipt::binds`]).
@@ -22,7 +23,8 @@
 //! - **What it keeps** ([`State`]): live blocks, tombstones, revision
 //!   records, visibility records, run titles, edit outcomes and the op log,
 //!   each under §1.8's cap with its stated eviction ([`State::owned_bytes`]
-//!   counts them).
+//!   counts them, and [`Board::owned_bytes`] everything the board keeps but
+//!   the card fold, which [`Board::card_fold_bytes`] reports apart).
 //! - **Re-folding** ([`Refold`]): a board up to a past position, in slices
 //!   of [`REFOLD_SLICE`] events, refused past [`REFOLD_MAX`].
 //!
@@ -80,7 +82,7 @@ use std::collections::{BTreeMap, VecDeque};
 use serde_json::Value;
 
 use crate::block::message::{self, Edit, Trailer};
-use crate::block::{self, Author, Batch, BlockId, Body, Generation, ItemId, Kind, Op, Path, Ref, Slot, Tag};
+use crate::block::{self, Author, BlockId, Body, Generation, ItemId, Kind, Op, Path, Ref, Slot, Tag};
 use crate::fold::{self, Fold};
 
 pub use crate::fold::Event;
@@ -151,58 +153,89 @@ impl Place {
     }
 }
 
-/// A block call of the open batch: the current assistant message's,
-/// waiting for the next message's results.
-#[derive(Clone, Debug, PartialEq)]
-struct Open {
-    tool_id: String,
-    at: usize,
-    /// `None` if [`block::parse_call`] refuses the input: never bound.
-    batch: Option<Batch>,
-    /// `Some(binds)` once its result is read.
-    result: Option<bool>,
-    /// A later call took its tool id over: it never gets a result.
-    taken: bool,
-}
-
 /// The board of one conversation generation: the history's fold, plus the
 /// open batch (module docs).
+///
+/// It keeps no copy of the history (§1.8): the open batch is a range of it,
+/// `[open, position)`, read again at its commit and by [`Board::view`] and
+/// [`Board::bound`]. So the board reads from the history the desk keeps
+/// ([`Board::read`]), and every call that reads takes it: the same events,
+/// extended, never another history under the same positions. When the
+/// history changes under the board (a rollback, a settled history without
+/// the live turn, a compaction), the desk folds again from where the two
+/// diverge (§1.8).
 #[derive(Clone, Debug)]
 pub struct Board {
     state: State,
     cards: Fold,
-    open: Vec<Open>,
-    /// A result has been read since the open batch's first call.
+    /// The open batch's first event.
+    open: usize,
+    /// A block call is in the open batch.
+    calls: bool,
+    /// A result has been read since the open batch began.
     results: bool,
     at: usize,
+}
+
+/// What a block call of the open batch has, read from the history: its
+/// result's text, none yet, or a later call took its tool id over (so it
+/// never gets one).
+enum Answer<'e> {
+    Result(&'e str),
+    None,
+    Taken,
+}
+
+/// The answer of the call at `i`, from `events[i + 1..end]`: the first
+/// result for its tool id, unless a later call took the id over. Reading:
+/// the board scans the batch rather than keep a record per call, so it
+/// retains nothing per pending call; a batch's commit costs its length
+/// squared in comparisons of tool ids, as a view does.
+fn answer(events: &[Event], i: usize, end: usize) -> Answer<'_> {
+    let Event::Call { tool_id, .. } = &events[i] else { return Answer::None };
+    let mut first = None;
+    for e in &events[i + 1..end] {
+        match e {
+            Event::Call { tool_id: t, .. } if t == tool_id => return Answer::Taken,
+            Event::Result { tool_id: t, text } if t == tool_id && first.is_none() => first = Some(text.as_str()),
+            _ => {}
+        }
+    }
+    first.map_or(Answer::None, Answer::Result)
 }
 
 impl Board {
     /// An empty board of `generation` (§1.2).
     pub fn new(generation: Generation) -> Self {
-        Board { state: State::new(generation), cards: Fold::default(), open: Vec::new(), results: false, at: 0 }
+        Board { state: State::new(generation), cards: Fold::default(), open: 0, calls: false, results: false, at: 0 }
     }
 
-    /// The board of a history (`api_messages`, Full): its generation is the
-    /// first message's, its events [`fold::events`]'.
-    pub fn of_history(messages: &[Value]) -> Self {
+    /// The board of a history (`api_messages`, Full), and its events: its
+    /// generation is the first message's, its events [`fold::events`]'.
+    pub fn of_history(messages: &[Value]) -> (Self, Vec<Event>) {
         let generation = Generation::of(messages.first().unwrap_or(&Value::Null));
-        Self::fold(generation, &fold::events(messages))
+        let events = fold::events(messages);
+        (Self::fold(generation, &events), events)
     }
 
-    /// The board of `events`, in order.
-    pub fn fold<'a>(generation: Generation, events: impl IntoIterator<Item = &'a Event>) -> Self {
+    /// The board of `events`.
+    pub fn fold(generation: Generation, events: &[Event]) -> Self {
         let mut b = Board::new(generation);
-        for e in events {
-            b.apply(e);
-        }
+        b.read(events);
         b
     }
 
-    /// Reads every event of `events` past [`Board::position`].
+    /// Reads every event of `events` past [`Board::position`]. `events` is
+    /// the history the board has read so far, extended.
+    ///
+    /// # Panics
+    ///
+    /// If `events` is shorter than what the board has read: it isn't that
+    /// history (fold again from where they diverge).
     pub fn read(&mut self, events: &[Event]) {
-        for e in &events[self.at.min(events.len())..] {
-            self.apply(e);
+        assert!(events.len() >= self.at, "the board read {} events of a history of {}: fold it again", self.at, events.len());
+        while self.at < events.len() {
+            self.read_one(events);
         }
     }
 
@@ -211,38 +244,26 @@ impl Board {
         &self.state
     }
 
-    /// Read one more event.
-    pub fn apply(&mut self, event: &Event) {
+    fn read_one(&mut self, events: &[Event]) {
         let at = self.at;
-        self.at += 1;
+        let event = &events[at];
         match event {
-            Event::Call { tool_id, name, input } => {
+            Event::Call { name, .. } => {
                 // A call after a result starts the next assistant message.
                 if self.results {
-                    self.commit();
-                }
-                for o in self.open.iter_mut().filter(|o| &o.tool_id == tool_id) {
-                    o.taken = true;
+                    self.commit(events, at);
                 }
                 if block::NAMES.contains(&name.as_str()) {
-                    let batch = block::parse_call(input).ok();
-                    self.open.push(Open { tool_id: tool_id.clone(), at, batch, result: None, taken: false });
+                    self.calls = true;
                 }
                 self.cards.apply(event);
             }
-            Event::Result { tool_id, text } => {
-                // The tool id's latest call; one taken over never binds.
-                if let Some(o) = self.open.iter_mut().rev().find(|o| &o.tool_id == tool_id)
-                    && o.result.is_none()
-                {
-                    let binds = block::Receipt::parse(text).zip(o.batch.as_ref()).is_some_and(|(r, b)| r.binds(b));
-                    o.result = Some(binds);
-                }
+            Event::Result { .. } => {
                 self.results = true;
                 self.cards.apply(event);
             }
             Event::User { text } => {
-                self.commit();
+                self.commit(events, at);
                 self.cards.apply(event);
                 let read = message::read(text);
                 if let Some(e) = &read.edit {
@@ -251,41 +272,63 @@ impl Board {
                 self.state.notices(Pos::event(at), &read.trailer);
             }
         }
+        self.at += 1;
     }
 
-    /// The open batch's calls, in call order, onto the committed board:
-    /// every call, as if each result were in (`last`), or the bound prefix
-    /// only (`bound`), or the overlay (neither).
-    fn replay(&self, state: &mut State, mode: Replay) {
+    /// The open batch's block calls, in call order, onto `state`: every
+    /// call, as if each without its result were unbound (`Commit`), or the
+    /// bound prefix only (`Bound`), or the overlay (`View`). The batch is
+    /// `events[self.open..end]`.
+    fn replay(&self, state: &mut State, events: &[Event], end: usize, mode: Replay) {
+        if !self.calls {
+            return;
+        }
         let mut pending = false;
-        for o in &self.open {
-            let binds = match o.result {
-                _ if o.taken || o.batch.is_none() => false,
-                Some(b) => b,
-                None if mode == Replay::Commit => false,
-                None if mode == Replay::Bound => return,
-                None => {
-                    pending = true;
-                    true
-                }
+        for i in self.open..end {
+            let Event::Call { tool_id, name, input } = &events[i] else { continue };
+            if !block::NAMES.contains(&name.as_str()) {
+                continue;
+            }
+            let batch = block::parse_call(input).ok();
+            let binds = match (&batch, answer(events, i, end)) {
+                (None, _) | (_, Answer::Taken) => false,
+                (Some(b), Answer::Result(text)) => block::Receipt::parse(text).is_some_and(|r| r.binds(b)),
+                (Some(_), Answer::None) => match mode {
+                    Replay::Commit => false,
+                    Replay::Bound => return,
+                    Replay::View => {
+                        pending = true;
+                        true
+                    }
+                },
             };
-            match (&o.batch, binds) {
-                (Some(batch), true) => {
-                    let cx = apply::Cx { call: o.at, tool_id: &o.tool_id, cards: &self.cards, pending };
-                    state.call(&cx, batch);
+            match batch {
+                Some(batch) if binds => {
+                    let cx = apply::Cx { call: i, tool_id, cards: &self.cards, pending };
+                    state.call(&cx, &batch.ops);
                 }
-                _ => state.unbound(Pos::event(o.at), pending),
+                _ => state.unbound(Pos::event(i), pending),
             }
         }
     }
 
-    fn commit(&mut self) {
-        let generation = self.state.generation;
-        let mut state = std::mem::replace(&mut self.state, State::new(generation));
-        self.replay(&mut state, Replay::Commit);
-        self.state = state;
-        self.open.clear();
+    /// Commits the open batch, `events[self.open..end]`: the next one
+    /// begins at `end`.
+    fn commit(&mut self, events: &[Event], end: usize) {
+        if self.calls {
+            let generation = self.state.generation;
+            let mut state = std::mem::replace(&mut self.state, State::new(generation));
+            self.replay(&mut state, events, end, Replay::Commit);
+            self.state = state;
+        }
+        self.open = end;
+        self.calls = false;
         self.results = false;
+    }
+
+    fn history<'e>(&self, events: &'e [Event]) -> &'e [Event] {
+        assert!(events.len() >= self.at, "the board read {} events of a history of {}: fold it again", self.at, events.len());
+        &events[..self.at]
     }
 
     /// The board as the desk draws it (§1.7): committed, then the open
@@ -293,19 +336,19 @@ impl Board {
     /// result doesn't is left out; one without its result yet is pending,
     /// and it and every op after it apply provisionally ([`Block::pending`],
     /// [`Logged::pending`]). With every result in, it is the board the
-    /// history will hold.
-    pub fn view(&self) -> State {
+    /// history will hold. `events` is the history the board read.
+    pub fn view(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
-        self.replay(&mut s, Replay::View);
+        self.replay(&mut s, self.history(events), self.at, Replay::View);
         s
     }
 
     /// The bound board (§3.2): committed, then the open calls up to the
     /// first without its result. A take starts here, never from pending
     /// state.
-    pub fn bound(&self) -> State {
+    pub fn bound(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
-        self.replay(&mut s, Replay::Bound);
+        self.replay(&mut s, self.history(events), self.at, Replay::Bound);
         s
     }
 
@@ -380,11 +423,8 @@ impl<'a> Refold<'a> {
 
     /// Read up to `budget` more events; `true` once it has reached `until`.
     pub fn step(&mut self, budget: usize) -> bool {
-        let from = self.board.position();
-        let to = self.until.min(from.saturating_add(budget));
-        for e in &self.events[from..to] {
-            self.board.apply(e);
-        }
+        let to = self.until.min(self.board.position().saturating_add(budget));
+        self.board.read(&self.events[..to]);
         self.board.position() == self.until
     }
 

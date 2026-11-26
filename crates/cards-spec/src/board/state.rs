@@ -254,11 +254,10 @@ impl Visibility {
     }
 }
 
-/// A run title (`collapse` with `run`, §1.3): the call's tool id and its
-/// summary.
+/// A run title (`collapse` with `run`, §1.3): its summary, and the latest
+/// op that wrote it. The call at `at.event` is the one whose run it titles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Run {
-    pub tool_id: Box<str>,
     pub summary: Box<str>,
     pub at: Pos,
 }
@@ -495,9 +494,10 @@ impl State {
         self.runs.iter()
     }
 
-    /// The run title of the call with `tool_id`.
-    pub fn run(&self, tool_id: &str) -> Option<&str> {
-        self.runs.iter().find(|r| &*r.tool_id == tool_id).map(|r| &*r.summary)
+    /// The run title of the block call at position `call`: the run that
+    /// call sits in.
+    pub fn run(&self, call: usize) -> Option<&str> {
+        self.runs.iter().find(|r| r.at.event == call).map(|r| &*r.summary)
     }
 
     pub fn outcomes(&self) -> impl Iterator<Item = &EditOutcome> {

@@ -31,9 +31,9 @@ enum Found {
 
 impl State {
     /// A bound call's ops, in array order (§1.7).
-    pub(crate) fn call(&mut self, cx: &Cx, batch: &Batch) {
+    pub(crate) fn call(&mut self, cx: &Cx, ops: &[Op]) {
         self.pending = cx.pending;
-        for (i, op) in batch.ops.iter().enumerate() {
+        for (i, op) in ops.iter().enumerate() {
             let at = Pos { event: cx.call, op: Some(u8::try_from(i).unwrap_or(u8::MAX)) };
             match op {
                 Op::Put(p) => self.put(cx, at, i, p),
@@ -290,14 +290,15 @@ impl State {
     fn collapse(&mut self, cx: &Cx, at: Pos, c: &Collapse) {
         if c.run {
             // The tool run this call sits in (§1.3): the desk's grouping,
-            // titled by the agent.
+            // titled by the agent. Keyed by the call's position, never a
+            // copy of its tool id (§1.8: an outer id has no bound).
             let summary: Box<str> = c.summary.clone().unwrap_or_default().into();
-            match self.runs.iter_mut().find(|r| &*r.tool_id == cx.tool_id) {
+            match self.runs.iter_mut().find(|r| r.at.event == cx.call) {
                 Some(r) => {
                     r.summary = summary;
                     r.at = at;
                 }
-                None => push_capped(&mut self.runs, Run { tool_id: cx.tool_id.into(), summary, at }, RUNS_MAX),
+                None => push_capped(&mut self.runs, Run { summary, at }, RUNS_MAX),
             }
             self.logged(at, Author::Agent, Did::Run, None, Outcome::Applied);
             return;

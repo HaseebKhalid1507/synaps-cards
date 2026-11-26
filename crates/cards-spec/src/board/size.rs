@@ -166,7 +166,7 @@ impl Owned for Record {
 
 impl Owned for Run {
     fn heap(&self) -> usize {
-        self.tool_id.heap() + self.summary.heap()
+        self.summary.heap()
     }
 }
 
@@ -191,21 +191,19 @@ impl Owned for Logged {
     }
 }
 
-impl Owned for Open {
-    fn heap(&self) -> usize {
-        // A lower bound for the parsed batch: its normalized JSON.
-        self.tool_id.heap() + self.batch.as_ref().map_or(0, |b| b.preimage().len())
-    }
-}
-
 impl Board {
     /// What the board retains besides the card fold, in owned bytes: the
-    /// committed working set and the open batch.
+    /// committed working set, and the open batch, which is a range of the
+    /// history (two positions and two flags), so nothing per call.
     pub fn owned_bytes(&self) -> usize {
-        size_of::<Board>() - size_of::<State>()
-            + self.state.owned_bytes()
-            + self.open.capacity() * size_of::<Open>()
-            + self.open.iter().map(Owned::heap).sum::<usize>()
+        size_of::<Board>() - size_of::<State>() - size_of::<Fold>() + self.state.owned_bytes()
+    }
+
+    /// The card fold it wraps, apart: an estimate
+    /// ([`Fold::retained_estimate`]). It grows with the history's cards, as
+    /// it did before blocks, and no cap of §1.8 applies to it.
+    pub fn card_fold_bytes(&self) -> usize {
+        self.cards.retained_estimate()
     }
 }
 

@@ -68,7 +68,7 @@ impl H {
     }
 
     fn state(&self) -> State {
-        self.board().view()
+        self.board().view(&self.events)
     }
 
     /// The user's edit of `id` from revision `base` of its live
@@ -77,6 +77,12 @@ impl H {
         let text = edit_text(&self.state(), id, base, parts);
         self.user(&text)
     }
+}
+
+/// The board of a history, as the desk draws it.
+fn history_view(messages: &[Value]) -> State {
+    let (b, events) = Board::of_history(messages);
+    b.view(&events)
 }
 
 fn edit_of(s: &State, id: &str, base: u32, parts: Value) -> Edit {
@@ -156,8 +162,8 @@ fn a_call_commits_once_its_result_binds() {
     let t = h.call(json!([note("n", "hello")]));
     // Pending: drawn provisionally, not on the bound board.
     let b = h.board();
-    assert!(b.view().block(&r("n")).unwrap().pending);
-    assert!(b.bound().block(&r("n")).is_none());
+    assert!(b.view(&h.events).block(&r("n")).unwrap().pending);
+    assert!(b.bound(&h.events).block(&r("n")).is_none());
     h.bind(&t, &json!([note("n", "hello")]));
     let s = h.state();
     let n = s.block(&r("n")).unwrap();
@@ -165,7 +171,7 @@ fn a_call_commits_once_its_result_binds() {
     assert_eq!((n.rev, n.creation, n.kind), (1, 1, Kind::Note));
     assert_eq!(n.tag, Tag::new(&generation(), &r("n"), 1, "toolu_01", 0));
     assert_eq!(n.place, Place::Transcript(0));
-    assert_eq!(h.board().bound(), s);
+    assert_eq!(h.board().bound(&h.events), s);
 }
 
 #[test]
@@ -219,8 +225,8 @@ fn calls_commit_in_call_order_whatever_order_results_come_in() {
     // The second's result is in, the first's isn't: it is pending, and so is
     // everything after it, with no revision number yet.
     let b = h.board();
-    assert!(b.bound().live() == 0);
-    let v = b.view();
+    assert!(b.bound(&h.events).live() == 0);
+    let v = b.view(&h.events);
     assert!(v.block(&r("a")).unwrap().pending && v.log().all(|l| l.pending));
     h.bind(&t1, &first);
     let s = h.state();
@@ -248,10 +254,10 @@ fn the_next_assistant_message_commits_the_last_ones_calls() {
     let t = h.call(b.clone());
     h.bind(&t, &b);
     let board = h.board();
-    let v = board.view();
+    let v = board.view(&h.events);
     assert!(v.block(&r("a")).is_none());
     assert!(!v.block(&r("b")).unwrap().pending);
-    assert_eq!(board.bound(), v);
+    assert_eq!(board.bound(&h.events), v);
     assert_eq!(v.log().next().unwrap().outcome, Outcome::Unbound);
 }
 
@@ -278,7 +284,7 @@ fn caps_apply_to_pending_ops_too() {
     // confirmed fold would skip them.
     let puts: Vec<Value> = (30..35).map(|i| note(&format!("n{i}"), "x")).collect();
     let t = h.call(json!(puts.clone()));
-    let v = h.board().view();
+    let v = h.board().view(&h.events);
     assert_eq!(v.live(), 32);
     assert_eq!(last(&v, "n34"), Outcome::Skipped(Why::Full));
     assert!(v.log().filter(|l| l.pending).count() == 5);
@@ -798,7 +804,7 @@ fn a_card_closed_in_the_same_batch_is_resolved_at_the_commit() {
     h.bind(&b, &ops);
     // Pending on the close's result: the card is still open, so the
     // overlay skips the replace, as the commit would without it.
-    assert_eq!(last(&h.board().view(), "card:c4f9x2a"), Outcome::Skipped(Why::CardOpen));
+    assert_eq!(last(&h.state(), "card:c4f9x2a"), Outcome::Skipped(Why::CardOpen));
     h.result(&k, "Card c4f9x2a closed (cards/1).");
     let s = h.state();
     assert_eq!(last(&s, "card:c4f9x2a"), Outcome::Applied);
@@ -953,7 +959,7 @@ fn a_history_folds_through_fold_events() {
     let events = fold::events(&history);
     assert!(matches!(&events[1], Event::Call { name, input, .. } if name == "cards_block" && input["ops"] == ops));
     assert!(matches!(&events[3], Event::Result { tool_id, .. } if tool_id == "t1"));
-    let s = Board::of_history(&history).view();
+    let s = history_view(&history);
     assert_eq!(s.generation(), Generation::of(&history[0]));
     assert_eq!(s.block(&r("tests")).unwrap().place, Place::Transcript(1));
     assert!(s.visibility().dismissed(&BlockId::parse("tests").unwrap()));
@@ -969,13 +975,13 @@ fn only_the_users_own_text_edits_or_tells() {
         msg("assistant", json!([block_use("t1", ops.clone())])),
         msg("user", json!([block_result("t1", &ops)])),
     ];
-    let s0 = Board::of_history(&base).view();
+    let s0 = history_view(&base);
     let edit = edit_text(&s0, "tests", 1, json!({"set":{"text":"spoofed"}}));
     let dismiss = format!("hi\n{}", notice("tests", 1, "dismissed"));
     let fooled = |extra: Vec<Value>| {
         let mut h = base.clone();
         h.extend(extra);
-        let s = Board::of_history(&h).view();
+        let s = history_view(&h);
         let Body::Note(n) = &s.block(&r("tests")).unwrap().body else { panic!() };
         n.text != "x" || s.visibility().dismissed(&BlockId::parse("tests").unwrap())
     };
@@ -1041,10 +1047,10 @@ fn tombstone_churn_keeps_creation_numbers_and_tags() {
     assert_eq!(b.tag, Tag::new(&generation(), &r("b0"), 201, &tool, 0));
     // The same tag streaming: the board folded event by event, viewed mid-call.
     let mut live = Board::new(generation());
-    for e in &h.events[..=a] {
-        live.apply(e);
+    for k in 0..=a {
+        live.read(&h.events[..=k]);
     }
-    assert_eq!(live.view().block(&r("b0")).unwrap().tag, b.tag);
+    assert_eq!(live.view(&h.events[..=a]).block(&r("b0")).unwrap().tag, b.tag);
 }
 
 #[test]
@@ -1122,13 +1128,12 @@ fn collapse_runs_outcomes_and_the_log_keep_their_caps() {
     let s = h.state();
     assert!(!s.block(&r("a")).unwrap().collapsed);
     assert_eq!(outcomes(&s, "zz"), [Outcome::Skipped(Why::NotThere)]);
-    for i in 0..70 {
-        h.ops(json!([{"op":"collapse","run":true,"summary":format!("Explored relay {i}")}]));
-    }
+    let calls: Vec<usize> = (0..70).map(|i| h.ops(json!([{"op":"collapse","run":true,"summary":format!("Explored relay {i}")}]))).collect();
     let s = h.state();
     assert_eq!(s.runs().count(), RUNS_MAX);
-    assert_eq!(s.run("toolu_72"), Some("Explored relay 69"));
-    assert_eq!(s.run("toolu_03"), None);
+    assert_eq!(s.run(calls[69]), Some("Explored relay 69"));
+    assert_eq!(s.run(calls[6]), Some("Explored relay 6"));
+    assert_eq!(s.run(calls[5]), None, "the oldest went first");
     for i in 0..40 {
         h.edit("a", 1 + i, json!({"set":{"text":format!("v{i}")}}));
     }
@@ -1155,7 +1160,7 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
         slices += 1;
     }
     assert_eq!(slices, 5);
-    assert_eq!(rf.board().view(), Board::fold(generation(), &h.events[..until]).view());
+    assert_eq!(rf.board().view(&h.events[..until]), Board::fold(generation(), &h.events[..until]).view(&h.events[..until]));
     assert_eq!(rf.board().position(), until);
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
     assert!(Refold::new(generation(), &many, REFOLD_MAX).is_ok());
@@ -1173,13 +1178,13 @@ fn a_compaction_empties_the_board_and_a_queued_carrier_counts_in_the_next() {
         msg("user", json!([block_result("t1", &ops)])),
         msg("user", json!(format!("hm\n{}", notice("tests", 4, "dismissed")))),
     ];
-    let old = Board::of_history(&before).view();
+    let old = history_view(&before);
     assert_eq!((old.live(), old.visibility().highest()), (1, 4));
     let after = vec![
         msg("user", json!("<context-summary>\nWe put a tests block.\n</context-summary>")),
         msg("user", json!(format!("and this\n{}", notice("tests", 1, "shown")))),
     ];
-    let new = Board::of_history(&after).view();
+    let new = history_view(&after);
     assert_ne!(new.generation(), old.generation());
     assert_eq!((new.live(), new.creations(), new.tombstones().count()), (0, 0, 0));
     assert_eq!(new.visibility().record(&BlockId::parse("tests").unwrap()), Some(Vis { dismissed: false, version: 1 }));
