@@ -410,9 +410,20 @@ impl State {
         b.pending |= pending;
     }
 
+    /// Whether `id` leaving its group would revise a group at
+    /// [`REVISIONS_MAX`] (§1.4): a group's membership is its body, so one
+    /// left with two or more members takes a revision. One left with a
+    /// single member ends instead, which takes none. Decided before anything
+    /// moves, so a live incarnation never changes under its revision.
+    fn leaving_revises_a_capped_group(&self, id: &Ref) -> bool {
+        let Some(g) = self.blocks.get(id).and_then(|b| b.group.clone()) else { return false };
+        self.blocks.get(&Ref::Block(g)).is_some_and(|g| g.members().len() > 2 && g.rev >= REVISIONS_MAX)
+    }
+
     /// `id` leaves its group (by `did` at `at`). A group left with one
     /// member dissolves: the member takes its place, and the group's
-    /// incarnation ends (§1.3).
+    /// incarnation ends (§1.3). Otherwise it is a revision of the group
+    /// (the caller has checked it may take one).
     fn leave(&mut self, id: &Ref, at: Pos, did: Did) {
         let Some(g) = self.blocks.get_mut(id).and_then(|b| b.group.take()) else { return };
         let gid = Ref::Block(g);
@@ -436,10 +447,9 @@ impl State {
                 self.tombstone(&group, at);
             }
             _ => {
-                if group.rev < REVISIONS_MAX {
-                    group.rev += 1;
-                    self.record(&group, at, Author::Agent, did, &["members".to_string()]);
-                }
+                debug_assert!(group.rev < REVISIONS_MAX, "a leave that revises a capped group is skipped first");
+                group.rev += 1;
+                self.record(&group, at, Author::Agent, did, &["members".to_string()]);
                 self.blocks.insert(gid, group);
             }
         }
@@ -454,6 +464,10 @@ impl State {
             && self.visibility.dismissed(b)
         {
             self.skip(at, Did::Move, id, Why::Dismissed);
+            return;
+        }
+        if self.leaving_revises_a_capped_group(id) {
+            self.skip(at, Did::Move, id, Why::GroupRevisions);
             return;
         }
         let dest: Option<Place> = match (m.target, m.slot) {
@@ -542,6 +556,7 @@ impl State {
     fn remove(&mut self, cx: &Cx, at: Pos, r: &Remove) {
         for id in r.id.iter().chain(&r.ids) {
             match self.find(id, cx.cards) {
+                Found::Live if self.leaving_revises_a_capped_group(id) => self.skip(at, Did::Remove, id, Why::GroupRevisions),
                 Found::Live => {
                     self.end(id, at, Did::Remove);
                     self.logged(at, Author::Agent, Did::Remove, Some(id.clone()), Outcome::Applied);
