@@ -1499,3 +1499,38 @@ fn a_converted_cards_old_tag_never_applies_again() {
     assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Applied);
     assert_eq!(note_text(&h.state(), "card:c4f9x2a"), "mine again");
 }
+
+/// §3.6's restore, across each thing that can lie between: the desk
+/// re-folds rN (P2-2) and sends its user paths as an ordinary edit from the
+/// latest revision. Over the same incarnation it applies; a removed item
+/// stays removed; over a replace it is stale; over a remove it is gone.
+#[test]
+fn a_restore_applies_on_its_incarnation_only() {
+    let mut h = H::default();
+    h.ops(json!([put_plan("plan", &["fix", "test"]), note("n", "A")]));
+    h.ops(json!([{"op":"patch","id":"n","set":{"text":"B"}}, {"op":"patch","id":"plan","set":{"steps.fix.label":"Fix it","steps.test.label":"Test it"}}]));
+    h.ops(json!([{"op":"patch","id":"plan","remove":["steps.test"]}]));
+    h.user("next");
+    let s = h.state();
+    let r1 = |s: &State, id: &str| s.records_of(s.block(&r(id)).unwrap().tag).find(|rec| rec.rev == 1).unwrap().at;
+    let past = refold(&h.events, Target::Revision(r1(&s, "n"))).unwrap();
+    let at = h.edit("n", 2, json!({"set":{"text": note_text(&past, "n")}}));
+    let s = h.state();
+    assert_eq!((s.outcome(at).unwrap().codes.as_slice(), note_text(&s, "n").as_str()), ([Code::Applied].as_slice(), "A"));
+    // The plan's r1: test's label can't come back, its id is spent.
+    let past = refold(&h.events, Target::Revision(r1(&s, "plan"))).unwrap();
+    let Body::Plan(p1) = &past.block(&r("plan")).unwrap().body else { panic!() };
+    let set: serde_json::Map<String, Value> =
+        p1.steps.iter().map(|st| (format!("steps.{}.label", st.id.as_str()), json!(st.label))).collect();
+    let rev = s.block(&r("plan")).unwrap().rev;
+    let at = h.edit("plan", rev, json!({ "set": set }));
+    assert_eq!(h.state().outcome(at).unwrap().codes, [Code::Applied, Code::NotThere]);
+    // Over a replace, stale; over a remove, gone.
+    let restore = edit_text(&h.state(), "n", 3, json!({"set":{"text":"B"}}));
+    h.ops(json!([{"op":"replace","id":"n","kind":"note","body":{"text":"new"}}]));
+    let at = h.user(&restore);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Rewritten);
+    h.ops(json!([{"op":"remove","id":"n"}]));
+    let at = h.user(&restore);
+    assert_eq!(h.state().outcome(at).unwrap().result, EditResult::Gone);
+}
