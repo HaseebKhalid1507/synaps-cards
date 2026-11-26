@@ -604,11 +604,11 @@ fn overlapping_paths_never_apply() {
     }
 }
 
-/// Adversarial streams at every cap together: 32 maximal blocks churning
+/// An adversarial stream at every cap together: 32 maximal blocks churning
 /// their 64 item ids, the user's writes on every path, merges, 1,024
-/// records, a full log of skipped paths, 64 records, runs and outcomes.
-#[test]
-fn adversarial_streams_stay_under_one_mib() {
+/// records, a full log of skipped paths, 64 records, runs and outcomes. Its
+/// last call's batch is still open.
+fn adversarial_history() -> Vec<Event> {
     let mut events: Vec<Event> = Vec::new();
     let mut tool = 0;
     let mut call = |events: &mut Vec<Event>, ops: Value| {
@@ -711,7 +711,13 @@ fn adversarial_streams_stay_under_one_mib() {
         events.push(Event::User { text: message::build(&e, &Summary::default()).unwrap() });
     }
     call(&mut events, json!([{"op":"put","id":"last","kind":"note","title":"😀".repeat(80),"body":{"text":"😀".repeat(500)}}]));
-    let s = state(&events);
+    events
+}
+
+#[test]
+fn adversarial_streams_stay_under_one_mib() {
+    let events = adversarial_history();
+    let s = Board::fold(generation(), &events).view(&events);
     assert_eq!(
         (s.live(), s.records().count(), s.log().count(), s.visibility().len(), s.runs().count(), s.outcomes().count()),
         (32, RECORDS_MAX, LOG_MAX, VISIBILITY_MAX, RUNS_MAX, OUTCOMES_MAX)
@@ -729,6 +735,31 @@ fn adversarial_streams_stay_under_one_mib() {
     let total = s.owned_bytes();
     eprintln!("adversarial working set: {total} bytes; by owner {:?}", s.owned_by_owner());
     assert!(total <= WORKING_SET_MAX_BYTES, "{total}");
+}
+
+/// §1.8 (R2-P2-1): the re-fold scratch is one working set, ≤ 1 MiB at
+/// every step and once done, its card fold apart: a hand-back's outcome
+/// through the whole adversarial history, and that hand-back's revision.
+#[test]
+fn a_refold_owns_one_working_set() {
+    let mut events = adversarial_history();
+    events.push(Event::ResultsEnd);
+    let last = events.iter().rposition(|e| matches!(e, Event::User { .. })).unwrap();
+    let whole = Board::fold(generation(), &events).view(&events);
+    for target in [Target::Outcome(Pos::event(last)), Target::Revision(Pos::event(last))] {
+        let mut rf = Refold::to(generation(), &events, target).unwrap();
+        let mut most = rf.owned_bytes();
+        while !rf.step(1000) {
+            most = most.max(rf.owned_bytes());
+        }
+        most = most.max(rf.owned_bytes());
+        let s = rf.state().unwrap();
+        assert!(s.owned_bytes() > WORKING_SET_MAX_BYTES / 2, "{target:?}: a large working set, {} bytes", s.owned_bytes());
+        if let Target::Outcome(_) = target {
+            assert_eq!(s.blocks().collect::<Vec<_>>(), whole.blocks().collect::<Vec<_>>());
+        }
+        assert!(most <= WORKING_SET_MAX_BYTES, "{target:?}: the scratch owns {most} bytes");
+    }
 }
 
 /// §1.8 (P1-1): the open batch holds no copy of its calls, neither while a

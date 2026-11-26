@@ -300,6 +300,17 @@ impl Board {
     }
 }
 
+impl Refold<'_> {
+    /// What the re-fold scratch owns besides the card fold it reads, in
+    /// owned bytes (§1.8: one at a time, ≤ 1 MiB): the board it reads, and
+    /// the board at its target once done.
+    pub fn owned_bytes(&self) -> usize {
+        size_of::<Self>() - size_of::<Board>() - size_of::<Option<Option<State>>>()
+            + self.board.owned_bytes()
+            + self.state().map_or(0, State::owned_bytes)
+    }
+}
+
 impl State {
     /// The working set's owned bytes (§1.8): at most
     /// [`WORKING_SET_MAX_BYTES`], an invariant the property tests check.
