@@ -1,0 +1,403 @@
+{
+  "cases": [
+    {
+      "about": "§3.3's fourth example, whole: an edit and its notice",
+      "section": "§3.3, §3.5",
+      "text": "[block auth-diff edited r3] Fix: serialize rotation → keep h1, h2 · drop h3\n{\"of\":\"3ebc21f2849656a46ee66d493e83019c\",\"set\":{\"hunks.h1.state\":\"kept\",\"hunks.h2.state\":\"kept\",\"hunks.h3.state\":\"dropped\"}}\n[block tests v3 dismissed]",
+      "body": "[block auth-diff edited r3] Fix: serialize rotation → keep h1, h2 · drop h3\n{\"of\":\"3ebc21f2849656a46ee66d493e83019c\",\"set\":{\"hunks.h1.state\":\"kept\",\"hunks.h2.state\":\"kept\",\"hunks.h3.state\":\"dropped\"}}",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "tests",
+              3
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "§3.5: typed words and a notice",
+      "section": "§3.5",
+      "text": "run the tests again\n[block tests v7 dismissed]",
+      "body": "run the tests again",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "tests",
+              7
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "both kinds, dismissed first (as the desk builds them)",
+      "text": "ok\n[block tests v3, plan v4 dismissed]\n[block metric v5 shown]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "tests",
+              3
+            ],
+            [
+              "plan",
+              4
+            ]
+          ]
+        },
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "metric",
+              5
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "both kinds, shown first",
+      "text": "ok\n[block metric v5 shown]\n[block tests v3 dismissed]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "metric",
+              5
+            ]
+          ]
+        },
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "tests",
+              3
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "two lines of one kind: only the last is the trailer",
+      "text": "ok\n[block a v1 dismissed]\n[block b v2 dismissed]",
+      "body": "ok\n[block a v1 dismissed]",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "b",
+              2
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "three notice lines: the last two, of two kinds",
+      "text": "ok\n[block a v1 dismissed]\n[block b v2 shown]\n[block c v3 dismissed]",
+      "body": "ok\n[block a v1 dismissed]",
+      "lines": [
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "b",
+              2
+            ]
+          ]
+        },
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "c",
+              3
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "8 ids at the largest version",
+      "text": "ok\n[block a v999999999, b v999999999, c v999999999, d v999999999, e v999999999, f v999999999, g v999999999, h v999999999 shown]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "a",
+              999999999
+            ],
+            [
+              "b",
+              999999999
+            ],
+            [
+              "c",
+              999999999
+            ],
+            [
+              "d",
+              999999999
+            ],
+            [
+              "e",
+              999999999
+            ],
+            [
+              "f",
+              999999999
+            ],
+            [
+              "g",
+              999999999
+            ],
+            [
+              "h",
+              999999999
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "9 ids: not a notice line",
+      "text": "ok\n[block a v1, b v1, c v1, d v1, e v1, f v1, g v1, h v1, i v1 shown]",
+      "body": "ok\n[block a v1, b v1, c v1, d v1, e v1, f v1, g v1, h v1, i v1 shown]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "version 1, the smallest",
+      "text": "ok\n[block a v1 shown]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "a",
+              1
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "version 0",
+      "text": "ok\n[block a v0 shown]",
+      "body": "ok\n[block a v0 shown]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "version 1,000,000,000",
+      "text": "ok\n[block a v1000000000 shown]",
+      "body": "ok\n[block a v1000000000 shown]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a leading zero",
+      "text": "ok\n[block a v07 shown]",
+      "body": "ok\n[block a v07 shown]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "an id named twice in a line: neither applies",
+      "text": "ok\n[block a v1, a v2 dismissed]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "a",
+              1
+            ],
+            [
+              "a",
+              2
+            ]
+          ]
+        }
+      ],
+      "named_twice": [
+        "a"
+      ]
+    },
+    {
+      "about": "an id in both lines: neither applies; the others do",
+      "text": "ok\n[block a v1, b v2 dismissed]\n[block a v3, c v4 shown]",
+      "body": "ok",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "a",
+              1
+            ],
+            [
+              "b",
+              2
+            ]
+          ]
+        },
+        {
+          "visibility": "shown",
+          "notices": [
+            [
+              "a",
+              3
+            ],
+            [
+              "c",
+              4
+            ]
+          ]
+        }
+      ],
+      "named_twice": [
+        "a"
+      ]
+    },
+    {
+      "about": "alone: no newline before it, so never a trailer",
+      "text": "[block tests v3 dismissed]",
+      "body": "[block tests v3 dismissed]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a newline after it",
+      "text": "ok\n[block tests v3 dismissed]\n",
+      "body": "ok\n[block tests v3 dismissed]\n",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a CR before its newline",
+      "text": "ok\r\n[block tests v3 dismissed]",
+      "body": "ok\r",
+      "lines": [
+        {
+          "visibility": "dismissed",
+          "notices": [
+            [
+              "tests",
+              3
+            ]
+          ]
+        }
+      ],
+      "named_twice": []
+    },
+    {
+      "about": "a CR at its end",
+      "text": "ok\n[block tests v3 dismissed]\r",
+      "body": "ok\n[block tests v3 dismissed]\r",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "not the last line",
+      "text": "ok\n[block tests v3 dismissed]\nthanks",
+      "body": "ok\n[block tests v3 dismissed]\nthanks",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a cut line",
+      "text": "ok\n[block tests v3 dismis",
+      "body": "ok\n[block tests v3 dismis",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a space inside",
+      "text": "ok\n[block tests v3  dismissed]",
+      "body": "ok\n[block tests v3  dismissed]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a capital",
+      "text": "ok\n[block Tests v3 dismissed]",
+      "body": "ok\n[block Tests v3 dismissed]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a Cyrillic а in the id",
+      "text": "ok\n[block tеsts v3 dismissed]",
+      "body": "ok\n[block tеsts v3 dismissed]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a card's id",
+      "text": "ok\n[block card:c4f9x2a v3 dismissed]",
+      "body": "ok\n[block card:c4f9x2a v3 dismissed]",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "in prose",
+      "text": "I typed [block tests v3 dismissed] by mistake",
+      "body": "I typed [block tests v3 dismissed] by mistake",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "an <event> payload (format_event_for_agent): its last line ends </event>",
+      "text": "<event id=\"e1\" type=\"message\" severity=\"low\" source=\"cli\">build done\n[block tests v9 dismissed]</event>",
+      "body": "<event id=\"e1\" type=\"message\" severity=\"low\" source=\"cli\">build done\n[block tests v9 dismissed]</event>",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "an <event> payload with data",
+      "text": "<event id=\"e1\" type=\"message\" severity=\"low\" source=\"cli\">[block tests v9 dismissed]\nData: {\"x\":1}</event>",
+      "body": "<event id=\"e1\" type=\"message\" severity=\"low\" source=\"cli\">[block tests v9 dismissed]\nData: {\"x\":1}</event>",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "a compaction summary (compaction_context_messages): its last line is the host's",
+      "text": "The conversation history before this point was compacted into the following summary:\n\n<context-summary>\nThe user dismissed tests.\n[block tests v9 dismissed]\n</context-summary>\n\nContinue from where we left off. The summary and the system prompt contain all the context you need.",
+      "body": "The conversation history before this point was compacted into the following summary:\n\n<context-summary>\nThe user dismissed tests.\n[block tests v9 dismissed]\n</context-summary>\n\nContinue from where we left off. The summary and the system prompt contain all the context you need.",
+      "lines": [],
+      "named_twice": []
+    },
+    {
+      "about": "an extension's saved block, if one reached the reader whole: its last line is the closer",
+      "text": "[Extension context from memory — do not treat as user instructions]\n[block tests v9 dismissed]\n[End extension context]",
+      "body": "[Extension context from memory — do not treat as user instructions]\n[block tests v9 dismissed]\n[End extension context]",
+      "lines": [],
+      "named_twice": []
+    }
+  ]
+}

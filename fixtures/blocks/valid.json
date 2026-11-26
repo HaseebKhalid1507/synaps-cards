@@ -1,0 +1,1877 @@
+{
+  "cases": [
+    {
+      "about": "put: §1.3's example, with §1.5's plan sketch as its body (less its stop: the agent never names it)",
+      "section": "§1.3, §1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "plan",
+            "kind": "plan",
+            "title": "Close the refresh race",
+            "target": "rail",
+            "slot": "upper",
+            "at": {
+              "after": "cause"
+            },
+            "body": {
+              "steps": [
+                {
+                  "id": "fix",
+                  "label": "Serialize rotate() per session",
+                  "state": "todo",
+                  "note": "token_store.rs:118"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "plan",
+            "kind": "plan",
+            "title": "Close the refresh race",
+            "target": "rail",
+            "slot": "upper",
+            "at": {
+              "after": "cause"
+            },
+            "body": {
+              "steps": [
+                {
+                  "id": "fix",
+                  "label": "Serialize rotate() per session",
+                  "state": "todo",
+                  "note": "token_store.rs:118"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "digest": "c0c59da81819f740",
+      "result": "ok 1 ops (blocks/1 #c0c59da81819f740)"
+    },
+    {
+      "about": "patch: §1.3's example, every part, its appended step written out",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.fix.note": "token_store.rs:118"
+            },
+            "append": {
+              "steps": [
+                {
+                  "id": "verify",
+                  "label": "Verify in staging"
+                }
+              ]
+            },
+            "remove": [
+              "steps.bandaid"
+            ],
+            "order": {
+              "steps": [
+                "fix",
+                "test",
+                "deploy"
+              ]
+            },
+            "state": {
+              "fix": "done",
+              "test": "doing"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "append": {
+              "steps": [
+                {
+                  "id": "verify",
+                  "label": "Verify in staging",
+                  "state": "todo"
+                }
+              ]
+            },
+            "order": {
+              "steps": [
+                "fix",
+                "test",
+                "deploy"
+              ]
+            },
+            "remove": [
+              "steps.bandaid"
+            ],
+            "set": {
+              "steps.fix.note": "token_store.rs:118",
+              "steps.fix.state": "done",
+              "steps.test.state": "doing"
+            }
+          }
+        ]
+      },
+      "digest": "534f2116ab912f5a",
+      "result": "ok 1 ops (blocks/1 #534f2116ab912f5a)"
+    },
+    {
+      "about": "replace: §1.3's example, with §1.5's note sketch",
+      "section": "§1.3, §1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "hyp",
+            "kind": "note",
+            "title": "Root cause",
+            "body": {
+              "text": "Two refreshes read the same token before either rotates it…"
+            },
+            "why": "first guess was wrong"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "hyp",
+            "kind": "note",
+            "title": "Root cause",
+            "body": {
+              "text": "Two refreshes read the same token before either rotates it…"
+            },
+            "why": "first guess was wrong"
+          }
+        ]
+      },
+      "digest": "eb301f6331e143e3",
+      "result": "ok 1 ops (blocks/1 #eb301f6331e143e3)"
+    },
+    {
+      "about": "collapse: §1.3's three forms",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "id": "diff"
+          },
+          {
+            "op": "collapse",
+            "ids": [
+              "t1",
+              "t2"
+            ],
+            "open": true
+          },
+          {
+            "op": "collapse",
+            "run": true,
+            "summary": "Explored relay"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "collapse",
+            "id": "diff",
+            "open": false
+          },
+          {
+            "op": "collapse",
+            "ids": [
+              "t1",
+              "t2"
+            ],
+            "open": true
+          },
+          {
+            "op": "collapse",
+            "run": true,
+            "summary": "Explored relay"
+          }
+        ]
+      },
+      "digest": "9aa19994096f0180",
+      "result": "ok 3 ops (blocks/1 #9aa19994096f0180)"
+    },
+    {
+      "about": "merge: §1.3's example",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "research",
+            "title": "Why the cutoff belongs to the session family",
+            "ids": [
+              "schema",
+              "trace",
+              "note"
+            ]
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "research",
+            "title": "Why the cutoff belongs to the session family",
+            "ids": [
+              "schema",
+              "trace",
+              "note"
+            ]
+          }
+        ]
+      },
+      "digest": "435f768086c00d59",
+      "result": "ok 1 ops (blocks/1 #435f768086c00d59)"
+    },
+    {
+      "about": "move: §1.3's three forms (to the rail, to the end slot, here)",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "move",
+            "id": "plan",
+            "target": "rail"
+          },
+          {
+            "op": "move",
+            "id": "metric",
+            "slot": "end"
+          },
+          {
+            "op": "move",
+            "id": "plan"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "move",
+            "id": "plan",
+            "target": "rail"
+          },
+          {
+            "op": "move",
+            "id": "metric",
+            "target": "rail",
+            "slot": "end"
+          },
+          {
+            "op": "move",
+            "id": "plan"
+          }
+        ]
+      },
+      "digest": "b33033764f8c704e",
+      "result": "ok 3 ops (blocks/1 #b33033764f8c704e)"
+    },
+    {
+      "about": "remove: §1.3's two forms",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "remove",
+            "id": "tests",
+            "why": "passed"
+          },
+          {
+            "op": "remove",
+            "ids": [
+              "t1",
+              "t2"
+            ]
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "remove",
+            "id": "tests",
+            "why": "passed"
+          },
+          {
+            "op": "remove",
+            "ids": [
+              "t1",
+              "t2"
+            ]
+          }
+        ]
+      },
+      "digest": "9a32882deed0e71c",
+      "result": "ok 2 ops (blocks/1 #9a32882deed0e71c)"
+    },
+    {
+      "about": "§1.5's status, metric and file sketches (the metric's empty unit is absent)",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "status",
+            "kind": "status",
+            "body": {
+              "text": "Bisecting the cutoff",
+              "detail": "3 of 7 commits left",
+              "progress": {
+                "n": 3,
+                "of": 7
+              },
+              "state": "working"
+            }
+          },
+          {
+            "op": "put",
+            "id": "metric",
+            "kind": "metric",
+            "target": "rail",
+            "body": {
+              "label": "Upstream rotations per burst",
+              "value": "1.0",
+              "was": "2.0",
+              "unit": "",
+              "series": [
+                2,
+                2,
+                1.5,
+                1
+              ],
+              "state": "ok"
+            }
+          },
+          {
+            "op": "put",
+            "id": "file",
+            "kind": "file",
+            "body": {
+              "path": "crates/relay/src/token_store.rs",
+              "line": 84,
+              "note": "TokenStore::rotate",
+              "state": "editing"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "status",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "Bisecting the cutoff",
+              "detail": "3 of 7 commits left",
+              "progress": {
+                "n": 3,
+                "of": 7
+              },
+              "state": "working"
+            }
+          },
+          {
+            "op": "put",
+            "id": "metric",
+            "kind": "metric",
+            "target": "rail",
+            "slot": "upper",
+            "body": {
+              "label": "Upstream rotations per burst",
+              "value": "1.0",
+              "was": "2.0",
+              "series": [
+                2,
+                2,
+                1.5,
+                1
+              ],
+              "state": "ok"
+            }
+          },
+          {
+            "op": "put",
+            "id": "file",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "crates/relay/src/token_store.rs",
+              "line": 84,
+              "note": "TokenStore::rotate",
+              "state": "editing"
+            }
+          }
+        ]
+      },
+      "digest": "367b9f83a53fd2c5",
+      "result": "ok 3 ops (blocks/1 #367b9f83a53fd2c5)"
+    },
+    {
+      "about": "§1.5's two diffs: an edit preview, and a proposal",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "preview",
+            "kind": "diff",
+            "body": {
+              "file": "crates/relay/src/token_store.rs",
+              "state": "editing",
+              "from": "edits"
+            }
+          },
+          {
+            "op": "put",
+            "id": "proposal",
+            "kind": "diff",
+            "body": {
+              "file": "crates/relay/src/token_store.rs",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "at": "rotate()",
+                  "lines": [
+                    "- let t = …",
+                    "+ let _g = slot.lock().await;"
+                  ],
+                  "state": "open"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "preview",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "crates/relay/src/token_store.rs",
+              "state": "editing",
+              "from": "edits"
+            }
+          },
+          {
+            "op": "put",
+            "id": "proposal",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "crates/relay/src/token_store.rs",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "at": "rotate()",
+                  "lines": [
+                    "- let t = …",
+                    "+ let _g = slot.lock().await;"
+                  ],
+                  "state": "open"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "digest": "5407ecf14ce237a3",
+      "result": "ok 2 ops (blocks/1 #5407ecf14ce237a3)"
+    },
+    {
+      "about": "§1.5: a finished card becomes its outcome, the card's first block incarnation",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "card:c4f9x2a",
+            "kind": "note",
+            "body": {
+              "text": "Lock wait set to 900 ms"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "card:c4f9x2a",
+            "kind": "note",
+            "body": {
+              "text": "Lock wait set to 900 ms"
+            }
+          }
+        ]
+      },
+      "digest": "3ba691c995098ad0",
+      "result": "ok 1 ops (blocks/1 #3ba691c995098ad0)"
+    },
+    {
+      "about": "§2.1's two-step tick, state sugar: the same normalized op as the next case",
+      "section": "§2.1",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "state": {
+              "fix": "done",
+              "test": "doing"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.fix.state": "done",
+              "steps.test.state": "doing"
+            }
+          }
+        ]
+      },
+      "digest": "56ca03f6a62b3613",
+      "result": "ok 1 ops (blocks/1 #56ca03f6a62b3613)"
+    },
+    {
+      "about": "the same tick spelled out with set, in another key order: the same digest as §2.1's",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.test.state": "doing",
+              "steps.fix.state": "done"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.fix.state": "done",
+              "steps.test.state": "doing"
+            }
+          }
+        ]
+      },
+      "digest": "56ca03f6a62b3613",
+      "result": "ok 1 ops (blocks/1 #56ca03f6a62b3613)"
+    },
+    {
+      "about": "every kind at its smallest: the defaults filled (state todo, working, neutral; target transcript)",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "body": {
+              "text": "S"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "N"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "state": "reading"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "state": "todo"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "S",
+              "state": "working"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "target": "transcript",
+            "body": {
+              "text": "N"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "neutral"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "state": "reading"
+            }
+          }
+        ]
+      },
+      "digest": "a32f4f198f88d499",
+      "result": "ok 6 ops (blocks/1 #a32f4f198f88d499)"
+    },
+    {
+      "about": "defaults spelled out, and optional strings left empty: the same digest as the next case",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "title": "",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "state": "todo",
+                  "note": ""
+                }
+              ]
+            }
+          },
+          {
+            "op": "collapse",
+            "id": "p",
+            "open": false,
+            "run": false
+          },
+          {
+            "op": "remove",
+            "id": "x",
+            "why": ""
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "state": "todo"
+                }
+              ]
+            }
+          },
+          {
+            "op": "collapse",
+            "id": "p",
+            "open": false
+          },
+          {
+            "op": "remove",
+            "id": "x"
+          }
+        ]
+      },
+      "digest": "7e2e65427e46eac6",
+      "result": "ok 3 ops (blocks/1 #7e2e65427e46eac6)"
+    },
+    {
+      "about": "the same ops with the defaults left out",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A"
+                }
+              ]
+            }
+          },
+          {
+            "op": "collapse",
+            "id": "p"
+          },
+          {
+            "op": "remove",
+            "id": "x"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A",
+                  "state": "todo"
+                }
+              ]
+            }
+          },
+          {
+            "op": "collapse",
+            "id": "p",
+            "open": false
+          },
+          {
+            "op": "remove",
+            "id": "x"
+          }
+        ]
+      },
+      "digest": "7e2e65427e46eac6",
+      "result": "ok 3 ops (blocks/1 #7e2e65427e46eac6)"
+    },
+    {
+      "about": "every state of every kind",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "todo",
+                  "label": "Todo",
+                  "state": "todo"
+                },
+                {
+                  "id": "doing",
+                  "label": "Doing",
+                  "state": "doing"
+                },
+                {
+                  "id": "done",
+                  "label": "Done",
+                  "state": "done"
+                },
+                {
+                  "id": "failed",
+                  "label": "Failed",
+                  "state": "failed"
+                },
+                {
+                  "id": "skipped",
+                  "label": "Skipped",
+                  "state": "skipped"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "s0",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "state": "working"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s1",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "state": "waiting"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s2",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "state": "blocked"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s3",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "state": "done"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d0",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "editing"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d1",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d2",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d3",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "reverted"
+            }
+          },
+          {
+            "op": "put",
+            "id": "h",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "open",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "open"
+                },
+                {
+                  "id": "kept",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                },
+                {
+                  "id": "dropped",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "dropped"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "m0",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "ok"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m1",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "warn"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m2",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "bad"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m3",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "neutral"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "todo",
+                  "label": "Todo",
+                  "state": "todo"
+                },
+                {
+                  "id": "doing",
+                  "label": "Doing",
+                  "state": "doing"
+                },
+                {
+                  "id": "done",
+                  "label": "Done",
+                  "state": "done"
+                },
+                {
+                  "id": "failed",
+                  "label": "Failed",
+                  "state": "failed"
+                },
+                {
+                  "id": "skipped",
+                  "label": "Skipped",
+                  "state": "skipped"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "s0",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "S",
+              "state": "working"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s1",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "S",
+              "state": "waiting"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s2",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "S",
+              "state": "blocked"
+            }
+          },
+          {
+            "op": "put",
+            "id": "s3",
+            "kind": "status",
+            "target": "transcript",
+            "body": {
+              "text": "S",
+              "state": "done"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d0",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "editing"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d1",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "proposed"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d2",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "d3",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "reverted"
+            }
+          },
+          {
+            "op": "put",
+            "id": "h",
+            "kind": "diff",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "open",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "open"
+                },
+                {
+                  "id": "kept",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                },
+                {
+                  "id": "dropped",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "dropped"
+                }
+              ]
+            }
+          },
+          {
+            "op": "put",
+            "id": "m0",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "ok"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m1",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "warn"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m2",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "bad"
+            }
+          },
+          {
+            "op": "put",
+            "id": "m3",
+            "kind": "metric",
+            "target": "transcript",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "state": "neutral"
+            }
+          }
+        ]
+      },
+      "digest": "709ce1a100bc521b",
+      "result": "ok 14 ops (blocks/1 #709ce1a100bc521b)"
+    },
+    {
+      "about": "file states, a whole-number line",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f0",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "reading"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f1",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "editing"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f2",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f3",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "done"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f0",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "reading"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f1",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "editing"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f2",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "written"
+            }
+          },
+          {
+            "op": "put",
+            "id": "f3",
+            "kind": "file",
+            "target": "transcript",
+            "body": {
+              "path": "p",
+              "line": 1,
+              "state": "done"
+            }
+          }
+        ]
+      },
+      "digest": "7e594a7c3cb59399",
+      "result": "ok 4 ops (blocks/1 #7e594a7c3cb59399)"
+    },
+    {
+      "about": "sanitized strings: CRLF and tabs, invisibles dropped, ZWJ kept; a note keeps its lines, a title folds them",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "title": "Root\tcause\r\nfound\u200b",
+            "body": {
+              "text": "line one\r\nline\ttwo\u00ad\nfamily: 👨\u200d👩\u200d👧"
+            }
+          },
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "Fix\u2060 it\nnow",
+                  "note": "\ufeffnote"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "title": "Root cause found",
+            "target": "transcript",
+            "body": {
+              "text": "line one\nline two\nfamily: 👨\u200d👩\u200d👧"
+            }
+          },
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "target": "transcript",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "Fix it now",
+                  "state": "todo",
+                  "note": "note"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "digest": "9905f37202456515",
+      "result": "ok 2 ops (blocks/1 #9905f37202456515)"
+    },
+    {
+      "about": "a status patched: text, detail, progress, state; and its detail cleared",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "s",
+            "set": {
+              "text": "Bisecting",
+              "detail": "4 of 7",
+              "progress": {
+                "n": 4,
+                "of": 7
+              },
+              "state": "waiting"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "s",
+            "set": {
+              "detail": ""
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "s",
+            "set": {
+              "detail": "4 of 7",
+              "progress": {
+                "n": 4,
+                "of": 7
+              },
+              "state": "waiting",
+              "text": "Bisecting"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "s",
+            "set": {
+              "detail": ""
+            }
+          }
+        ]
+      },
+      "digest": "12cfbae832d8ad1d",
+      "result": "ok 2 ops (blocks/1 #12cfbae832d8ad1d)"
+    },
+    {
+      "about": "a diff patched: hunks appended, lines appended, a hunk removed, hunks ordered, a hunk kept by state sugar",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "append": {
+              "hunks": [
+                {
+                  "id": "h4",
+                  "at": "refresh()",
+                  "lines": [
+                    "+ retry(3)"
+                  ]
+                }
+              ],
+              "hunks.h2.lines": [
+                "+ drop(_g);",
+                ""
+              ]
+            },
+            "remove": [
+              "hunks.h3"
+            ],
+            "order": {
+              "hunks": [
+                "h4",
+                "h1"
+              ]
+            },
+            "state": {
+              "h1": "kept"
+            },
+            "set": {
+              "hunks.h2.at": "rotate() end",
+              "state": "proposed",
+              "file": "crates/relay/src/lib.rs"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "append": {
+              "hunks": [
+                {
+                  "id": "h4",
+                  "at": "refresh()",
+                  "lines": [
+                    "+ retry(3)"
+                  ],
+                  "state": "open"
+                }
+              ],
+              "hunks.h2.lines": [
+                "+ drop(_g);",
+                ""
+              ]
+            },
+            "order": {
+              "hunks": [
+                "h4",
+                "h1"
+              ]
+            },
+            "remove": [
+              "hunks.h3"
+            ],
+            "set": {
+              "file": "crates/relay/src/lib.rs",
+              "hunks.h1.state": "kept",
+              "hunks.h2.at": "rotate() end",
+              "state": "proposed"
+            }
+          }
+        ]
+      },
+      "digest": "81ad7d93435798cc",
+      "result": "ok 1 ops (blocks/1 #81ad7d93435798cc)"
+    },
+    {
+      "about": "a metric patched: its series appended (canonical numbers), its value and was",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "m",
+            "append": {
+              "series": [
+                1.0,
+                -0.0,
+                0.5,
+                0.00012,
+                1e-05,
+                1e-07,
+                1.5e-07,
+                123456.75,
+                -3
+              ]
+            },
+            "set": {
+              "value": "0.9",
+              "was": "1.0",
+              "unit": "x",
+              "state": "warn",
+              "label": "Rotations"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "m",
+            "append": {
+              "series": [
+                1,
+                0,
+                0.5,
+                0.00012,
+                1e-05,
+                1e-07,
+                1.5e-07,
+                123456.75,
+                -3
+              ]
+            },
+            "set": {
+              "label": "Rotations",
+              "state": "warn",
+              "unit": "x",
+              "value": "0.9",
+              "was": "1.0"
+            }
+          }
+        ]
+      },
+      "digest": "8d64494a208f7de3",
+      "result": "ok 1 ops (blocks/1 #8d64494a208f7de3)"
+    },
+    {
+      "about": "a file patched; a note's text keeps its line breaks; a group's title",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "f",
+            "set": {
+              "path": "src/lib.rs",
+              "line": 12,
+              "note": "",
+              "state": "written"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "n",
+            "set": {
+              "text": "a\nb",
+              "title": "Findings"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "g",
+            "set": {
+              "title": "Research"
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "f",
+            "set": {
+              "line": 12,
+              "note": "",
+              "path": "src/lib.rs",
+              "state": "written"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "n",
+            "set": {
+              "text": "a\nb",
+              "title": "Findings"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "g",
+            "set": {
+              "title": "Research"
+            }
+          }
+        ]
+      },
+      "digest": "93a81b5fd80ab356",
+      "result": "ok 3 ops (blocks/1 #93a81b5fd80ab356)"
+    },
+    {
+      "about": "the agent patches the user's step (u- ids are the user's to mint, anyone's to name), and a step whose id is 0 (ids, never indices)",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.u-k3x7qa.label": "Check staging logs (prod too)",
+              "steps.0.label": "Zeroth"
+            },
+            "state": {
+              "u-k3x7qa": "doing"
+            },
+            "order": {
+              "steps": [
+                "u-k3x7qa",
+                "0",
+                "fix"
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "order": {
+              "steps": [
+                "u-k3x7qa",
+                "0",
+                "fix"
+              ]
+            },
+            "set": {
+              "steps.0.label": "Zeroth",
+              "steps.u-k3x7qa.label": "Check staging logs (prod too)",
+              "steps.u-k3x7qa.state": "doing"
+            }
+          }
+        ]
+      },
+      "digest": "739a66aae11eb036",
+      "result": "ok 1 ops (blocks/1 #739a66aae11eb036)"
+    },
+    {
+      "about": "cards named where cards may be: collapse, remove, move in the transcript, at.after, patch",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "ids": [
+              "card:c4f9x2a",
+              "plan"
+            ],
+            "open": true
+          },
+          {
+            "op": "move",
+            "id": "card:c4f9x2a",
+            "target": "transcript",
+            "at": {
+              "after": "plan"
+            }
+          },
+          {
+            "op": "put",
+            "id": "after",
+            "kind": "note",
+            "at": {
+              "after": "card:c4f9x2a"
+            },
+            "body": {
+              "text": "x"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "card:c4f9x2a",
+            "set": {
+              "text": "Lock wait set to 1200 ms"
+            }
+          },
+          {
+            "op": "remove",
+            "id": "card:c4f9x2a"
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "collapse",
+            "ids": [
+              "card:c4f9x2a",
+              "plan"
+            ],
+            "open": true
+          },
+          {
+            "op": "move",
+            "id": "card:c4f9x2a",
+            "target": "transcript",
+            "at": {
+              "after": "plan"
+            }
+          },
+          {
+            "op": "put",
+            "id": "after",
+            "kind": "note",
+            "target": "transcript",
+            "at": {
+              "after": "card:c4f9x2a"
+            },
+            "body": {
+              "text": "x"
+            }
+          },
+          {
+            "op": "patch",
+            "id": "card:c4f9x2a",
+            "set": {
+              "text": "Lock wait set to 1200 ms"
+            }
+          },
+          {
+            "op": "remove",
+            "id": "card:c4f9x2a"
+          }
+        ]
+      },
+      "digest": "92ed68a4a3b47829",
+      "result": "ok 5 ops (blocks/1 #92ed68a4a3b47829)"
+    },
+    {
+      "about": "merge into a live group: one member is enough for the extension",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "research",
+            "ids": [
+              "extra"
+            ]
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "research",
+            "ids": [
+              "extra"
+            ]
+          }
+        ]
+      },
+      "digest": "86f7c01c42d566b9",
+      "result": "ok 1 ops (blocks/1 #86f7c01c42d566b9)"
+    },
+    {
+      "about": "a proposal's hunk with a blank context line and a tab",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "title": "Fix: serialize rotation",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "",
+                    "\tlet x = 1;",
+                    "+ y"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "normalized": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "title": "Fix: serialize rotation",
+            "target": "transcript",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "",
+                    " let x = 1;",
+                    "+ y"
+                  ],
+                  "state": "open"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "digest": "345577d3debdc7bb",
+      "result": "ok 1 ops (blocks/1 #345577d3debdc7bb)"
+    }
+  ]
+}

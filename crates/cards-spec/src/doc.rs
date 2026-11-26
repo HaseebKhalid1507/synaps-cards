@@ -146,7 +146,7 @@ fn non_empty(s: Option<String>) -> Option<String> {
 
 /// A shown string: line endings, refused characters, the raw bound, then
 /// `ui_sanitize` and the minimum on what is left.
-fn string(v: &Value, path: &str, lines: Lines, min: usize, max: usize, advice: &str) -> Result<String, Error> {
+pub(crate) fn string(v: &Value, path: &str, lines: Lines, min: usize, max: usize, advice: &str) -> Result<String, Error> {
     let Some(raw) = v.as_str() else {
         return Err(Error::new(path, "must be a string"));
     };
@@ -168,7 +168,7 @@ fn string(v: &Value, path: &str, lines: Lines, min: usize, max: usize, advice: &
 
 /// A value quoted in an error line: sanitized and cut, so an error can't
 /// carry what the card couldn't.
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     format!("\"{}\"", cut_chars(&ui_sanitize(s, Lines::Single), 40))
 }
 
@@ -368,7 +368,7 @@ fn field_id(v: Option<&Value>, path: &str) -> Result<String, Error> {
 }
 
 /// A JSON value quoted in an error line, cut.
-fn json_quote(v: &Value) -> String {
+pub(crate) fn json_quote(v: &Value) -> String {
     match v {
         Value::String(s) => quote(s),
         other => cut_chars(&ui_sanitize(&sorted_json(other), Lines::Single), 40),

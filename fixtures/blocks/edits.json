@@ -1,0 +1,204 @@
+{
+  "cases": [
+    {
+      "about": "§3.3's first example: an order, a skip, a stop",
+      "section": "§3.3",
+      "id": "plan",
+      "base": 4,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "Close the refresh race",
+      "pieces": [
+        "order fix, test, deploy, bandaid",
+        "skip bandaid",
+        "stop before deploy"
+      ],
+      "parts": {
+        "order": {
+          "steps": [
+            "fix",
+            "test",
+            "deploy",
+            "bandaid"
+          ]
+        },
+        "set": {
+          "steps.bandaid.state": "skipped",
+          "steps.deploy.stop": true
+        }
+      },
+      "design": "[block plan edited r4] Close the refresh race → order fix, test, deploy, bandaid · skip bandaid · stop before deploy\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"order\":{\"steps\":[\"fix\",\"test\",\"deploy\",\"bandaid\"]},\"set\":{\"steps.bandaid.state\":\"skipped\",\"steps.deploy.stop\":true}}",
+      "text": "[block plan edited r4] Close the refresh race → order fix, test, deploy, bandaid · skip bandaid · stop before deploy\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"order\":{\"steps\":[\"fix\",\"test\",\"deploy\",\"bandaid\"]},\"set\":{\"steps.bandaid.state\":\"skipped\",\"steps.deploy.stop\":true}}"
+    },
+    {
+      "about": "§3.3's second example: the user's step, u-k3x7qa",
+      "section": "§3.3",
+      "id": "plan",
+      "base": 6,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "Close the refresh race",
+      "pieces": [
+        "add “Check staging logs” after test"
+      ],
+      "parts": {
+        "append": {
+          "steps": [
+            {
+              "id": "u-k3x7qa",
+              "label": "Check staging logs",
+              "state": "todo"
+            }
+          ]
+        },
+        "order": {
+          "steps": [
+            "fix",
+            "test",
+            "u-k3x7qa",
+            "deploy"
+          ]
+        }
+      },
+      "design": "[block plan edited r6] Close the refresh race → add “Check staging logs” after test\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"append\":{\"steps\":[{\"id\":\"u-k3x7qa\",\"label\":\"Check staging logs\",\"state\":\"todo\"}]},\"order\":{\"steps\":[\"fix\",\"test\",\"u-k3x7qa\",\"deploy\"]}}",
+      "text": "[block plan edited r6] Close the refresh race → add “Check staging logs” after test\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"append\":{\"steps\":[{\"id\":\"u-k3x7qa\",\"label\":\"Check staging logs\",\"state\":\"todo\"}]},\"order\":{\"steps\":[\"fix\",\"test\",\"u-k3x7qa\",\"deploy\"]}}"
+    },
+    {
+      "about": "§3.3's third example: a restore, back to r1",
+      "section": "§3.3, §3.6",
+      "id": "cause",
+      "base": 5,
+      "of": "0adc13ce1747120320cd140b074555a4",
+      "title": "Root cause",
+      "back_to": 1,
+      "pieces": [
+        "text “First guess: the retry loop”"
+      ],
+      "parts": {
+        "set": {
+          "text": "First guess: the retry loop"
+        }
+      },
+      "design": "[block cause edited r5] Root cause → back to r1: text “First guess: the retry loop”\n{\"of\":\"0adc13ce1747120320cd140b074555a4\",\"set\":{\"text\":\"First guess: the retry loop\"}}",
+      "text": "[block cause edited r5] Root cause → back to r1: text “First guess: the retry loop”\n{\"of\":\"0adc13ce1747120320cd140b074555a4\",\"set\":{\"text\":\"First guess: the retry loop\"}}"
+    },
+    {
+      "about": "§3.3's fourth example (its notice line is in notices.json)",
+      "section": "§3.3",
+      "id": "auth-diff",
+      "base": 3,
+      "of": "3ebc21f2849656a46ee66d493e83019c",
+      "title": "Fix: serialize rotation",
+      "pieces": [
+        "keep h1, h2",
+        "drop h3"
+      ],
+      "parts": {
+        "set": {
+          "hunks.h1.state": "kept",
+          "hunks.h2.state": "kept",
+          "hunks.h3.state": "dropped"
+        }
+      },
+      "design": "[block auth-diff edited r3] Fix: serialize rotation → keep h1, h2 · drop h3\n{\"of\":\"3ebc21f2849656a46ee66d493e83019c\",\"set\":{\"hunks.h1.state\":\"kept\",\"hunks.h2.state\":\"kept\",\"hunks.h3.state\":\"dropped\"}}",
+      "text": "[block auth-diff edited r3] Fix: serialize rotation → keep h1, h2 · drop h3\n{\"of\":\"3ebc21f2849656a46ee66d493e83019c\",\"set\":{\"hunks.h1.state\":\"kept\",\"hunks.h2.state\":\"kept\",\"hunks.h3.state\":\"dropped\"}}"
+    },
+    {
+      "about": "no title: the id names the block; an unskip and a stop lifted",
+      "id": "plan",
+      "base": 9999,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": null,
+      "pieces": [
+        "unskip bandaid",
+        "no stop before deploy"
+      ],
+      "parts": {
+        "set": {
+          "steps.deploy.stop": false,
+          "steps.bandaid.state": "todo"
+        }
+      },
+      "text": "[block plan edited r9999] plan → unskip bandaid · no stop before deploy\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"todo\",\"steps.deploy.stop\":false}}"
+    },
+    {
+      "about": "a note's title and text: its line breaks stay, escaped, on line 2",
+      "id": "findings",
+      "base": 2,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "Findings\u200b",
+      "pieces": [
+        "title “What we know”",
+        "text “Two readers…”"
+      ],
+      "parts": {
+        "set": {
+          "title": "What we know",
+          "text": "Two readers race.\nThe lock fixes it."
+        }
+      },
+      "text": "[block findings edited r2] Findings → title “What we know” · text “Two readers…”\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"text\":\"Two readers race.\\nThe lock fixes it.\",\"title\":\"What we know\"}}"
+    },
+    {
+      "about": "pieces sanitized, then cut at 40 characters each",
+      "id": "plan",
+      "base": 7,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "Tabs\tand\u2060 joins",
+      "pieces": [
+        "rename “a step whose label is long enough to be cut”",
+        "x\ty"
+      ],
+      "parts": {
+        "set": {
+          "steps.a.label": "a step whose label is long enough to be cut"
+        }
+      },
+      "text": "[block plan edited r7] Tabs and joins → rename “a step whose label is long enou… · x y\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.a.label\":\"a step whose label is long enough to be cut\"}}"
+    },
+    {
+      "about": "line 1 cut at 200 characters",
+      "id": "plan",
+      "base": 12,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "Close the refresh race",
+      "pieces": [
+        "rename step 0 to something longer",
+        "rename step 1 to something longer",
+        "rename step 2 to something longer",
+        "rename step 3 to something longer",
+        "rename step 4 to something longer",
+        "rename step 5 to something longer",
+        "rename step 6 to something longer",
+        "rename step 7 to something longer"
+      ],
+      "parts": {
+        "set": {
+          "steps.s0.label": "something longer",
+          "steps.s1.label": "something longer",
+          "steps.s2.label": "something longer",
+          "steps.s3.label": "something longer",
+          "steps.s4.label": "something longer",
+          "steps.s5.label": "something longer",
+          "steps.s6.label": "something longer",
+          "steps.s7.label": "something longer"
+        }
+      },
+      "text": "[block plan edited r12] Close the refresh race → rename step 0 to something longer · rename step 1 to something longer · rename step 2 to something longer · rename step 3 to something longer · rename…\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.s0.label\":\"something longer\",\"steps.s1.label\":\"something longer\",\"steps.s2.label\":\"something longer\",\"steps.s3.label\":\"something longer\",\"steps.s4.label\":\"something longer\",\"steps.s5.label\":\"something longer\",\"steps.s6.label\":\"something longer\",\"steps.s7.label\":\"something longer\"}}"
+    },
+    {
+      "about": "a label in a 4-byte script",
+      "id": "plan",
+      "base": 1,
+      "of": "bab3b9916631463b1935420c710c9287",
+      "title": "𝔓𝔩𝔞𝔫",
+      "pieces": [
+        "rename fix"
+      ],
+      "parts": {
+        "set": {
+          "steps.fix.label": "𝔉𝔦𝔵 𝔱𝔥𝔢 𝔯𝔞𝔠𝔢"
+        }
+      },
+      "text": "[block plan edited r1] 𝔓𝔩𝔞𝔫 → rename fix\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.fix.label\":\"𝔉𝔦𝔵 𝔱𝔥𝔢 𝔯𝔞𝔠𝔢\"}}"
+    }
+  ]
+}

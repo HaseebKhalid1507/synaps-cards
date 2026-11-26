@@ -1,0 +1,181 @@
+{
+  "cases": [
+    {
+      "about": "the grammar: an edit",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": {
+        "id": "plan",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
+    },
+    {
+      "about": "a typed look-alike from an input-holder counts (§3.3)",
+      "text": "[block plan edited r4] whatever I like\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": {
+        "id": "plan",
+        "base": 4,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
+    },
+    {
+      "about": "ordinary text",
+      "text": "please skip bandaid",
+      "edit": null
+    },
+    {
+      "about": "line 2 cut",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped",
+      "edit": null
+    },
+    {
+      "about": "line 1 cut before its rest",
+      "text": "[block plan edited r4]\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "line 1 with nothing after its prefix",
+      "text": "[block plan edited r4] \n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "line 2 with of last",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"set\":{\"steps.bandaid.state\":\"skipped\"},\"of\":\"bab3b9916631463b1935420c710c9287\"}",
+      "edit": null
+    },
+    {
+      "about": "line 2 with a space",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\": \"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "line 2 with an escape the builder doesn't write",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skip\\u0070ed\"}}",
+      "edit": null
+    },
+    {
+      "about": "remove is the agent's",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"remove\":[\"steps.bandaid\"]}",
+      "edit": null
+    },
+    {
+      "about": "state sugar is the agent's",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"state\":{\"bandaid\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a step's note is the agent's",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.fix.note\":\"n\"}}",
+      "edit": null
+    },
+    {
+      "about": "done is the agent's (execution truth)",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"done\"}}",
+      "edit": null
+    },
+    {
+      "about": "a user's step with an agent's id",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"append\":{\"steps\":[{\"id\":\"fix\",\"label\":\"L\",\"state\":\"todo\"}]}}",
+      "edit": null
+    },
+    {
+      "about": "v1.1's u-k3x9qa, outside the alphabet",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"append\":{\"steps\":[{\"id\":\"u-k3x9qa\",\"label\":\"L\",\"state\":\"todo\"}]}}",
+      "edit": null
+    },
+    {
+      "about": "overlapping paths: a user's step appended and set",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"append\":{\"steps\":[{\"id\":\"u-k3x7qa\",\"label\":\"L\",\"state\":\"todo\"}]},\"set\":{\"steps.u-k3x7qa.label\":\"M\"}}",
+      "edit": null
+    },
+    {
+      "about": "paths of two kinds",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"hunks.h1.state\":\"kept\",\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a repeated key",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.a.label\":\"A\",\"steps.a.label\":\"B\"}}",
+      "edit": null
+    },
+    {
+      "about": "nothing to do",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\"}",
+      "edit": null
+    },
+    {
+      "about": "of in capitals",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"BAB3B9916631463B1935420C710C9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "of one digit short",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c928\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "r0",
+      "text": "[block plan edited r0] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "r04",
+      "text": "[block plan edited r04] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "r9999, the last revision",
+      "text": "[block plan edited r9999] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": {
+        "id": "plan",
+        "base": 9999,
+        "of": "bab3b9916631463b1935420c710c9287",
+        "parts": {
+          "set": {
+            "steps.bandaid.state": "skipped"
+          }
+        }
+      }
+    },
+    {
+      "about": "r10000",
+      "text": "[block plan edited r10000] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a card can't be edited",
+      "text": "[block card:c4f9x2a edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a third line",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}\nthanks",
+      "edit": null
+    },
+    {
+      "about": "words first",
+      "text": "here:\n[block plan edited r4] Close the refresh race → skip bandaid\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a CRLF",
+      "text": "[block plan edited r4] Close the refresh race → skip bandaid\r\n{\"of\":\"bab3b9916631463b1935420c710c9287\",\"set\":{\"steps.bandaid.state\":\"skipped\"}}",
+      "edit": null
+    },
+    {
+      "about": "a card answer",
+      "text": "[card c4f9x2a] Which approach? → Refactor the parser\n{\"choice\":\"Refactor the parser\"}",
+      "edit": null
+    }
+  ]
+}
