@@ -50,6 +50,14 @@ impl Digest {
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
     }
+
+    /// The first 8 bytes of SHA-256 over `data`: a card's digest over its
+    /// [`preimage`], a block call's over its normalized batch.
+    pub(crate) fn of(data: &[u8]) -> Self {
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&sha256(data)[..8]);
+        Digest(out)
+    }
 }
 
 impl std::fmt::Display for Digest {
@@ -72,10 +80,7 @@ pub fn preimage(doc: &CardDoc, wait: bool) -> Vec<u8> {
 
 /// The digest of a validated card (`Input::Create`'s `doc` and `wait`).
 pub fn digest(doc: &CardDoc, wait: bool) -> Digest {
-    let h = sha256(&preimage(doc, wait));
-    let mut out = [0u8; 8];
-    out.copy_from_slice(&h[..8]);
-    Digest(out)
+    Digest::of(&preimage(doc, wait))
 }
 
 /// A result's first line (§1.5).

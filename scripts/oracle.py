@@ -14,6 +14,9 @@ on:
 - the extension's success result (§1.5): the envelope, the options and
   fields cut to the 1 KiB cap, the trailer (`fixtures/results.json`).
 
+And the blocks corpus (`fixtures/blocks/`, docs/blocks.md v1.3) from
+`scripts/oracle_blocks.py`, a second implementation of `cards_spec::block`.
+
 The `doc` of each fixture is the C1 corpus's (normalization is not
 reimplemented here; cards-spec's output is checked against it directly).
 """
@@ -23,6 +26,8 @@ import json
 import sys
 import unicodedata
 from pathlib import Path
+
+import oracle_blocks
 
 ROOT = Path(__file__).resolve().parent.parent
 FIX = ROOT / "fixtures"
@@ -253,6 +258,12 @@ def main():
         else:
             fill_round_trips(f)
         after = dump(f)
+        if after != before:
+            stale.append(path.relative_to(ROOT))
+            if not check:
+                path.write_text(after)
+    for path in oracle_blocks.files():
+        before, after = oracle_blocks.fill(path, dump)
         if after != before:
             stale.append(path.relative_to(ROOT))
             if not check:

@@ -15,6 +15,9 @@
 //!   refusals, and [`sanitize::fold_key`] (case folding pinned to the
 //!   corpus's Unicode, never the toolchain's).
 //! - [`types`]: the data and its bounds.
+//! - [`block`]: blocks, the editable transcript (`docs/blocks.md` v1.3): the
+//!   ops, the kinds, paths and patches, the incarnation tag, the edit and
+//!   notice grammar.
 //!
 //! Ported from synaps-desk #75's card model
 //! (`crates/synaps-client/src/surface/` at `3f61cff`), itself a mirror of
@@ -32,6 +35,7 @@
 //! runs the tests in both (the `preserve_order` feature).
 
 pub mod answer;
+pub mod block;
 mod casefold;
 pub mod digest;
 pub mod doc;

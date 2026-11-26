@@ -1,0 +1,141 @@
+{
+  "cases": [
+    {
+      "about": "a typed first message; its _synaps_at is left out",
+      "first_message": {
+        "role": "user",
+        "content": "Fix the refresh race in the relay",
+        "_synaps_at": "2026-11-26T05:00:00Z"
+      },
+      "id": "plan",
+      "creation": 1,
+      "tool_id": "toolu_01ABCdef",
+      "op_index": 0,
+      "generation_preimage": "{\"content\":\"Fix the refresh race in the relay\",\"role\":\"user\"}",
+      "generation": "a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6",
+      "tag_preimage": "blocks/1\u0000a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6\u0000plan\u00001\u0000toolu_01ABCdef\u00000",
+      "tag": "5c54b0499a97fa7058af0daab8100ad1"
+    },
+    {
+      "about": "the same message without _synaps_at: the same generation, and the same tag",
+      "first_message": {
+        "content": "Fix the refresh race in the relay",
+        "role": "user"
+      },
+      "id": "plan",
+      "creation": 1,
+      "tool_id": "toolu_01ABCdef",
+      "op_index": 0,
+      "generation_preimage": "{\"content\":\"Fix the refresh race in the relay\",\"role\":\"user\"}",
+      "generation": "a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6",
+      "tag_preimage": "blocks/1\u0000a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6\u0000plan\u00001\u0000toolu_01ABCdef\u00000",
+      "tag": "5c54b0499a97fa7058af0daab8100ad1"
+    },
+    {
+      "about": "the same call, the next creation: another tag",
+      "first_message": {
+        "role": "user",
+        "content": "Fix the refresh race in the relay",
+        "_synaps_at": "2026-11-26T05:00:00Z"
+      },
+      "id": "plan",
+      "creation": 2,
+      "tool_id": "toolu_01ABCdef",
+      "op_index": 0,
+      "generation_preimage": "{\"content\":\"Fix the refresh race in the relay\",\"role\":\"user\"}",
+      "generation": "a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6",
+      "tag_preimage": "blocks/1\u0000a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6\u0000plan\u00002\u0000toolu_01ABCdef\u00000",
+      "tag": "cd3951f565d4cf9f78e4e69523057234"
+    },
+    {
+      "about": "the same call, the op after it",
+      "first_message": {
+        "role": "user",
+        "content": "Fix the refresh race in the relay",
+        "_synaps_at": "2026-11-26T05:00:00Z"
+      },
+      "id": "plan",
+      "creation": 1,
+      "tool_id": "toolu_01ABCdef",
+      "op_index": 1,
+      "generation_preimage": "{\"content\":\"Fix the refresh race in the relay\",\"role\":\"user\"}",
+      "generation": "a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6",
+      "tag_preimage": "blocks/1\u0000a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6\u0000plan\u00001\u0000toolu_01ABCdef\u00001",
+      "tag": "04783d8dcacc900660771e1f3d6646e1"
+    },
+    {
+      "about": "content blocks: keys sorted at every level, _synaps_* left out at every level, other keys of the message too",
+      "first_message": {
+        "_synaps_hooked": 1,
+        "role": "user",
+        "name": "ignored",
+        "content": [
+          {
+            "type": "text",
+            "text": "Résumé ✓ \"quoted\"\nnext",
+            "_synaps_x": true
+          },
+          {
+            "type": "image",
+            "source": {
+              "media_type": "image/png",
+              "data": "iVBOR",
+              "type": "base64"
+            }
+          }
+        ]
+      },
+      "id": "auth-diff",
+      "creation": 12,
+      "tool_id": "call_9",
+      "op_index": 15,
+      "generation_preimage": "{\"content\":[{\"text\":\"Résumé ✓ \\\"quoted\\\"\\nnext\",\"type\":\"text\"},{\"source\":{\"data\":\"iVBOR\",\"media_type\":\"image/png\",\"type\":\"base64\"},\"type\":\"image\"}],\"role\":\"user\"}",
+      "generation": "8032a1b26a157c5c05936f3e8e4becc6d7a65a0380c9e2c0f49129ea0377be2b",
+      "tag_preimage": "blocks/1\u00008032a1b26a157c5c05936f3e8e4becc6d7a65a0380c9e2c0f49129ea0377be2b\u0000auth-diff\u000012\u0000call_9\u000015",
+      "tag": "61ef208be7e845c52b780ed7f4f9f7c2"
+    },
+    {
+      "about": "a compaction's summary, a new generation; a card's first block incarnation",
+      "first_message": {
+        "role": "user",
+        "content": "The conversation history before this point was compacted into the following summary:\n\n<context-summary>\nWe fixed the race.\n</context-summary>\n\nContinue from where we left off. The summary and the system prompt contain all the context you need."
+      },
+      "id": "card:c4f9x2a",
+      "creation": 3,
+      "tool_id": "toolu_02",
+      "op_index": 2,
+      "generation_preimage": "{\"content\":\"The conversation history before this point was compacted into the following summary:\\n\\n<context-summary>\\nWe fixed the race.\\n</context-summary>\\n\\nContinue from where we left off. The summary and the system prompt contain all the context you need.\",\"role\":\"user\"}",
+      "generation": "5b485f4e558a4b4b996f46e1864f04ef61ccdbd21641c0cfcdd2f0314be58743",
+      "tag_preimage": "blocks/1\u00005b485f4e558a4b4b996f46e1864f04ef61ccdbd21641c0cfcdd2f0314be58743\u0000card:c4f9x2a\u00003\u0000toolu_02\u00002",
+      "tag": "2f64d13467bbe7a7b50134cccd39d708"
+    },
+    {
+      "about": "a creation number past 32 bits, a tool id outside ASCII",
+      "first_message": {
+        "role": "user",
+        "content": "Fix the refresh race in the relay",
+        "_synaps_at": "2026-11-26T05:00:00Z"
+      },
+      "id": "x",
+      "creation": 4294967296,
+      "tool_id": "call_ü/1",
+      "op_index": 7,
+      "generation_preimage": "{\"content\":\"Fix the refresh race in the relay\",\"role\":\"user\"}",
+      "generation": "a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6",
+      "tag_preimage": "blocks/1\u0000a0b1eb4c68b96a5f23115b93b813766cd68ab2adf6d103350bdd736e0f87cfd6\u0000x\u00004294967296\u0000call_ü/1\u00007",
+      "tag": "05a7410d081281ab1316a7af9ba2c676"
+    },
+    {
+      "about": "no first message object: {}",
+      "first_message": "just text",
+      "id": "x",
+      "creation": 1,
+      "tool_id": "t",
+      "op_index": 0,
+      "generation_preimage": "{}",
+      "generation": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "tag_preimage": "blocks/1\u000044136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\u0000x\u00001\u0000t\u00000",
+      "tag": "183861d4c260df83e712a8b6b27575b5"
+    }
+  ]
+}

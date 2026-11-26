@@ -183,14 +183,16 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
 | Op | Does | On an id that's absent or removed |
 |---|---|---|
 | `put` | Creates a block: a new incarnation at r1, placed by `target`, `slot` and `at`, or here. **Create only.** On a live id it does nothing and is logged `exists`, so a retried put can never undo a user's edit. To change a block, `patch` or `replace` it | Creates it. A removed id gets a new incarnation. A dismissed id stays dismissed (§3.5) |
-| `patch` | Changes paths in the current incarnation (§1.4). `state` is sugar for setting `state` on items of the kind's main list: `{"fix":"done"}` is `set {"steps.fix.state":"done"}` | Skipped, and marked |
-| `replace` | Starts a new incarnation in the same place and group: a new body, and a new kind or title if given. The header reads `r1 · replaced`, with `why` on hover. The old incarnation's revisions stay viewable (`[`) but can't be restored (§3.6). A user's draft of the old one goes stale (§3.2) | Skipped, and marked. A resolved card is the exception: `card:<id>` gets its first block incarnation (§1.5) |
+| `patch` | Changes paths in the current incarnation (§1.4). `state` is sugar for setting `state` on items of the kind's main list: `{"fix":"done"}` is `set {"steps.fix.state":"done"}`. A hunk's state is the user's (§3.4), so the agent's sugar ticks only a plan's steps | Skipped, and marked |
+| `replace` | Starts a new incarnation in the same place and group: a new kind and body, both given, even to keep the kind (the extension checks a body against its kind, and keeps no state to look the old one up), and a new title if given. The header reads `r1 · replaced`, with `why` on hover. The old incarnation's revisions stay viewable (`[`) but can't be restored (§3.6). A user's draft of the old one goes stale (§3.2) | Skipped, and marked. A resolved card is the exception: `card:<id>` gets its first block incarnation (§1.5) |
 | `collapse` | Folds a block (`open: true` unfolds it), one or several (`ids`, ≤ 8). `run: true` folds **the tool run this call sits in** under `summary`. That's the desk's own run grouping (`DESK:sd/turns.rs:1-5`), titled by the agent: tool rows merge with no tool ids named | Skipped, and marked |
 | `merge` | Groups blocks into a `group` block `into` (rules below) | Members that don't qualify are skipped one by one |
 | `move` | Re-places a block (§1.2): `target`, `slot`, `at`, or here. A grouped block leaves its group. A dismissed block can't be moved (§3.5) | Skipped, and marked |
 | `remove` | Ends the incarnation, one or several (`ids`, ≤ 8). The block leaves the view, and a tombstone `rN · removed · why` stays in the op log (§1.8). A group's members are released, not removed | No-op |
 
 "Marked" means: a line in the op log, with its reason (§3.8), and a dim `skipped` chip on the block, if the block is live.
+
+`why` (on `replace` and `remove`) and a run's `summary` are one line of ≤ 80 characters, as a title is.
 
 **Groups (`merge`), one level deep:**
 - A group is a block of kind `group`, whose body is its members' ids. **A group can't be a member**, so groups never nest and can never cycle.
@@ -200,6 +202,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
   - any other live block: the merge is skipped.
   `into` listed in `ids` is refused by the extension.
 - **Each member** must be a live block that isn't a group, a card, dismissed, or already in a group, and must be in the group's target and, in the rail, its slot. Others are skipped one by one. A new group left with fewer than 2 members is skipped whole.
+  - So `ids` may name `card:<id>`: the extension takes it like any reference, and the fold skips it as a member that doesn't qualify. The call is refused only for a malformed id, an id listed twice, or `into` among the `ids`. `into` names a block, never a card.
 - **2 to 8 members.** Members count toward the 32 live blocks, and so does the group. The group's header counts its members: `3 blocks`.
 - **Membership is by id.** It survives the member's `patch` and `replace`, and ends at its `remove` or `move`. A group left with one member dissolves: that member takes the group's place, and the group's incarnation ends with a tombstone.
 - **On the group itself:**
@@ -246,7 +249,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
   - **Not revisions:** placement (`move`, `at`, `target`, `slot`), `collapse`, and dismissal.
   - **A user edit** that applies at least one path adds one revision, authored by the user.
   - **Cap:** at most 9,999 revisions per incarnation. Ops past that are skipped, with `replace the block or use a new id`.
-- **Semantic equality** is equality of the normalized form, as `cards_spec::block` normalizes it: defaults filled, strings sanitized, keys in schema order, map keys in byte order. The digest hashes the same form (§1.6).
+- **Semantic equality** is equality of the normalized form, as `cards_spec::block` normalizes it: defaults filled, strings sanitized, keys in schema order, map keys in byte order, and each number in one spelling: the shortest that reads back, a whole one below 10¹⁶ as an integer (`1e+16` from there). The digest hashes the same form (§1.6).
 
 ### 1.5 Kinds v1
 
@@ -256,10 +259,10 @@ A block's `title` (≤ 80) is top-level, and the `body` is its kind's. All strin
 |---|---|---|---|---|
 | **plan** | `{"steps":[{"id":"fix","label":"Serialize rotate() per session","state":"todo","note":"token_store.rs:118","stop":false}]}` | 1–20 steps; label ≤ 100, note ≤ 80; state `todo·doing·done·failed·skipped`; ≤ 4 KiB. `stop` is the user's: an agent op naming it is refused | `steps` | order; a label; a skip and an unskip; `stop`; adding `u-` steps |
 | **status** | `{"text":"Bisecting the cutoff","detail":"3 of 7 commits left","progress":{"n":3,"of":7},"state":"working"}` | text ≤ 80, detail ≤ 120; n ≤ of ≤ 10⁶; state `working·waiting·blocked·done`; ≤ 512 B | — | none (it's the agent's voice) |
-| **diff** | `{"file":"crates/relay/src/token_store.rs","state":"editing","from":"edits"}`, or a proposal: `{"file":…,"state":"proposed","hunks":[{"id":"h1","at":"rotate()","lines":["- let t = …","+ let _g = slot.lock().await;"],"state":"open"}]}` | file ≤ 200; state `editing·proposed·written·reverted`; 1–6 hunks, ≤ 120 lines in all, a line ≤ 160; hunk state `open·kept·dropped`; ≤ 6 KiB | `hunks` | a proposal's hunks: kept or dropped |
+| **diff** | `{"file":"crates/relay/src/token_store.rs","state":"editing","from":"edits"}`, or a proposal: `{"file":…,"state":"proposed","hunks":[{"id":"h1","at":"rotate()","lines":["- let t = …","+ let _g = slot.lock().await;"],"state":"open"}]}` | file ≤ 200; state `editing·proposed·written·reverted`; 1–6 hunks, ≤ 120 lines in all, a line ≤ 160; hunk state `open·kept·dropped`, where the agent writes `open` and `kept` and `dropped` are the user's (§3.4); ≤ 6 KiB | `hunks` | a proposal's hunks: kept or dropped |
 | **note** | `{"text":"Two refreshes read the same token before either rotates it…"}` | ≤ 1500 chars, ≤ 30 lines, markdown-lite as a card's detail (design §5.2); ≤ 2 KiB | — | `text`, `title` |
-| **metric** | `{"label":"Upstream rotations per burst","value":"1.0","was":"2.0","unit":"","series":[2,2,1.5,1],"state":"ok"}` | label ≤ 60; value, was and unit ≤ 16 (the agent formats them); series ≤ 32 numbers, and an append rolls off the oldest; state `ok·warn·bad·neutral`; ≤ 1 KiB | — | none |
-| **file** | `{"path":"crates/relay/src/token_store.rs","line":84,"note":"TokenStore::rotate","state":"editing"}` | path ≤ 200, note ≤ 80; state `reading·editing·written·done`; ≤ 512 B | — | none |
+| **metric** | `{"label":"Upstream rotations per burst","value":"1.0","was":"2.0","unit":"","series":[2,2,1.5,1],"state":"ok"}` | label ≤ 60; value, was and unit ≤ 16 (the agent formats them); series ≤ 32 numbers, any finite ones (no ceiling: the count and the 1 KiB bound them), and an append rolls off the oldest; state `ok·warn·bad·neutral`; ≤ 1 KiB | — | none |
+| **file** | `{"path":"crates/relay/src/token_store.rs","line":84,"note":"TokenStore::rotate","state":"editing"}` | path ≤ 200, note ≤ 80; `line` a whole number ≥ 1, any that fits 64 bits; state `reading·editing·written·done`; ≤ 512 B | — | none |
 | **question** | **A card.** It is made only by `cards_ui` (design §1.4), and named `card:c4f9x2a` in ops | the card's own: 8 KiB | — | answered as a card (design §3) |
 | *group* | from `merge` only: `{"members":["schema","trace"]}` | 2–8 members, one level (§1.3) | — | unpack (local) |
 
@@ -281,6 +284,7 @@ So "a question that becomes its answer" works like this:
 1. `cards_ui` asks.
 2. The answer comes back as today.
 3. `{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"Lock wait set to 900 ms"}}` turns the question into its outcome. That is the card's first block incarnation. The card fold's receipt stays, drawn as the block's first line, and one `[` away.
+4. The user edits that block like any other, named `card:c4f9x2a` (§3.3). The question itself is never edited: an open or unconverted card has no block incarnation, so no edit can name one, and it is answered as a card (design §3).
 
 Ops on a card apply only once it is resolved (answered, skipped, closed or replaced in the card fold). On an open card they are skipped: the agent closes it first (design §1.4 `close`). Cards don't go to the rail, or into groups, in v1.
 
@@ -454,7 +458,7 @@ The last step's outcome often comes in the last tool result, after which the age
 ### 2.6 The description (B3 ships it; B5 tunes it)
 
 > Keep a few living blocks in the user's desktop app instead of narrating progress: a plan that ticks, a status, a diff, a note, a metric, a file. They sit in the transcript, or in the right rail ("target":"rail"; "slot":"end" for its bottom). One call takes {"ops":[…]} (up to 16) and returns at once. "ok" means valid, not seen: never retry for lack of a sign.
-> Ops: put creates (id, kind, title, body, at {"after":id}); on an existing id it does nothing. patch: set, append, remove, order by path like "steps.fix.label"; items by id, never index; "state":{"fix":"done"} ticks; name each path once. replace swaps the body (give why) and drops the user's unsent edit, so prefer patch. collapse (id, ids, or run:true with a summary folds this run's tool calls), merge (ids into a group), move (no target: here), remove. A finished card can be replaced as "card:<id>".
+> Ops: put creates (id, kind, title, body, at {"after":id}); on an existing id it does nothing. patch: set, append, remove, order by path like "steps.fix.label"; items by id, never index; "state":{"fix":"done"} ticks; name each path once. replace swaps kind and body, both given (give why), and drops the user's unsent edit, so prefer patch. collapse (id, ids, or run:true with a summary folds this run's tool calls), merge (ids into a group), move (no target: here), remove. A finished card can be replaced as "card:<id>".
 > Put ops in a message that already calls tools, after its reads and edits. A call in your final message costs a round: make at most one closing call per turn, only when the end state matters. Patch on real transitions, not chatter. At most 6 blocks, 4 in the rail. Don't restate what the app shows: the running tool, changed files (use a diff with "from":"edits"), tokens. Never start a step marked stop: end your turn and say why.
 > A user message "[block <id> edited r<N>] …" carries their edit as a patch on its next line. It applies where it still can: started or finished steps keep their state. A last line "[block <id> v<N> dismissed]" means they hid it: stop patching it, and don't put, move or recreate it, even under another id; you may remove it. "[block <id> v<N> shown]" means it's back: bring it up to date. Per id, only a v<N> above all earlier ones counts. After a compaction your blocks are gone: put again only what's useful. To ask the user, use cards_ui.
 
@@ -603,11 +607,13 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 ```
 
 - **Line 1, for people.**
-  - It matches `^\[block ([a-z][a-z0-9_-]{0,23}) edited r([1-9][0-9]{0,3})\] `, then the block's title (or its id), then ` → `.
+  - It matches `^\[block ([a-z][a-z0-9_-]{0,23}|card:c[a-z0-9]{6}) edited r([1-9][0-9]{0,3})\] `, then the block's title (or its id), then ` → `.
+  - **A card's block** is named `card:<id>`: the block incarnation that `replace card:<id>` made (§1.5, step 3). Its `of` is that incarnation's tag. An open or unconverted card has no incarnation, so no tag names it, and an edit naming it applies nothing, like one naming a removed block (admission, below). Answering a card stays the card's own message (`[card <id>] …`, design §3).
   - After that comes a summary of pieces joined by ` · `. Each piece is cut at 40 characters, and the line is at most 200 characters, sanitized (design §3.3's rules).
   - There is one verb. A restore is an edit whose summary says `back to rN` (§3.6).
   - `rN` is the **base**: the revision of incarnation `of` that the user edited from. It tells the agent what the user saw.
-- **Line 2, for machines.** It is a patch in the agent's own vocabulary (§1.4), with `of` first: the incarnation's tag (§1.2). Then come the user's parts, `set`, `append` and `order`, in schema key order, with no `op` or `id`, since line 1 names the block. It is ≤ 8 KiB. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
+- **Line 2, for machines.** It is a patch in the agent's own vocabulary (§1.4), with `of` first: the incarnation's tag (§1.2). Then come the user's parts, `append`, `order` and `set`, in byte order of their keys, as all four examples write them, with no `op` or `id`, since line 1 names the block. That is only how line 2 is written: the parts still apply in §1.4's phases (`append`, `set`, `order`). It is ≤ 8 KiB.
+  - **Read for what it says, not how it is spelled.** The desk always writes line 2 one way: compact, `of` first, the parts in byte order. Reading it, any JSON spelling of the same patch counts alike: keys in another order, spaces between tokens, another escape (`caf\u00e9` is `café`). Line 2 is still one line with no control character, ≤ 8 KiB as written, a JSON object with `of` and only the user's parts, no key twice. The memo matches a message by its body's own bytes (§3.7), so a respelled edit is matched as it was sent. The 8 KiB is on line 2 as received: read with what the user left out filled in (a step's `state`), the same patch can be longer, and it is still the edit. The desk writes an outgoing line 2 within 8 KiB and never rebuilds a received one. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
 - **Then 0 to 2 notice lines** (§3.5).
 - **Admission** (the fold, at the message's place in history). The message is read as an edit only if all of these hold:
   - all of the genuine user message is the grammar: lines 1 and 2, then optional notices (design §2.3);
@@ -637,6 +643,8 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 | plan | `append steps` | agent; the user with `u-` ids, state `todo`, no `stop` | the list stays ≤ 20, and the id is unused in the incarnation |
 | note | `text`, `title` | agent, user | the note is live |
 | diff | `hunks.H.state` = `kept` or `dropped` | user | the diff's `state` is `proposed`, and H is live |
+
+**A hunk's state is the user's.** The agent writes a hunk `open`, in a `put`, a `replace` or an `append`, and never sets one. The extension refuses an agent's `kept` or `dropped` by `set`, by `state` sugar or in a hunk it writes, and an agent's `set` back to `open` too: a keep or a drop is the user's decision, not the agent's report. To withdraw a hunk, the agent removes it.
 
 **Execution truth.** A step's `doing`, `done` and `failed` are the agent's report of what ran, and nothing the user hands back changes them. A skip or a stop that lands after the step started is a conflict, and the row says `deploy already ran`. The description tells the agent the same rule (§2.6), so "skip deploy" in line 1 over a finished step reads as what the user wanted, not as what happened.
 
@@ -1044,12 +1052,12 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 
 | Bound | Limit |
 |---|---|
-| A call | 1–16 ops, ≤ 8 KiB compact, depth ≤ 6 |
+| A call | 1–16 ops, ≤ 8 KiB compact, depth ≤ 6 per op, scalars counted (≤ 8 with `{"ops":[…]}`): §1.5's proposed diff has its lines 6 deep in its op |
 | A block's body | the kind's cap (§1.5), ≤ 6 KiB |
 | Blocks | ≤ 32 live per conversation, groups and members included |
 | Groups | one level, 2–8 members |
 | The rail | ≤ 4 expanded across both slots, ≤ 12 lines each |
-| An edit message | line 1 ≤ 200 characters, line 2 ≤ 8 KiB, ≤ 2 notice lines of ≤ 8 ids |
+| An edit message | line 1 ≤ 200 characters, line 2 ≤ 8 KiB as sent (read back normalized, it can be longer: §3.3), ≤ 2 notice lines of ≤ 8 ids |
 | An incarnation tag | 128 bits, 32 hex digits (§1.2) |
 | A notice | ≤ 8 ids a line, one line per kind, a version ≤ 999,999,999, an id once per message (§3.5) |
 | Retained state | §1.8: the board's working set ≤ 1 MiB per conversation; the overlay, scratch, memo, drafts and archive capped per session; nothing recoverable evicted silently, and no desire evicted at all |

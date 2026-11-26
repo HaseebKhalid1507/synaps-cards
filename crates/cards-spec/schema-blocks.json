@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "properties": {
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "description": "Applied in order. Put the call after your reads and edits.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "op": {"enum": ["put", "patch", "replace", "collapse", "merge", "move", "remove"]},
+          "id": {"type": "string", "description": "^[a-z][a-z0-9_-]{0,23}$, or card:<id> for a finished card"},
+          "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
+          "kind": {"enum": ["plan", "status", "diff", "note", "metric", "file"], "description": "put and replace both give it"},
+          "title": {"type": "string", "maxLength": 80},
+          "target": {"enum": ["transcript", "rail"]},
+          "slot": {"enum": ["upper", "end"]},
+          "at": {"type": "object", "properties": {"after": {"type": "string"}}, "required": ["after"], "additionalProperties": false},
+          "body": {
+            "type": "object",
+            "description": "plan {steps:[{id,label,state?,note?}]}; status {text,detail?,progress?:{n,of},state?}; diff {file,state,from?:\"edits\" or hunks?:[{id,at?,lines,state?}]}; note {text}; metric {label,value,was?,unit?,series?,state?}; file {path,line?,note?,state}"
+          },
+          "set": {"type": "object", "description": "path: value, e.g. \"steps.fix.label\""},
+          "append": {"type": "object", "description": "list: items, e.g. \"steps\", \"hunks.h1.lines\", \"series\""},
+          "remove": {"type": "array", "items": {"type": "string"}, "description": "items, e.g. \"steps.fix\""},
+          "order": {"type": "object", "description": "list: item ids in order"},
+          "state": {"type": "object", "description": "item id: state, on the main list"},
+          "open": {"type": "boolean"},
+          "run": {"type": "boolean"},
+          "summary": {"type": "string", "maxLength": 80},
+          "into": {"type": "string"},
+          "why": {"type": "string", "maxLength": 80}
+        },
+        "required": ["op"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["ops"],
+  "additionalProperties": false
+}

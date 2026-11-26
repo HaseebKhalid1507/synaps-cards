@@ -1,0 +1,1355 @@
+{
+  "cases": [
+    {
+      "about": "§1.6's first refusal",
+      "section": "§1.6",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "plan",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A"
+                },
+                {
+                  "id": "b",
+                  "label": "B"
+                },
+                {
+                  "id": "c",
+                  "label": "C",
+                  "state": "finished"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps[2].state: \"finished\" is not a plan state (todo, doing, done, failed, skipped)"
+    },
+    {
+      "about": "§1.6's second refusal",
+      "section": "§1.6",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "id": "diff"
+          },
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.fix.state": "done"
+            },
+            "state": {
+              "fix": "done"
+            }
+          }
+        ]
+      },
+      "error": "ops[1]: \"steps.fix.state\" is named twice (state and set)"
+    },
+    {
+      "about": "§1.5's plan sketch as it stands: stop is the user's, even false",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "plan",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "fix",
+                  "label": "Serialize rotate() per session",
+                  "state": "todo",
+                  "note": "token_store.rs:118",
+                  "stop": false
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps[0].stop: stop is the user's: an agent op can't name it"
+    },
+    {
+      "about": "§1.5's group sketch: a group is made by merge",
+      "section": "§1.5",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "g",
+            "kind": "group",
+            "body": {
+              "members": [
+                "schema",
+                "trace"
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].kind: a group is made by merge"
+    },
+    {
+      "about": "§1.2: a slot with the transcript",
+      "section": "§1.2",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "target": "transcript",
+            "slot": "end"
+          }
+        ]
+      },
+      "error": "ops[0].slot: a slot places a block in the rail; leave it out, or use target rail"
+    },
+    {
+      "about": "§1.2: at.after naming the op's own id",
+      "section": "§1.2",
+      "input": {
+        "ops": [
+          {
+            "op": "move",
+            "id": "plan",
+            "at": {
+              "after": "plan"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].at.after: names this block itself; name another, or leave at out"
+    },
+    {
+      "about": "§1.1: at:\"top\" is blocks/2's",
+      "section": "§1.1",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "at": "top"
+          }
+        ]
+      },
+      "error": "ops[0].at: \"top\" is not in blocks/1; use {\"after\":\"<id>\"}, or leave at out to place it here"
+    },
+    {
+      "about": "§1.3: into listed in ids",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "research",
+            "ids": [
+              "schema",
+              "research"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].ids[1]: is into; a group can't be its own member"
+    },
+    {
+      "about": "§1.4: the agent can't mint u- ids",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "append": {
+              "steps": [
+                {
+                  "id": "u-k3x7qa",
+                  "label": "Mine"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].append.steps[0].id: \"u-k3x7qa\" starts with u-, which is the user's; pick another id"
+    },
+    {
+      "about": "§1.4: an item set and removed",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "remove": [
+              "steps.fix"
+            ],
+            "set": {
+              "steps.fix.label": "F"
+            }
+          }
+        ]
+      },
+      "error": "ops[0]: \"steps.fix.label\" sets a field of an item the patch removes"
+    },
+    {
+      "about": "§1.4: an item set and appended",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "append": {
+              "steps": [
+                {
+                  "id": "fix",
+                  "label": "F"
+                }
+              ]
+            },
+            "state": {
+              "fix": "done"
+            }
+          }
+        ]
+      },
+      "error": "ops[0]: \"steps.fix.state\" sets a field of an item the patch appends"
+    },
+    {
+      "about": "§1.4: an item removed and appended",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "append": {
+              "steps": [
+                {
+                  "id": "fix",
+                  "label": "F"
+                }
+              ]
+            },
+            "remove": [
+              "steps.fix"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0]: \"steps.fix\" is named twice (remove and append)"
+    },
+    {
+      "about": "§1.4: an id twice in one order",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "order": {
+              "steps": [
+                "fix",
+                "test",
+                "fix"
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].order.steps[2]: \"fix\" is listed twice"
+    },
+    {
+      "about": "§1.4: indices are not paths",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps[0].label": "F"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"steps[0].label\": not a path: a field (title), or an item's field (steps.fix.label)"
+    },
+    {
+      "about": "§1.4: a path four deep",
+      "section": "§1.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.fix.label.x": "F"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"steps.fix.label.x\": not a path: a field (title), or an item's field (steps.fix.label)"
+    },
+    {
+      "about": "the agent sets stop",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps.deploy.stop": true
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"steps.deploy.stop\": stop is the user's: an agent op can't name it"
+    },
+    {
+      "about": "paths of two kinds in one patch",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "x",
+            "set": {
+              "steps.fix.label": "F",
+              "file": "f"
+            }
+          }
+        ]
+      },
+      "error": "ops[0]: \"file\" and \"steps.fix.label\" are paths of different kinds"
+    },
+    {
+      "about": "a state word no kind with that field has",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "x",
+            "set": {
+              "state": "finished"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.state: \"finished\" is not a state of a status (working, waiting, blocked, done), a diff (editing, proposed, written, reverted), a metric (ok, warn, bad, neutral) or a file (reading, editing, written, done)"
+    },
+    {
+      "about": "state sugar keeping a hunk beside a plan's tick: a hunk's state is the user's (§3.4)",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "x",
+            "state": {
+              "fix": "done",
+              "h1": "kept"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].state.h1: a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an empty patch",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {},
+            "state": {}
+          }
+        ]
+      },
+      "error": "ops[0]: a patch needs set, append, remove, order or state"
+    },
+    {
+      "about": "set on a list",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "plan",
+            "set": {
+              "steps": []
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.steps: \"steps\" is a list: append to it, remove its items or order it"
+    },
+    {
+      "about": "a hunk's state named twice, by set and by sugar: the overlap rule speaks before the kind",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "set": {
+              "hunks.h1.state": "dropped"
+            },
+            "state": {
+              "h1": "kept"
+            }
+          }
+        ]
+      },
+      "error": "ops[0]: \"hunks.h1.state\" is named twice (state and set)"
+    },
+    {
+      "about": "lines appended to a hunk the patch removes",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "remove": [
+              "hunks.h1"
+            ],
+            "append": {
+              "hunks.h1.lines": [
+                "+x"
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0]: \"hunks.h1.lines\" appends to an item the patch removes"
+    },
+    {
+      "about": "remove names a field",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "remove": [
+              "hunks.h1.at"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].remove[0]: \"hunks.h1.at\" is not an item path (steps.fix)"
+    },
+    {
+      "about": "not an object",
+      "input": [
+        "put"
+      ],
+      "error": "input: must be a JSON object {\"ops\":[…]}"
+    },
+    {
+      "about": "an unknown parameter",
+      "input": {
+        "ops": [
+          {
+            "op": "remove",
+            "id": "x"
+          }
+        ],
+        "wait": true
+      },
+      "error": "wait: unknown parameter; a call takes ops only"
+    },
+    {
+      "about": "no ops",
+      "input": {
+        "ops": []
+      },
+      "error": "ops: at least 1 op"
+    },
+    {
+      "about": "an op that isn't an object",
+      "input": {
+        "ops": [
+          "remove x"
+        ]
+      },
+      "error": "ops[0]: must be an object {op, …}"
+    },
+    {
+      "about": "an op without op",
+      "input": {
+        "ops": [
+          {
+            "id": "x"
+          }
+        ]
+      },
+      "error": "ops[0].op: required: put, patch, replace, collapse, merge, move or remove"
+    },
+    {
+      "about": "an unknown op",
+      "input": {
+        "ops": [
+          {
+            "op": "restore",
+            "id": "x"
+          }
+        ]
+      },
+      "error": "ops[0].op: \"restore\" is not an op; use put, patch, replace, collapse, merge, move or remove"
+    },
+    {
+      "about": "put: no kind",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "body": {
+              "text": "x"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].kind: required: plan, status, diff, note, metric or file"
+    },
+    {
+      "about": "put: no body",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note"
+          }
+        ]
+      },
+      "error": "ops[0].body: required: the note's body"
+    },
+    {
+      "about": "put: a card id",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "card:c4f9x2a",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].id: a card is made by cards_ui; replace a finished card instead"
+    },
+    {
+      "about": "put: an id with a capital",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "Plan",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].id: \"Plan\" must match ^[a-z][a-z0-9_-]{0,23}$: a lowercase letter, then up to 23 lowercase letters, digits, _ or -"
+    },
+    {
+      "about": "put: an unknown key",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "why": "new"
+          }
+        ]
+      },
+      "error": "ops[0].why: unknown key; a put takes id, kind, title, target, slot, at and body"
+    },
+    {
+      "about": "put: a control character in the title",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "title": "red\u001b[31m"
+          }
+        ]
+      },
+      "error": "ops[0].title: holds U+001B (a control character); remove it"
+    },
+    {
+      "about": "put: a bidi override in a label",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "txt.exe\u202egpj"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps[0].label: holds U+202E (a bidi control); remove it"
+    },
+    {
+      "about": "put: a target that isn't one",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "target": "sidebar"
+          }
+        ]
+      },
+      "error": "ops[0].target: \"sidebar\" is not a target; use transcript or rail"
+    },
+    {
+      "about": "put: a slot that isn't one",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "slot": "lower"
+          }
+        ]
+      },
+      "error": "ops[0].slot: \"lower\" is not a slot; use upper or end"
+    },
+    {
+      "about": "put: at with another key",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x"
+            },
+            "at": {
+              "after": "x",
+              "before": "y"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].at.before: unknown key; at takes after"
+    },
+    {
+      "about": "§1.3 (amended at B1): a replace with no kind is refused, even to keep the block's (Shady's example)",
+      "section": "§1.3",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "n",
+            "body": {
+              "text": "Corrected conclusion"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].kind: required, even to keep the block's: plan, status, diff, note, metric or file"
+    },
+    {
+      "about": "replace: a placement",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "hyp",
+            "kind": "note",
+            "target": "rail",
+            "body": {
+              "text": "x"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].target: unknown key; a replace takes id, kind, title, body and why"
+    },
+    {
+      "about": "collapse: run without a summary",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "run": true
+          }
+        ]
+      },
+      "error": "ops[0].summary: required with run: the run's title"
+    },
+    {
+      "about": "collapse: run with an id",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "run": true,
+            "id": "x",
+            "summary": "s"
+          }
+        ]
+      },
+      "error": "ops[0].run: folds this call's tool run; give it without id or ids"
+    },
+    {
+      "about": "collapse: nothing named",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "open": true
+          }
+        ]
+      },
+      "error": "ops[0].id: required: id, or ids, or run:true with a summary"
+    },
+    {
+      "about": "collapse: id and ids",
+      "input": {
+        "ops": [
+          {
+            "op": "collapse",
+            "id": "a",
+            "ids": [
+              "b"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].ids: give id or ids, not both"
+    },
+    {
+      "about": "merge: a card as into (into names a block; a card among the ids is the fold's to skip)",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "card:c4f9x2a",
+            "ids": [
+              "a",
+              "b"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].into: \"card:c4f9x2a\" names a card; only a block can be here"
+    },
+    {
+      "about": "merge: a card listed twice among the ids",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "g",
+            "ids": [
+              "card:c4f9x2a",
+              "a",
+              "card:c4f9x2a"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].ids[2]: \"card:c4f9x2a\" is listed twice"
+    },
+    {
+      "about": "merge: no ids",
+      "input": {
+        "ops": [
+          {
+            "op": "merge",
+            "into": "g"
+          }
+        ]
+      },
+      "error": "ops[0].ids: required: the 1 to 8 blocks to group"
+    },
+    {
+      "about": "move: a card to the rail",
+      "input": {
+        "ops": [
+          {
+            "op": "move",
+            "id": "card:c4f9x2a",
+            "slot": "end"
+          }
+        ]
+      },
+      "error": "ops[0].slot: cards don't go to the rail"
+    },
+    {
+      "about": "remove: an id twice",
+      "input": {
+        "ops": [
+          {
+            "op": "remove",
+            "ids": [
+              "a",
+              "b",
+              "a"
+            ]
+          }
+        ]
+      },
+      "error": "ops[0].ids[2]: \"a\" is listed twice"
+    },
+    {
+      "about": "remove: a card id that isn't one",
+      "input": {
+        "ops": [
+          {
+            "op": "remove",
+            "id": "card:C4F9X2A"
+          }
+        ]
+      },
+      "error": "ops[0].id: \"card:C4F9X2A\" must be a block id (^[a-z][a-z0-9_-]{0,23}$) or card:<card id> for a finished card"
+    },
+    {
+      "about": "plan: an unknown key",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "items": []
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.items: unknown key; a plan takes steps"
+    },
+    {
+      "about": "plan: no steps",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": []
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps: at least 1 steps"
+    },
+    {
+      "about": "plan: a step id twice",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "A"
+                },
+                {
+                  "id": "a",
+                  "label": "B"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps[1].id: \"a\" is used twice; item ids are unique in their list"
+    },
+    {
+      "about": "plan: a label of invisibles only",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "p",
+            "kind": "plan",
+            "body": {
+              "steps": [
+                {
+                  "id": "a",
+                  "label": "\u200b"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.steps[0].label: must not be empty (it holds only invisible characters)"
+    },
+    {
+      "about": "status: no text",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "body": {
+              "state": "done"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.text: required"
+    },
+    {
+      "about": "status: a plan's state",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "state": "doing"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.state: \"doing\" is not a status state (working, waiting, blocked, done)"
+    },
+    {
+      "about": "status: progress of 0",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "progress": {
+                "n": 0,
+                "of": 0
+              }
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.progress.of: must be a whole number from 1 to 1000000 (got 0)"
+    },
+    {
+      "about": "status: progress as a fraction",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "s",
+            "kind": "status",
+            "body": {
+              "text": "S",
+              "progress": {
+                "n": 1.5,
+                "of": 3
+              }
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.progress.n: must be a whole number from 0 to 1000000 (got 1.5)"
+    },
+    {
+      "about": "diff: no state (a diff has no neutral one)",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.state: required: a diff state (editing, proposed, written, reverted)"
+    },
+    {
+      "about": "diff: from and hunks",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "from": "edits",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks: from:\"edits\" draws the session's edits; give hunks or from, not both"
+    },
+    {
+      "about": "diff: from something else",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "editing",
+              "from": "disk"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.from: \"disk\" is not a source; from takes \"edits\""
+    },
+    {
+      "about": "diff: a hunk without lines",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].lines: required: the hunk's lines"
+    },
+    {
+      "about": "diff: a hunk's state",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "applied"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].state: \"applied\" is not a hunk state; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "§3.4: an agent keeps a hunk by set (the keep is the user's)",
+      "section": "§3.4",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "set": {
+              "hunks.h1.state": "kept"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"hunks.h1.state\": a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent sets a hunk back to open: not its path either",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "set": {
+              "hunks.h1.state": "open"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].set.\"hunks.h1.state\": a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent drops a hunk by state sugar",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "state": {
+              "h1": "dropped"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].state.h1: a hunk's state is the user's keep or drop; an agent can't set it (remove the hunk to withdraw it)"
+    },
+    {
+      "about": "an agent puts a diff with a hunk kept",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].state: \"kept\" is the user's keep or drop; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "an agent replaces a diff with a hunk dropped",
+      "input": {
+        "ops": [
+          {
+            "op": "replace",
+            "id": "d",
+            "kind": "diff",
+            "body": {
+              "file": "f",
+              "state": "proposed",
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "dropped"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.hunks[0].state: \"dropped\" is the user's keep or drop; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "an agent appends a hunk kept",
+      "input": {
+        "ops": [
+          {
+            "op": "patch",
+            "id": "d",
+            "append": {
+              "hunks": [
+                {
+                  "id": "h1",
+                  "lines": [
+                    "+x"
+                  ],
+                  "state": "kept"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].append.hunks[0].state: \"kept\" is the user's keep or drop; an agent's hunk is open, so leave state out"
+    },
+    {
+      "about": "note: no text",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {}
+          }
+        ]
+      },
+      "error": "ops[0].body.text: required"
+    },
+    {
+      "about": "note: a markdown key",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "n",
+            "kind": "note",
+            "body": {
+              "text": "x",
+              "md": true
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.md: unknown key; a note takes text"
+    },
+    {
+      "about": "metric: no value",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "body": {
+              "label": "L"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.value: required"
+    },
+    {
+      "about": "metric: a value as a number",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": 1.0
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.value: must be a string"
+    },
+    {
+      "about": "metric: a series of strings",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "m",
+            "kind": "metric",
+            "body": {
+              "label": "L",
+              "value": "1",
+              "series": [
+                "1"
+              ]
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.series[0]: must be a number (got \"1\")"
+    },
+    {
+      "about": "file: no state (a file has no neutral one)",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "body": {
+              "path": "p"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.state: required: a file state (reading, editing, written, done)"
+    },
+    {
+      "about": "file: line 0",
+      "input": {
+        "ops": [
+          {
+            "op": "put",
+            "id": "f",
+            "kind": "file",
+            "body": {
+              "path": "p",
+              "line": 0,
+              "state": "reading"
+            }
+          }
+        ]
+      },
+      "error": "ops[0].body.line: must be a whole number of at least 1 that fits 64 bits (got 0)"
+    }
+  ]
+}
