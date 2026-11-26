@@ -649,9 +649,9 @@ pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, Pat
 /// agent's validation on the body, since the user's own decisions (a step's
 /// stop, a hunk kept) are stored state no agent writes.
 ///
-/// Decision (pending Haseeb), D3: checked per path, so the path that would
-/// pass a cap is the one skipped. Decision D7: the maxima only, so a patch
-/// may remove a plan's last step (1–20 is a put's).
+/// Decision D3 (§1.4, §1.8): checked per path, so the path that would pass
+/// a cap is the one skipped. Decision D7: the maxima only, so a patch may
+/// remove a plan's last step (1–20 is a put's).
 pub fn check_stored(body: &Body) -> Result<(), PathWhy> {
     use crate::block::{DIFF_LINES_MAX, HUNKS_MAX, PLAN_STEPS_MAX};
     match body {

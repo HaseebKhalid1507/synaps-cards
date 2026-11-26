@@ -1558,3 +1558,38 @@ fn only_a_replace_acts_on_an_unconverted_card() {
     assert_eq!(outcomes(&s, "card:c4f9x2a")[4..], [Outcome::Applied, Outcome::Applied]);
     assert!(s.block(&r("card:c4f9x2a")).unwrap().collapsed);
 }
+
+/// Decision D3 (§1.4, §1.8, amended): caps are checked path by path in the
+/// phases' order, so of two paths that pass the byte cap only together, the
+/// later is the one skipped, and the earlier applies.
+#[test]
+fn of_two_paths_that_pass_a_cap_together_the_later_is_skipped() {
+    // 20 steps: s10 and s11 short, the rest filled so that growing one of
+    // them to 100 emoji fits the 4 KiB and growing both doesn't.
+    let body = |fill: usize| {
+        let steps: Vec<Value> = (0..20)
+            .map(|i| {
+                let label = if i == 10 || i == 11 { "😀".repeat(10) } else { "é".repeat(fill) };
+                json!({"id": format!("s{i:02}"), "label": label})
+            })
+            .collect();
+        json!({ "steps": steps })
+    };
+    let grow = 90 * "😀".len();
+    let fill = (1..=100)
+        .rev()
+        .find(|&f| {
+            let bytes = Body::parse(Kind::Plan, &body(f), "body").map_or(usize::MAX, |b| b.bytes());
+            let room = block::PLAN_MAX_BYTES.saturating_sub(bytes);
+            bytes <= block::PLAN_MAX_BYTES && grow <= room && room < 2 * grow
+        })
+        .expect("a fill that leaves room for one");
+    let mut h = H::default();
+    h.ops(json!([{"op":"put","id":"plan","kind":"plan","body":body(fill)}]));
+    let label = "😀".repeat(100);
+    h.ops(json!([{"op":"patch","id":"plan","set":{"steps.s10.label": label, "steps.s11.label": label}}]));
+    let s = h.state();
+    assert_eq!(outcomes(&s, "plan")[1..], [Outcome::Applied, Outcome::SkippedPath(path("steps.s11.label"), PathWhy::TooBig)]);
+    let Body::Plan(p) = &s.block(&r("plan")).unwrap().body else { panic!() };
+    assert_eq!((p.steps[10].label.chars().count(), p.steps[11].label.chars().count()), (100, 10));
+}

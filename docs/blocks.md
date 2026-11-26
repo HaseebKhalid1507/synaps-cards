@@ -243,7 +243,7 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
   3. `set`: in byte order of the paths;
   4. `order`.
 
-  Each path is all or nothing: an append that would pass its list's cap is skipped whole, for that list. A skipped path is marked, and the rest still apply. The order never depends on how a JSON map happens to iterate.
+  Each path is all or nothing: an append that would pass its list's cap is skipped whole, for that list. A path that would take the body past its kind's byte cap, or break a rule across its fields (§1.5), is skipped the same way. Paths are checked one at a time, in the phases' order, so of two paths that pass the byte cap only together, the later is skipped (decision D3, settled at B2). A skipped path is marked, and the rest still apply. The order never depends on how a JSON map happens to iterate.
 - **Revisions.**
   - **An op adds one revision** to the incarnation when it changes the normalized kind, title or body. An op that changes nothing (a `set` to the current value, a `put` on a live id) adds none, and is logged `no change`.
   - **Not revisions:** placement (`move`, `at`, `target`, `slot`), `collapse`, and dismissal.
@@ -353,7 +353,7 @@ The history is the record. Everything else has an owner, a count and a byte cap,
 
 | State | Cap | Past the cap |
 |---|---|---|
-| Live blocks (groups and members included): kind, title, place, body | 32, ≤ 6.25 KiB each. A body is its kind's cap, ≤ 6 KiB (§1.5) | A creating op is skipped and marked. The extension refuses a body over its cap, and the fold skips a patch that would exceed it |
+| Live blocks (groups and members included): kind, title, place, body | 32, ≤ 6.25 KiB each. A body is its kind's cap, ≤ 6 KiB (§1.5) | A creating op is skipped and marked. The extension refuses a body over its cap. The fold skips the **path** of a patch that would exceed a body's or a list's cap, and the patch's other paths still apply (decision D3, settled at B2: §1.4 makes each path all or nothing) |
 | Tombstones: id, tag, last rev, a reference for `why` | 64, ≤ 96 B each | The oldest ending is dropped. A stale edit naming a dropped tag finds no live incarnation, so nothing applies |
 | The creation number (§1.2) | One integer per generation | None: it only counts. Nothing is kept per id, so no tombstone eviction can reset it |
 | Revision records: a **reference** (message, call, op), the author, the op kind, the count of changed paths and the first ≤ 4 of them | 64 per live incarnation and 1,024 across the board, ≤ 256 B each | The oldest are dropped, and the counter keeps counting. **A record never holds its op:** the op, its `why` and its other paths are read from the history at the reference |
