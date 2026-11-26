@@ -613,11 +613,11 @@ pub(crate) fn fits_set(kind: Kind, author: Author, p: &Path, v: &SetValue) -> bo
     serde_json::to_value(v).is_ok_and(|v| spec.check(&v, p.as_str(), p).is_ok())
 }
 
-/// One path, all or nothing (§1.4): `f` applied, then the kind's caps
-/// checked; on any failure the block is as it was.
+/// One path, all or nothing (§1.4): `f` applied, then the stored body
+/// checked ([`check_stored`]); on any failure the block is as it was.
 pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, PathWhy>) -> Result<bool, PathWhy> {
     let (body, title, items) = (b.body.clone(), b.title.clone(), b.items.clone());
-    let r = f(b).and_then(|changed| caps(&b.body).map(|()| changed));
+    let r = f(b).and_then(|changed| check_stored(&b.body).map(|()| changed));
     if r.is_err() {
         b.body = body;
         b.title = title;
@@ -626,22 +626,26 @@ pub(crate) fn path(b: &mut Block, f: impl FnOnce(&mut Block) -> Result<bool, Pat
     r
 }
 
-/// The kind's caps (§1.5) that a patch can pass: list counts, a diff's
-/// lines, the byte cap. Decision (pending Haseeb), D3: checked per path, so
-/// the path that would pass a cap is the one skipped. Decision D7: only the
-/// maxima, so a patch may remove a plan's last step (1–20 is the put's).
-/// Interim (fail first).
+/// What a stored body keeps (§1.5), whoever wrote it last: the kind's caps
+/// a patch can pass (list counts, a diff's lines, the byte cap) and the
+/// rules across its fields that B1 checks on a whole body: a status's text
+/// is one line, and a diff draws hunks or the session's edits, not both.
+/// The fold checks it after every path ([`path`]); it doesn't re-run an
+/// agent's validation on the body, since the user's own decisions (a step's
+/// stop, a hunk kept) are stored state no agent writes.
+///
+/// Decision (pending Haseeb), D3: checked per path, so the path that would
+/// pass a cap is the one skipped. Decision D7: the maxima only, so a patch
+/// may remove a plan's last step (1–20 is a put's).
 pub fn check_stored(body: &Body) -> Result<(), PathWhy> {
-    caps(body)
-}
-
-fn caps(body: &Body) -> Result<(), PathWhy> {
     use crate::block::{DIFF_LINES_MAX, HUNKS_MAX, PLAN_STEPS_MAX};
     match body {
         Body::Plan(p) if p.steps.len() > PLAN_STEPS_MAX => return Err(PathWhy::Full),
+        Body::Diff(d) if d.from.is_some() && !d.hunks.is_empty() => return Err(PathWhy::FromEdits),
         Body::Diff(d) if d.hunks.len() > HUNKS_MAX || d.hunks.iter().map(|h| h.lines.len()).sum::<usize>() > DIFF_LINES_MAX => {
             return Err(PathWhy::Full);
         }
+        Body::Status(s) if s.text.contains('\n') => return Err(PathWhy::NotKind),
         _ => {}
     }
     if body.bytes() > body.kind().max_bytes() { Err(PathWhy::TooBig) } else { Ok(()) }
@@ -695,7 +699,9 @@ pub(crate) fn set_field(b: &mut Block, p: &Path, v: &SetValue) -> Result<bool, P
             }
         }
         (Body::Status(s), f, None, None) => match (f, v) {
-            ("text", v) => put_if(&mut s.text, text(v)?.to_string()),
+            // A patch's `text` keeps its lines (B1 can't tell a note's from a
+            // status's): a status's is folded to one, as its put's is.
+            ("text", v) => put_if(&mut s.text, crate::sanitize::ui_sanitize(text(v)?, crate::sanitize::Lines::Single)),
             ("detail", v) => put_if(&mut s.detail, optional(v)?),
             ("progress", SetValue::Progress(n)) => put_if(&mut s.progress, Some(*n)),
             ("state", v) => put_if(&mut s.state, word(v, StatusState::parse)?),

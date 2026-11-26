@@ -298,6 +298,8 @@ fn check(s: &State, what: &str) {
     assert!(record <= RECORD_MAX_BYTES && line <= RECORD_MAX_BYTES, "{what}: {record} {line}");
     let listed: Vec<&Ref> = s.lists().flat_map(|(_, l)| l.iter()).collect();
     for b in s.blocks() {
+        // B1's stored-body contract, whoever wrote the body last.
+        assert_eq!(check_stored(&b.body), Ok(()), "{what}: {:?}", b.body);
         assert!(b.body.bytes() <= b.kind.max_bytes(), "{what}: {} over its cap", b.id);
         assert!(b.item_ids() <= block::ITEM_IDS_MAX && (1..=block::REVISIONS_MAX).contains(&b.rev), "{what}");
         assert!(s.records_of(b.tag).count() <= RECORDS_PER_BLOCK, "{what}");

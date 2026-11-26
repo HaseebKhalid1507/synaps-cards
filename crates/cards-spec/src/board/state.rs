@@ -422,7 +422,8 @@ pub enum PathWhy {
     Full,
     /// It would take the body past its kind's byte cap.
     TooBig,
-    /// Interim (fail first).
+    /// A diff that draws the session's edits (`from:"edits"`) takes no
+    /// hunks: "give hunks or from, not both" (§1.5).
     FromEdits,
 }
 
