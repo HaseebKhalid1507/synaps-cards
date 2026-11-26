@@ -613,7 +613,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
   - There is one verb. A restore is an edit whose summary says `back to rN` (§3.6).
   - `rN` is the **base**: the revision of incarnation `of` that the user edited from. It tells the agent what the user saw.
 - **Line 2, for machines.** It is a patch in the agent's own vocabulary (§1.4), with `of` first: the incarnation's tag (§1.2). Then come the user's parts, `append`, `order` and `set`, in byte order of their keys, as all four examples write them, with no `op` or `id`, since line 1 names the block. That is only how line 2 is written: the parts still apply in §1.4's phases (`append`, `set`, `order`). It is ≤ 8 KiB.
-  - **Read for what it says, not how it is spelled.** The desk always writes line 2 one way: compact, `of` first, the parts in byte order. Reading it, any JSON spelling of the same patch counts alike: keys in another order, spaces between tokens, another escape (`caf\u00e9` is `café`). Line 2 is still one line with no control character, ≤ 8 KiB as written, a JSON object with `of` and only the user's parts, no key twice. The memo matches a message by its body's own bytes (§3.7), so a respelled edit is matched as it was sent. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
+  - **Read for what it says, not how it is spelled.** The desk always writes line 2 one way: compact, `of` first, the parts in byte order. Reading it, any JSON spelling of the same patch counts alike: keys in another order, spaces between tokens, another escape (`caf\u00e9` is `café`). Line 2 is still one line with no control character, ≤ 8 KiB as written, a JSON object with `of` and only the user's parts, no key twice. The memo matches a message by its body's own bytes (§3.7), so a respelled edit is matched as it was sent. The 8 KiB is on line 2 as received: read with what the user left out filled in (a step's `state`), the same patch can be longer, and it is still the edit. The desk writes an outgoing line 2 within 8 KiB and never rebuilds a received one. `of` is 32 hex digits (§1.2), about 8 tokens more per hand-back than v1.1's 8 digits, input only.
 - **Then 0 to 2 notice lines** (§3.5).
 - **Admission** (the fold, at the message's place in history). The message is read as an edit only if all of these hold:
   - all of the genuine user message is the grammar: lines 1 and 2, then optional notices (design §2.3);
@@ -1057,7 +1057,7 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 | Blocks | ≤ 32 live per conversation, groups and members included |
 | Groups | one level, 2–8 members |
 | The rail | ≤ 4 expanded across both slots, ≤ 12 lines each |
-| An edit message | line 1 ≤ 200 characters, line 2 ≤ 8 KiB, ≤ 2 notice lines of ≤ 8 ids |
+| An edit message | line 1 ≤ 200 characters, line 2 ≤ 8 KiB as sent (read back normalized, it can be longer: §3.3), ≤ 2 notice lines of ≤ 8 ids |
 | An incarnation tag | 128 bits, 32 hex digits (§1.2) |
 | A notice | ≤ 8 ids a line, one line per kind, a version ≤ 999,999,999, an id once per message (§3.5) |
 | Retained state | §1.8: the board's working set ≤ 1 MiB per conversation; the overlay, scratch, memo, drafts and archive capped per session; nothing recoverable evicted silently, and no desire evicted at all |

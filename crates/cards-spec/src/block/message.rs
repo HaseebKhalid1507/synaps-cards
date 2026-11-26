@@ -48,6 +48,16 @@
 //!   and pass the overlap rule; [`Edit::admit`] checks them against the
 //!   block's kind where the message lands.
 //!
+//! **Read back, line 2 can grow.** The 8 KiB is on line 2 as received.
+//! [`parse`] normalizes what it reads, filling what the user left out (a
+//! step's `state` is `todo`), so 20 appended steps sent in 8,162 bytes
+//! come out as an [`Edit`] whose [`Edit::patch_text`] is 8,462. That is
+//! still the user's edit: reading doesn't refuse it, and its bytes are kept
+//! as sent ([`Read::body`]). Only the builder is held to the cap: [`build`]
+//! refuses a line 2 over it. So `parse` then `build` gives back the same
+//! edit only where the normalized line 2 fits, and a received edit is never
+//! rebuilt to be resent.
+//!
 //! **A card's block** (§3.3, amended at B1). `replace card:<id>` gives a
 //! resolved card its first block incarnation (§1.5), a block like any
 //! other, so the user edits it as `[block card:<id> edited rN]`: line 1's
@@ -254,11 +264,19 @@ impl Edit {
         };
         known(o, &["append", "order", "set"], "", "an edit takes append, order and set")?;
         let edit = Edit { id, base, of, parts: parse_parts(o, "", Author::User)? };
-        let n = edit.patch_text().len();
+        edit.line_2()?;
+        Ok(edit)
+    }
+
+    /// Line 2 as [`build`] writes it, if it is within
+    /// [`EDIT_PATCH_MAX_BYTES`].
+    fn line_2(&self) -> Result<String, Error> {
+        let line = self.patch_text();
+        let n = line.len();
         if n > EDIT_PATCH_MAX_BYTES {
             return Err(Error::new("parts", format!("over {EDIT_PATCH_MAX_BYTES} bytes (got {n}); hand back fewer changes at once")));
         }
-        Ok(edit)
+        Ok(line)
     }
 
     /// The card, when this edits a card's block: B2 admits it only if
@@ -270,7 +288,8 @@ impl Edit {
         }
     }
 
-    /// Line 2, compact.
+    /// Line 2, compact, normalized: what [`build`] writes, at any size
+    /// (module docs: a received edit's can be over the cap).
     pub fn patch_text(&self) -> String {
         serde_json::to_string(self).expect("an edit always serializes")
     }
@@ -295,15 +314,22 @@ pub struct Summary<'a> {
     pub pieces: Vec<&'a str>,
 }
 
-/// The edit message for `edit` (module docs). `edit` must hold the user's
-/// parts as [`parse`] would read them (this writes, it doesn't check).
-pub fn build(edit: &Edit, summary: &Summary) -> String {
+/// The edit message for `edit` (module docs), or an error if its line 2
+/// is over [`EDIT_PATCH_MAX_BYTES`]: it is never cut.
+///
+/// Build from an edit [`Edit::new`] made, which checks the paths and this
+/// size, as the desk's hand-back and restore do; this checks only the
+/// size. An edit [`parse`] read is not enough: it is capped as received,
+/// and normalized it can be over (module docs). Resend a received edit as
+/// its own bytes ([`Read::body`]), never rebuilt.
+pub fn build(edit: &Edit, summary: &Summary) -> Result<String, Error> {
+    let line2 = edit.line_2()?;
     let one = |s: &str| ui_sanitize(s, Lines::Single);
     let name = summary.title.map(one).filter(|t| !t.is_empty()).unwrap_or_else(|| edit.id.to_string());
     let pieces: Vec<String> = summary.pieces.iter().map(|p| cut_chars(&one(p), SUMMARY_PIECE_MAX)).collect();
     let lead = summary.back_to.map(|r| format!("back to r{r}: ")).unwrap_or_default();
     let line = format!("[block {} edited r{}] {name} → {lead}{}", edit.id, edit.base, pieces.join(" · "));
-    format!("{}\n{}", cut_chars(&line, EDIT_LINE_MAX), edit.patch_text())
+    Ok(format!("{}\n{line2}", cut_chars(&line, EDIT_LINE_MAX)))
 }
 
 /// `body` (a message's text without its trailer) read as an edit: `None`

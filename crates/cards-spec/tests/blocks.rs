@@ -127,7 +127,7 @@ fn block_edits_round_trip() {
         let e = edit_of(&c);
         let pieces: Vec<&str> = c["pieces"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
         let summary = Summary { title: c["title"].as_str(), back_to: c.get("back_to").and_then(Value::as_u64).map(|r| r as u32), pieces };
-        let text = message::build(&e, &summary);
+        let text = message::build(&e, &summary).unwrap();
         assert_eq!(text, c["text"].as_str().unwrap(), "{about}");
         if let Some(d) = c.get("design") {
             assert_eq!(text, d.as_str().unwrap(), "{about}: the design's text");
@@ -508,9 +508,15 @@ fn messages_split_and_read_back_under_mutation() {
     let mut pieces: Vec<String> = cases("notices.json").iter().map(|c| c["text"].as_str().unwrap().to_string()).collect();
     pieces.extend(cases("look_alikes.json").iter().map(|c| c["text"].as_str().unwrap().to_string()));
     pieces.extend(cases("edits.json").iter().map(|c| c["text"].as_str().unwrap().to_string()));
+    // An edit within the cap as sent that normalizes past it: 20 steps
+    // without their `state` (8,162 bytes), with it 8,462.
+    let steps: Vec<Value> =
+        "abcdefghijklmnopqrst".chars().map(|c| json!({"id": format!("u-aaaaa{c}"), "label": "😀".repeat(94)})).collect();
+    let grows = json!({"of": "bab3b9916631463b1935420c710c9287", "append": {"steps": steps}});
+    pieces.push(format!("[block plan edited r4] plan → add steps\n{grows}"));
     let lines: Vec<String> = pieces.iter().flat_map(|p| p.split('\n').map(String::from).collect::<Vec<_>>()).collect();
     let mut r = Rng(0x7e57_ab1e);
-    let (mut trailers, mut edits) = (0, 0);
+    let (mut trailers, mut edits, mut grown) = (0, 0, 0);
     for i in 0..6000 {
         let text = if r.below(3) == 0 {
             r.pick(&pieces).clone()
@@ -533,12 +539,19 @@ fn messages_split_and_read_back_under_mutation() {
         trailers += usize::from(!t.lines.is_empty());
         if let Some(e) = message::parse(&text) {
             let line1 = text.split_once('\n').unwrap().0;
-            // Line 2 is read for what it says: the builder's spelling of it reads the same.
-            assert_eq!(message::parse(&format!("{line1}\n{}", e.patch_text())).as_ref(), Some(&e), "case {i}: line 2 respelled");
             let again = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["x"] });
-            assert_eq!(message::parse(&again).as_ref(), Some(&e), "case {i}");
+            // The cap is on line 2 as received; normalized, it can grow past it.
+            if e.patch_text().len() <= message::EDIT_PATCH_MAX_BYTES {
+                // Line 2 is read for what it says: the builder's spelling of it reads the same.
+                assert_eq!(message::parse(&format!("{line1}\n{}", e.patch_text())).as_ref(), Some(&e), "case {i}: line 2 respelled");
+                assert_eq!(message::parse(&again.unwrap()).as_ref(), Some(&e), "case {i}");
+            } else {
+                // Still the user's edit, never rebuilt: the builder refuses it.
+                assert!(again.is_err(), "case {i}");
+                grown += 1;
+            }
             edits += 1;
         }
     }
-    assert!(trailers >= 600 && edits >= 100, "trailers {trailers}, edits {edits}");
+    assert!(trailers >= 600 && edits >= 100 && grown >= 10, "trailers {trailers}, edits {edits}, grown {grown}");
 }

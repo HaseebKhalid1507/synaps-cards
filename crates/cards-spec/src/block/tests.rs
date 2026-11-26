@@ -245,7 +245,7 @@ fn a_hunks_keep_or_drop_is_the_users() {
     let e = edit(json!({"set":{"hunks.h1.state":"kept","hunks.h2.state":"dropped"}}));
     assert_eq!(e.admit(Kind::Diff), Ok(()));
     assert!(e.admit(Kind::Plan).is_err());
-    let text = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["keep h1", "drop h2"] });
+    let text = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["keep h1", "drop h2"] }).unwrap();
     assert_eq!(message::parse(&text).as_ref(), Some(&e));
     let of = Tag::parse("bab3b9916631463b1935420c710c9287").unwrap();
     let open = Edit::new(BlockId::parse("d").unwrap(), 1, of, &json!({"set":{"hunks.h1.state":"open"}})).unwrap_err();
@@ -691,7 +691,7 @@ fn edits_build_and_read_back() {
         back_to: None,
         pieces: vec!["order fix, test, deploy, bandaid", "skip bandaid", "stop before deploy"],
     };
-    let text = message::build(&e, &s);
+    let text = message::build(&e, &s).unwrap();
     assert_eq!(
         text,
         "[block plan edited r4] Close the refresh race → order fix, test, deploy, bandaid · skip bandaid · stop before deploy\n\
@@ -706,11 +706,11 @@ fn edits_build_and_read_back() {
     // No title: the id. Pieces cut at 40; the line at 200.
     let long = "p".repeat(41);
     let s = Summary { title: None, back_to: Some(1), pieces: vec![&long] };
-    let line1 = message::build(&e, &s).split('\n').next().unwrap().to_string();
+    let line1 = message::build(&e, &s).unwrap().split('\n').next().unwrap().to_string();
     assert_eq!(line1, format!("[block plan edited r4] plan → back to r1: {}…", "p".repeat(39)));
     let many: Vec<String> = (0..20).map(|i| format!("piece {i}")).collect();
     let s = Summary { title: Some("T"), back_to: None, pieces: many.iter().map(String::as_str).collect() };
-    let text = message::build(&e, &s);
+    let text = message::build(&e, &s).unwrap();
     let line1 = text.split('\n').next().unwrap();
     assert!(line1.chars().count() == 200 && line1.ends_with('…'));
     assert_eq!(message::parse(&text), Some(e));
@@ -719,7 +719,7 @@ fn edits_build_and_read_back() {
 #[test]
 fn edit_look_alikes_are_ordinary_text() {
     let e = edit(json!({"set":{"steps.bandaid.state":"skipped"}}));
-    let text = message::build(&e, &Summary { title: Some("T"), back_to: None, pieces: vec!["skip bandaid"] });
+    let text = message::build(&e, &Summary { title: Some("T"), back_to: None, pieces: vec!["skip bandaid"] }).unwrap();
     let (l1, l2) = text.split_once('\n').unwrap();
     assert!(message::parse(&text).is_some());
     let of = "\"of\":\"bab3b9916631463b1935420c710c9287\"";
@@ -794,7 +794,8 @@ fn a_cards_block_is_edited_as_card_id() {
     let e = Edit::new(card.clone(), 1, of, &json!({"set":{"text":"Lock wait set to 1200 ms"}})).unwrap();
     assert_eq!(e.card().map(|c| c.as_str()), Some("c4f9x2a"));
     assert_eq!(e.admit(Kind::Note), Ok(()));
-    let text = message::build(&e, &Summary { title: Some("Lock wait"), back_to: None, pieces: vec!["text “Lock wait set to 1200 ms”"] });
+    let text =
+        message::build(&e, &Summary { title: Some("Lock wait"), back_to: None, pieces: vec!["text “Lock wait set to 1200 ms”"] }).unwrap();
     assert_eq!(
         text,
         format!(
@@ -803,7 +804,7 @@ fn a_cards_block_is_edited_as_card_id() {
     );
     assert_eq!(message::parse(&text).as_ref(), Some(&e));
     // No title: the line names it by its ref.
-    let line1 = message::build(&e, &Summary::default());
+    let line1 = message::build(&e, &Summary::default()).unwrap();
     assert!(line1.starts_with("[block card:c4f9x2a edited r1] card:c4f9x2a → "), "{line1}");
     // A block's edit names no card; a card's answer is no block edit.
     assert_eq!(edit(json!({"set":{"text":"x"}})).card(), None);
@@ -827,7 +828,7 @@ fn line_2_is_at_most_8_kib() {
         edit(json!({"append":{"steps":steps}}))
     };
     let overhead = with(&[1; 20]).patch_text().len() - 20;
-    let of_len = |len: usize| -> String {
+    let of_len = |len: usize| -> Edit {
         let mut need = len - overhead;
         let bytes: Vec<usize> = (0..20)
             .map(|i| {
@@ -837,10 +838,49 @@ fn line_2_is_at_most_8_kib() {
             })
             .collect();
         let e = with(&bytes);
-        let text = message::build(&e, &Summary { title: None, back_to: None, pieces: vec!["add 20 steps"] });
-        assert_eq!(text.split_once('\n').unwrap().1.len(), len);
-        text
+        assert_eq!(e.patch_text().len(), len);
+        e
     };
-    assert!(message::parse(&of_len(message::EDIT_PATCH_MAX_BYTES)).is_some());
-    assert!(message::parse(&of_len(message::EDIT_PATCH_MAX_BYTES + 1)).is_none());
+    let s = Summary { title: None, back_to: None, pieces: vec!["add 20 steps"] };
+    let at = of_len(message::EDIT_PATCH_MAX_BYTES);
+    let text = message::build(&at, &s).unwrap();
+    assert_eq!(message::parse(&text), Some(at));
+    // One past it: the builder refuses it, and the reader too, as written.
+    let past = of_len(message::EDIT_PATCH_MAX_BYTES + 1);
+    assert_eq!(message::build(&past, &s).unwrap_err().to_string(), "parts: over 8192 bytes (got 8193); hand back fewer changes at once");
+    let line1 = text.split_once('\n').unwrap().0;
+    assert_eq!(message::parse(&format!("{line1}\n{}", past.patch_text())), None);
+}
+
+/// Shady's round-2 P3: the cap is on line 2 as received. 20 steps sent
+/// without their `state` fit in 8,162 bytes; normalized, with `"state":"todo"`
+/// filled in, they are 8,462. It is still the user's edit, read and kept as
+/// sent; only the builder is held to the cap, so it isn't rebuilt.
+#[test]
+fn a_received_edit_may_normalize_past_the_cap() {
+    let ids = "abcdefghijklmnopqrst".chars().map(|c| format!("u-aaaaa{c}"));
+    let steps: Vec<Value> = ids.map(|id| json!({"id": id, "label": "😀".repeat(94)})).collect();
+    let parts = json!({"append":{"steps":steps}});
+    let line2 = format!("{{\"of\":\"bab3b9916631463b1935420c710c9287\",{}", &parts.to_string()[1..]);
+    assert_eq!(line2.len(), 8162);
+    let text = format!("[block plan edited r4] plan → add steps\n{line2}");
+    // Read: the user's edit, its steps `todo`.
+    let e = message::parse(&text).expect("within the cap as received");
+    let mut todo = parts.clone();
+    todo["append"]["steps"].as_array_mut().unwrap().iter_mut().for_each(|s| s["state"] = json!("todo"));
+    assert_eq!(e, edit(todo));
+    assert_eq!(e.admit(Kind::Plan), Ok(()));
+    assert_eq!(e.patch_text().len(), 8462);
+    // Kept as sent, a notice trailer or not: the memo's bytes are these.
+    for sent in [text.clone(), format!("{text}\n[block tests v3 dismissed]")] {
+        let read = message::read(&sent);
+        assert_eq!((read.body, read.edit.as_ref()), (text.as_str(), Some(&e)));
+    }
+    // Never rebuilt: the builder, and an outgoing edit, refuse 8,462 bytes,
+    // and the normalized line 2 isn't read as one.
+    let over = "parts: over 8192 bytes (got 8462); hand back fewer changes at once";
+    let s = Summary { title: None, back_to: None, pieces: vec!["add steps"] };
+    assert_eq!(message::build(&e, &s).unwrap_err().to_string(), over);
+    assert_eq!(Edit::new(e.id.clone(), 4, e.of, &parts).unwrap_err().to_string(), over);
+    assert_eq!(message::parse(&format!("[block plan edited r4] plan → add steps\n{}", e.patch_text())), None);
 }
