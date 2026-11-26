@@ -1745,3 +1745,27 @@ fn maximal_blocks_measure_under_the_block_ceiling() {
     );
     assert!(b.writer_count() >= 3 * 20 && l.block <= BLOCK_MAX_OWNED, "{l:?}");
 }
+
+/// P2-2: a re-fold reads `card:` ops against the card fold at the commit,
+/// as the commit did: a card closed in the target's batch is resolved, so
+/// its conversion takes a creation number, and the target's tag is the
+/// record's.
+#[test]
+fn a_refold_resolves_cards_as_the_commit_did() {
+    let mut h = H::default();
+    h.ask();
+    h.user("thinking");
+    let ops = json!([{"op":"replace","id":"card:c4f9x2a","kind":"note","body":{"text":"900 ms"}}, note("n", "after")]);
+    let b = h.call(ops.clone());
+    let k = h.tool();
+    h.events.push(Event::Call { tool_id: k.clone(), name: "cards_ui".into(), input: json!({"close": "c4f9x2a"}) });
+    h.bind(&b, &ops);
+    h.result(&k, "Card c4f9x2a closed (cards/1).");
+    h.events.push(Event::ResultsEnd);
+    h.user("ok");
+    let s = h.state();
+    let n = s.block(&r("n")).unwrap();
+    assert_eq!(n.creation, 2, "the conversion took 1");
+    let at = refold(&h.events, Target::Revision(n.created)).unwrap();
+    assert_eq!(at.block(&r("n")).unwrap().tag, n.tag);
+}

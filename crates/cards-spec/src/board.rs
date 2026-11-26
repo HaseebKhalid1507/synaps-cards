@@ -340,7 +340,11 @@ impl Board {
     ///
     /// With `stop`, an op's reference: no call after its call, and its call
     /// through that op only; `true` if that op was reached (its call bound).
-    fn replay(&self, state: &mut State, events: &[Event], end: usize, mode: Replay, stop: Option<Pos>) -> bool {
+    ///
+    /// `card:` ops resolve against `cards`, the card fold as it is at the
+    /// commit: the batch's results read (§1.7).
+    #[allow(clippy::too_many_arguments)]
+    fn replay(&self, cards: &Fold, state: &mut State, events: &[Event], end: usize, mode: Replay, stop: Option<Pos>) -> bool {
         let mut pending = false;
         for i in self.open..end {
             let Event::Call { tool_id, name, input } = &events[i] else { continue };
@@ -370,7 +374,7 @@ impl Board {
             };
             match ops {
                 Some(ops) if binds => {
-                    let cx = apply::Cx { call: i, tool_id, cards: &self.cards, pending };
+                    let cx = apply::Cx { call: i, tool_id, cards, pending };
                     state.call(&cx, ops);
                     if stop.is_some_and(|s| s.event == i) {
                         return true;
@@ -388,7 +392,7 @@ impl Board {
         if self.calls {
             let generation = self.state.generation;
             let mut state = std::mem::replace(&mut self.state, State::new(generation));
-            self.replay(&mut state, events, end, Replay::Commit, None);
+            self.replay(&self.cards, &mut state, events, end, Replay::Commit, None);
             self.state = state;
         }
         self.open = end;
@@ -410,7 +414,7 @@ impl Board {
     pub fn view(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
         if self.calls {
-            self.replay(&mut s, self.history(events), self.at, Replay::View, None);
+            self.replay(&self.cards, &mut s, self.history(events), self.at, Replay::View, None);
         }
         s
     }
@@ -421,7 +425,7 @@ impl Board {
     pub fn bound(&self, events: &[Event]) -> State {
         let mut s = self.state.clone();
         if self.calls {
-            self.replay(&mut s, self.history(events), self.at, Replay::Bound, None);
+            self.replay(&self.cards, &mut s, self.history(events), self.at, Replay::Bound, None);
         }
         s
     }
@@ -571,8 +575,13 @@ impl<'a> Refold<'a> {
                     }
                 }
                 let (end, mode) = end.map_or((events.len(), Replay::Bound), |e| (e, Replay::Commit));
+                // The card fold as the commit has it: the batch read.
+                let mut cards = self.board.cards.clone();
+                for e in &events[event..end] {
+                    cards.apply(e);
+                }
                 let mut s = self.board.state.clone();
-                self.board.replay(&mut s, events, end, mode, Some(at)).then_some(s)
+                self.board.replay(&cards, &mut s, events, end, mode, Some(at)).then_some(s)
             }
             Target::Revision(Pos { op: None, .. }) => Some(self.board.bound(&events[..self.until])),
             Target::Outcome(_) => Some(self.board.view(events)),
