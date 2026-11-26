@@ -263,6 +263,10 @@ fn history_of(r: &mut Rng, turns: usize, complete: bool) -> (Vec<Event>, Vec<std
             events.push(Event::Result { tool_id: t.clone(), text });
         }
         blocks.push(from..events.len());
+        // The next message's results end, as `fold::events` marks it.
+        if r.chance(90) {
+            events.push(Event::ResultsEnd);
+        }
         board.read(&events);
         if r.chance(75) {
             let text = if r.chance(10) {

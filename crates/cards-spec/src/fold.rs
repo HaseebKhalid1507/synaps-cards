@@ -51,6 +51,12 @@ pub enum Event {
     /// A genuine outer user message's text, in the history ([`events`]
     /// says which messages are).
     User { text: String },
+    /// The message after an assistant message has given every result it
+    /// holds (blocks.md §1.7): its calls get no more. [`events`] puts one
+    /// after that message's results, before anything else it holds. The
+    /// card fold reads nothing in it; the board commits the assistant
+    /// message's block calls here.
+    ResultsEnd,
 }
 
 /// A card's state (§2.3). A card no longer in the history has none: it is
@@ -196,6 +202,7 @@ impl Fold {
             Event::Call { tool_id, name, input } => self.call(tool_id, name, input, at),
             Event::Result { tool_id, text } => self.result(tool_id, text),
             Event::User { text } => self.user(text, at),
+            Event::ResultsEnd => {}
         }
     }
 
@@ -332,6 +339,13 @@ impl Fold {
 /// tool's call took the id over is left out. The card fold reads a block
 /// call as any other tool's call; the board ([`crate::board`]) reads both.
 ///
+/// The message after an assistant message ends its results with
+/// [`Event::ResultsEnd`]: a user message after its results, before its
+/// text; another assistant message (it has none) before its calls. So the
+/// board knows where an assistant message's results end even when the
+/// message gives no other event: another tool's results only, or a result
+/// with no text.
+///
 /// That removal is the host's own ([`user_content`]). A message's other
 /// shapes are never the user's text: a `tool_result` container, a block
 /// still inside an array, and a malformed `_synaps_hooked`, which leaves the
@@ -342,10 +356,17 @@ pub fn events(messages: &[Value]) -> Vec<Event> {
     let mut out = Vec::new();
     // Each tool id's latest call is a card call or a block call.
     let mut calls: HashMap<&str, bool> = HashMap::new();
+    // The last message was an assistant's: this one ends its results.
+    let mut after_assistant = false;
     for m in messages {
         let blocks = m["content"].as_array().map(Vec::as_slice).unwrap_or_default();
-        match m["role"].as_str() {
+        let role = m["role"].as_str();
+        let ends = std::mem::replace(&mut after_assistant, role == Some("assistant"));
+        match role {
             Some("assistant") => {
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
                 for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
                     let Some(id) = b["id"].as_str() else { continue };
                     let name = b["name"].as_str().unwrap_or_default();
@@ -363,11 +384,18 @@ pub fn events(messages: &[Value]) -> Vec<Event> {
                         out.push(Event::Result { tool_id: id.into(), text });
                     }
                 }
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
                 if let Value::String(text) = &*user_content(m) {
                     out.push(Event::User { text: text.clone() });
                 }
             }
-            _ => {}
+            _ => {
+                if ends {
+                    out.push(Event::ResultsEnd);
+                }
+            }
         }
     }
     out

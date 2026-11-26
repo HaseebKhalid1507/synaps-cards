@@ -12,7 +12,13 @@
 //!   The board holds an assistant message's block calls open until it has
 //!   read the next message's results, then commits them in call order,
 //!   before anything later. A call with no binding result by then is
-//!   unbound for good: a plain row, none of its ops applied.
+//!   unbound for good: a plain row, none of its ops applied. "By then" is
+//!   [`Event::ResultsEnd`], which [`crate::fold::events`] puts where the
+//!   next message's results end, whatever else that message holds. A
+//!   stream without it still commits at a genuine user message, or at a
+//!   call after a result (that is the next assistant message); but where
+//!   the next message gave no event (another tool's results only, a result
+//!   with no text), only `ResultsEnd` closes the batch.
 //! - **The live overlay** ([`Board::view`]): the committed board, cloned,
 //!   with the open calls read on top in call order. A call with no result
 //!   yet is *pending*: its ops apply provisionally, marked, and so does
@@ -32,9 +38,32 @@
 //! index, and an op's index in its call. The board never copies the history:
 //! a revision record or a log line holds a reference, and [`op_at`] reads
 //! the op back. So the live overlay and the history's fold agree only if
-//! they read the same events: the desk feeds the live turn as the history
-//! will hold it (an assistant message's calls, then the next message's
-//! results, then its text), as [`crate::fold::events`] gives them.
+//! they read the same events.
+//!
+//! **What the desk's live adapter must guarantee (D5).** The board is exact
+//! for the events it reads; the adapter makes the live events the history's:
+//! 1. one canonical sequence for the stream, a settled replay and a
+//!    reattach: an assistant message's calls in model order (every tool's,
+//!    as each takes its tool id), then the next message's final results,
+//!    then [`Event::ResultsEnd`], then genuine user text, exactly as
+//!    [`crate::fold::events`] extracts them (the same result filter, the
+//!    host's saved-block unwrapping, the same user-text admission). An event
+//!    the history won't hold moves every later reference;
+//! 2. only a call's whole input and a result's final text: no partial JSON,
+//!    no output chunks, no second event for a call whose input changed
+//!    (rebuild from the stable prefix instead);
+//! 3. `ResultsEnd` when the round's results are final (cancelled ones
+//!    included), before a steer lands at its `SteeringDelivered`: nothing
+//!    the user sends falls inside a batch;
+//! 4. a take from [`Board::bound`], never from [`Board::view`]; pending
+//!    blocks drawn without revision numbers; the overlay recomputed when a
+//!    live event changes it, not every frame;
+//! 5. a rollback, a settled history that replaces the live one, or a
+//!    compaction: fold again from where they diverge (a reference never
+//!    survives another history under the same positions), the generation
+//!    from the real first message;
+//! 6. re-folds ([`Refold`]) in small steps, the 30 ms clock checked between
+//!    them (a step can't be preempted), one scratch at a time.
 //!
 //! **Decisions (pending Haseeb).** Where the design leaves a contract or
 //! something the user sees open, this module takes a default, marked
@@ -56,8 +85,9 @@
 //! - D8: §1.8's bytes per entry are payload figures ([`State::owned_bytes`]).
 //!
 //! **Readings** (mechanical, `Reading:` where they're made):
-//! - the open batch closes at a user message, or at a call after a result
-//!   (the next assistant message); the events carry no message boundary;
+//! - an assistant message after an assistant message (no results between)
+//!   is the next message: its `ResultsEnd` comes before its calls, so the
+//!   first one's calls are unbound;
 //! - a card closed in the same batch is resolved at the commit (the card
 //!   fold has read the batch's results); one asked in it is still open;
 //! - a call that doesn't bind logs one line, `unbound`, for all its ops;
@@ -260,6 +290,10 @@ impl Board {
             }
             Event::Result { .. } => {
                 self.results = true;
+                self.cards.apply(event);
+            }
+            Event::ResultsEnd => {
+                self.commit(events, at);
                 self.cards.apply(event);
             }
             Event::User { text } => {
