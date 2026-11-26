@@ -1200,7 +1200,7 @@ fn a_refold_runs_in_slices_and_stops_far_back() {
         slices += 1;
     }
     assert_eq!(slices, 5);
-    assert_eq!(rf.board().view(&h.events[..until]), Board::fold(generation(), &h.events[..until]).view(&h.events[..until]));
+    assert_eq!(rf.state(), Some(&Board::fold(generation(), &h.events[..until]).bound(&h.events[..until])));
     assert_eq!(rf.board().position(), until);
     let many = vec![Event::User { text: String::new() }; REFOLD_MAX + 1];
     assert!(Refold::to(generation(), &many, Target::Revision(Pos::event(REFOLD_MAX - 1))).is_ok());

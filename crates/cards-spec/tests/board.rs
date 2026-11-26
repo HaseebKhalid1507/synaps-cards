@@ -994,9 +994,13 @@ fn the_board_the_overlay_and_the_scratch_stay_under_their_caps_together() {
     let overlay = b.view(&events);
     let rec = overlay.records().next().unwrap().clone();
     let mut rf = Refold::to(generation(), &events, Target::Revision(rec.at)).unwrap();
-    while !rf.step(1000) {}
+    let mut most = rf.owned_bytes();
+    while !rf.step(1000) {
+        most = most.max(rf.owned_bytes());
+    }
     let scratch = rf.state().unwrap();
-    let all = [b.owned_bytes(), overlay.owned_bytes(), scratch.owned_bytes()];
+    // The whole scratch, not only the board it materialized.
+    let all = [b.owned_bytes(), overlay.owned_bytes(), most.max(rf.owned_bytes())];
     eprintln!("board {}, overlay {}, scratch {} bytes", all[0], all[1], all[2]);
     assert_eq!(b.owned_bytes(), committed, "pending calls add nothing to the board");
     assert!(all.iter().all(|&n| n <= WORKING_SET_MAX_BYTES), "{all:?}");

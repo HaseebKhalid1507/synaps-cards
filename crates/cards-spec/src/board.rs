@@ -553,11 +553,18 @@ impl<'a> Refold<'a> {
             return false;
         }
         self.done = Some(self.finish());
+        // One working set (§1.8): the board's was moved into the result,
+        // and the card fold is let go.
+        self.board.cards = Fold::default();
         true
     }
 
+    /// The board at the target, materialized in the board's own working
+    /// set: moved out of it, never cloned.
     fn finish(&mut self) -> Option<State> {
         let events = self.events;
+        let generation = self.board.state.generation;
+        let take = |b: &mut Board| std::mem::replace(&mut b.state, State::new(generation));
         match self.target {
             Target::Revision(at @ Pos { event, op: Some(_) }) => {
                 let Some(Event::Call { name, .. }) = events.get(event) else { return None };
@@ -585,15 +592,26 @@ impl<'a> Refold<'a> {
                 }
                 let (end, mode) = end.map_or((events.len(), Replay::Bound), |e| (e, Replay::Commit));
                 // The card fold as the commit has it: the batch read.
-                let mut cards = self.board.cards.clone();
                 for e in &events[event..end] {
-                    cards.apply(e);
+                    self.board.cards.apply(e);
                 }
-                let mut s = self.board.state.clone();
-                self.board.replay(&cards, &mut s, events, end, mode, Some(at)).then_some(s)
+                let mut s = take(&mut self.board);
+                self.board.replay(&self.board.cards, &mut s, events, end, mode, Some(at)).then_some(s)
             }
-            Target::Revision(Pos { op: None, .. }) => Some(self.board.bound(&events[..self.until])),
-            Target::Outcome(_) => Some(self.board.view(events)),
+            Target::Revision(Pos { op: None, .. }) => {
+                let mut s = take(&mut self.board);
+                if self.board.calls {
+                    self.board.replay(&self.board.cards, &mut s, &events[..self.until], self.until, Replay::Bound, None);
+                }
+                Some(s)
+            }
+            Target::Outcome(_) => {
+                let mut s = take(&mut self.board);
+                if self.board.calls {
+                    self.board.replay(&self.board.cards, &mut s, events, events.len(), Replay::View, None);
+                }
+                Some(s)
+            }
         }
     }
 
