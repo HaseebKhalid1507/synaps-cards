@@ -1359,3 +1359,31 @@ fn a_diff_from_the_edits_takes_no_hunks() {
     assert_eq!(last(&s, "d"), Outcome::SkippedPath(path("hunks"), PathWhy::FromEdits));
     assert_eq!(check_stored(&d.body), Ok(()));
 }
+
+/// §1.4's semantic equality (P2-4): a series append that leaves the series
+/// as it was is no revision; one that changes it is.
+#[test]
+fn an_append_that_leaves_a_series_as_it_was_is_no_change() {
+    let mut h = H::default();
+    let zeros = vec![0; block::SERIES_MAX];
+    let wave: Vec<u32> = (0..block::SERIES_MAX).map(|i| u32::try_from(i % 2).unwrap()).collect();
+    h.ops(json!([
+        {"op":"put","id":"flat","kind":"metric","body":{"label":"Errors","value":"0","series":zeros}},
+        {"op":"put","id":"wave","kind":"metric","body":{"label":"Load","value":"1","series":wave}},
+    ]));
+    let records = h.state().records().count();
+    for _ in 0..3 {
+        h.ops(json!([
+            {"op":"patch","id":"flat","append":{"series":[0]}},
+            {"op":"patch","id":"wave","append":{"series":[0, 1]}},
+        ]));
+    }
+    let s = h.state();
+    for id in ["flat", "wave"] {
+        assert_eq!((s.block(&r(id)).unwrap().rev, last(&s, id)), (1, Outcome::NoChange), "{id}");
+    }
+    assert_eq!(s.records().count(), records, "no record for no change");
+    h.ops(json!([{"op":"patch","id":"flat","append":{"series":[5]}}, {"op":"patch","id":"flat","append":{"series":[5]}}]));
+    let s = h.state();
+    assert_eq!((s.block(&r("flat")).unwrap().rev, last(&s, "flat")), (3, Outcome::Applied), "a changed series is a revision, each time");
+}
