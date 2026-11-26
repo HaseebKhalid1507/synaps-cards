@@ -1976,8 +1976,8 @@ fn a_refold_pauses_inside_a_long_batchs_commit() {
             }
         }
         assert!(paused > n, "{target:?}: {paused} steps at the commit");
-        // No quadratic replay: a read of the batch for each pass of
-        // REPLAY_IDS calls, and one to apply them.
+        // Bounded passes, not linear: a read of the rest of the batch for
+        // each pass of REPLAY_IDS calls, and one to apply them.
         let len = h.events.len();
         assert!(rf.visited() <= len + (n.div_ceil(REPLAY_IDS) + 1) * len, "{target:?}: {} visits", rf.visited());
         assert_eq!(rf.state().unwrap().blocks().collect::<Vec<_>>(), want.blocks().collect::<Vec<_>>(), "{target:?}");

@@ -35,7 +35,8 @@
 //!   in passes of up to [`REPLAY_IDS`] block calls, each reading the rest of
 //!   the batch once for its calls' results, through an index that borrows
 //!   their tool ids from the history (≤ [`REPLAY_MAX_OWNED`] bytes). A batch
-//!   of up to [`REPLAY_IDS`] block calls costs two reads of it.
+//!   one pass takes costs two visits an event, and each further pass one
+//!   more read of the rest of it (its exact work: `board::replay`).
 //! - **Re-folding** ([`Refold`]): the board at a revision record's
 //!   reference, op by op ([`Target::Revision`]: its batch's binding read
 //!   from its results, the card fold as the commit had it), or the whole

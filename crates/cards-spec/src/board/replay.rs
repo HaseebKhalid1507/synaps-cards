@@ -5,13 +5,23 @@
 //! The batch is read in passes. A pass takes the block calls from where
 //! the last one stopped until its index holds [`REPLAY_IDS`] tool ids; it
 //! reads the batch on to its end once, for each of those ids its first
-//! result and whether a later call took it over; then it applies its calls.
-//! So the index borrows its ids from the history, copies none, and never
-//! holds more than [`REPLAY_IDS`] of them ([`REPLAY_MAX_OWNED`] bytes); a
-//! batch of up to [`REPLAY_IDS`] block calls costs two visits an event, and
-//! each [`REPLAY_IDS`] more one more read of the rest of the batch. The
-//! board's commit, [`Board::view`] and [`Board::bound`] run a replay to its
-//! end; a [`Refold`] runs its own under the step's budget.
+//! result and whether a later call took it over; then it applies its calls,
+//! or, if it read no block call it couldn't take, the rest of the batch
+//! (the last pass). So the index borrows its ids from the history, copies
+//! none, and never holds more than [`REPLAY_IDS`] of them
+//! ([`REPLAY_MAX_OWNED`] bytes).
+//!
+//! **Its work, exactly:** every pass reads from its first event to the
+//! batch's end, and the passes apply the batch once between them. A batch
+//! one pass takes (no block call after the one that fills it) costs two
+//! visits an event, results and other tools' events included; each further
+//! pass one more read of the rest of the batch. So `p` passes over `E`
+//! events cost at most `(1 + p) × E`; a pass before the last takes at
+//! least [`REPLAY_IDS`] block calls (more if it sees an id again), so for
+//! `C ≥ 1` block calls `p ≤ ⌈C / 256⌉`. Bounded, and every visit budgeted,
+//! but not linear when block calls dominate a long batch. The board's commit, [`Board::view`] and [`Board::bound`]
+//! run a replay to its end; a [`Refold`] runs its own under the step's
+//! budget.
 
 use std::collections::HashMap;
 
@@ -67,6 +77,8 @@ pub(super) struct Replay<'e> {
     scan: usize,
     /// The pass still takes the block calls it reads.
     taking: bool,
+    /// The pass read a block call it couldn't take: another pass follows.
+    more: bool,
     /// A call without its result was drawn (`View`): every call from it on
     /// is pending.
     pending: bool,
@@ -75,7 +87,7 @@ pub(super) struct Replay<'e> {
 
 impl<'e> Replay<'e> {
     pub(super) fn new(open: usize, end: usize, mode: Mode, stop: Option<Pos>) -> Self {
-        Replay { end, mode, stop, at: open, to: open, scan: open, taking: true, pending: false, ids: HashMap::new() }
+        Replay { end, mode, stop, at: open, to: open, scan: open, taking: true, more: false, pending: false, ids: HashMap::new() }
     }
 
     /// Replays onto `state`, the card fold `cards` as the commit has it,
@@ -94,6 +106,11 @@ impl<'e> Replay<'e> {
                     self.to = j + 1;
                 }
             }
+            if !self.more {
+                // The last pass: no block call after its calls, so it
+                // applies the rest of the batch, never read again.
+                self.to = self.end;
+            }
             while self.at < self.to {
                 *budget = budget.checked_sub(1)?;
                 let i = self.at;
@@ -106,6 +123,7 @@ impl<'e> Replay<'e> {
             self.ids.clear();
             self.scan = self.at;
             self.taking = true;
+            self.more = false;
         }
         Some(false)
     }
@@ -118,10 +136,12 @@ impl<'e> Replay<'e> {
                 self.ids.insert(tool_id.as_str(), Seen { call: j, answer: NO_RESULT });
                 self.taking = self.ids.len() < REPLAY_IDS;
             }
-            Event::Call { tool_id, .. } => {
+            Event::Call { tool_id, name, .. } => {
                 if let Some(s) = self.ids.get_mut(tool_id.as_str()) {
                     s.answer = TAKEN;
                 }
+                // A block call the full pass can't take: the next one will.
+                self.more |= block::NAMES.contains(&name.as_str());
             }
             Event::Result { tool_id, .. } => {
                 if let Some(s) = self.ids.get_mut(tool_id.as_str())
