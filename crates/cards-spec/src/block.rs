@@ -303,7 +303,7 @@ impl Kind {
 }
 
 /// Where a block draws (§1.2): placement, not identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {
     Transcript,
     Rail,
@@ -320,7 +320,7 @@ impl Target {
 
 /// A rail block's slot (§1.2, §4): `upper` between Prompt cache and Files,
 /// `end` after Files.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Slot {
     Upper,
     End,

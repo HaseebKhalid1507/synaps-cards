@@ -36,6 +36,7 @@
 
 pub mod answer;
 pub mod block;
+pub mod board;
 mod casefold;
 pub mod digest;
 pub mod doc;

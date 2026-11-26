@@ -67,7 +67,7 @@ impl Path {
         segs.next().is_none().then(|| Path(s.to_string()))
     }
 
-    fn of(list: &str, item: &str, field: &str) -> Self {
+    pub(crate) fn of(list: &str, item: &str, field: &str) -> Self {
         Path(format!("{list}.{item}.{field}"))
     }
 
@@ -86,7 +86,7 @@ impl Path {
     }
 
     /// `list.item`, for a path inside an item.
-    fn item_path(&self) -> Option<String> {
+    pub(crate) fn item_path(&self) -> Option<String> {
         Some(format!("{}.{}", self.head(), self.item()?))
     }
 

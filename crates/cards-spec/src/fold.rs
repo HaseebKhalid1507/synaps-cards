@@ -42,8 +42,9 @@ pub const NAMES: [&str; 2] = ["cards_ui", "cards:ui"];
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// An assistant `tool_use` block, of any tool: the fold must see every
-    /// call, because a call takes its tool id over. Only a card call's
-    /// `input` is read; [`events`] gives other tools' as `Null`.
+    /// call, because a call takes its tool id over. Only a card call's and
+    /// a block call's `input` is read ([`crate::board`]); [`events`] gives
+    /// other tools' as `Null`.
     Call { tool_id: String, name: String, input: Value },
     /// A `tool_result` block's text.
     Result { tool_id: String, text: String },
@@ -301,10 +302,12 @@ impl Fold {
 
 /// The fold's events in a session's history as the daemon sends it
 /// (`api_messages`, Full; §2.1): every call in an assistant message (another
-/// tool's with a `Null` input), the results of card calls, and each user
-/// message whose content, once the host's extension blocks are removed, is
-/// one string. A result belongs to its tool id's latest call, as in the
-/// fold: one after another tool's call took the id over is left out.
+/// tool's with a `Null` input), the results of card calls and of block calls
+/// (`cards_block`, blocks.md §1.7), and each user message whose content,
+/// once the host's extension blocks are removed, is one string. A result
+/// belongs to its tool id's latest call, as in the fold: one after another
+/// tool's call took the id over is left out. The card fold reads a block
+/// call as any other tool's call; the board ([`crate::board`]) reads both.
 ///
 /// That removal is the host's own ([`user_content`]). A message's other
 /// shapes are never the user's text: a `tool_result` container, a block
@@ -314,7 +317,7 @@ impl Fold {
 /// fold reads it as ordinary text.
 pub fn events(messages: &[Value]) -> Vec<Event> {
     let mut out = Vec::new();
-    // Each tool id's latest call is a card call.
+    // Each tool id's latest call is a card call or a block call.
     let mut calls: HashMap<&str, bool> = HashMap::new();
     for m in messages {
         let blocks = m["content"].as_array().map(Vec::as_slice).unwrap_or_default();
@@ -323,9 +326,9 @@ pub fn events(messages: &[Value]) -> Vec<Event> {
                 for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
                     let Some(id) = b["id"].as_str() else { continue };
                     let name = b["name"].as_str().unwrap_or_default();
-                    let card = NAMES.contains(&name);
-                    calls.insert(id, card);
-                    let input = if card { b["input"].clone() } else { Value::Null };
+                    let kept = NAMES.contains(&name) || crate::block::NAMES.contains(&name);
+                    calls.insert(id, kept);
+                    let input = if kept { b["input"].clone() } else { Value::Null };
                     out.push(Event::Call { tool_id: id.into(), name: name.into(), input });
                 }
             }
