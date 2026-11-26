@@ -22,13 +22,14 @@
 //!   (`1`, `true`, `yes`, `on`, any case, spaces trimmed); anything else is
 //!   off, and a value that is neither on nor off is logged ([`gate`]).
 
-use std::collections::{HashMap, VecDeque};
-use std::hash::{BuildHasher, RandomState};
 use std::time::{Duration, Instant};
 
 use cards_spec::block::{RESULT_MAX_BYTES, parse_call};
 use serde_json::Value;
 
+#[cfg(test)]
+use crate::chats::KEPT as TEN_MINUTES;
+use crate::chats::{CHATS_MAX, Chats};
 use crate::tool::{Refusal, chat_of};
 
 /// The tool's name as the extension declares it; the host namespaces it
@@ -48,10 +49,7 @@ pub const WORKER: &str = "cards_block: only the main chat has blocks";
 pub const CALLS_PER_MINUTE: usize = 30;
 pub const OPS_PER_MINUTE: usize = 120;
 pub const CALLS_PER_TEN_MINUTES: usize = 200;
-/// The most chats the counter keeps at once ([`Rate`]).
-pub const CHATS_MAX: usize = 256;
 const MINUTE: Duration = Duration::from_secs(60);
-const TEN_MINUTES: Duration = Duration::from_secs(600);
 
 /// Whether `initialize`'s `params.config` turns blocks on. The host passes
 /// the manifest's default as JSON (`false`), and a value from the
@@ -99,7 +97,9 @@ impl Blocks {
 /// ten. In memory, so a restart starts it again, which only errs lenient
 /// (design §5.5).
 ///
-/// **Bounded across chats, not only in each.** A chat keeps at most
+/// **Bounded across chats, not only in each**, in its own [`Chats`] table
+/// (`cards_ui`'s rate keeps another, so the two tools don't share places).
+/// A chat keeps at most
 /// [`CALLS_PER_TEN_MINUTES`] calls, and at most [`CHATS_MAX`] chats are kept,
 /// each under a 64-bit keyed hash of its name, so a long host id costs what
 /// a short one does (two names that collide share one limit, which errs
@@ -113,28 +113,14 @@ impl Blocks {
 /// once the table, or a chat's calls, are a quarter full.
 #[derive(Default)]
 pub struct Rate {
-    calls: HashMap<u64, VecDeque<(Instant, usize)>>,
-    names: RandomState,
+    calls: Chats<usize>,
 }
 
 impl Rate {
     /// Count a call of `ops` ops for `chat` at `now`, or say why not.
     pub fn admit(&mut self, chat: &str, ops: usize, now: Instant) -> Result<(), String> {
-        self.calls.retain(|_, calls| {
-            while calls.front().is_some_and(|&(t, _)| now.saturating_duration_since(t) >= TEN_MINUTES) {
-                calls.pop_front();
-            }
-            if let Some(n) = give_back(calls.capacity(), calls.len()) {
-                calls.shrink_to(n);
-            }
-            !calls.is_empty()
-        });
-        if let Some(n) = give_back(self.calls.capacity(), self.calls.len()) {
-            self.calls.shrink_to(n);
-        }
-        let chat = self.names.hash_one(chat);
-        let none = VecDeque::new();
-        let calls = self.calls.get(&chat).unwrap_or(&none);
+        let place = self.calls.at(chat, now);
+        let calls = place.entries();
         if calls.len() >= CALLS_PER_TEN_MINUTES {
             let n = CALLS_PER_TEN_MINUTES + 1;
             return Err(format!("{PREFIX}{n} calls in the last 10 minutes; batch your ops or patch less"));
@@ -150,30 +136,17 @@ impl Rate {
         if used + ops > OPS_PER_MINUTE {
             return Err(format!("{PREFIX}{} ops in the last minute, over {OPS_PER_MINUTE}; patch less", used + ops));
         }
-        if !self.calls.contains_key(&chat) && self.calls.len() >= CHATS_MAX {
-            // Every place is held by a chat with a call in its window: the
-            // one idle longest leaves when its last call is ten minutes old.
-            let last = self.calls.values().filter_map(|c| c.back()).map(|&(t, _)| t).min().unwrap_or(now);
-            let wait = TEN_MINUTES.saturating_sub(now.saturating_duration_since(last));
+        place.push(ops).map_err(|wait| {
             let s = (wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1);
-            return Err(format!("{PREFIX}{CHATS_MAX} other chats used blocks in the last 10 minutes; try again in {s} s"));
-        }
-        self.calls.entry(chat).or_default().push_back((now, ops));
-        Ok(())
+            format!("{PREFIX}{CHATS_MAX} other chats used blocks in the last 10 minutes; try again in {s} s")
+        })
     }
-}
-
-/// The capacity to shrink a collection to once it's a quarter full: twice
-/// its length, so the next calls don't grow it straight back. Small ones
-/// are left alone.
-fn give_back(capacity: usize, len: usize) -> Option<usize> {
-    (capacity > 16 && capacity >= 4 * len).then_some(2 * len)
 }
 
 #[cfg(test)]
 impl Rate {
-    fn window(&self, chat: &str) -> Option<&VecDeque<(Instant, usize)>> {
-        self.calls.get(&self.names.hash_one(chat))
+    fn window(&self, chat: &str) -> Option<&std::collections::VecDeque<(Instant, usize)>> {
+        self.calls.window(chat)
     }
 
     fn len(&self) -> usize {
