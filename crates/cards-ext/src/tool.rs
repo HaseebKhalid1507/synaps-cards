@@ -260,8 +260,9 @@ impl Ids {
 /// `0..2^(2·half)` whatever its round function; then walked until it lands
 /// in `0..n` (cycle walking), which keeps it one of `0..n`: `x`'s cycle comes
 /// back to `x`, so the walk ends, and the value it ends on is reached from
-/// `x` alone. Ids use `half` 16: 2^32 values for the 36^6 ids, so a walk is
-/// two steps on average.
+/// `x` alone. Ids use `half` 16: 2^32 values for the 36^6 ids, so a walk
+/// is about two passes of the network on average (at most 2^32/36^6 ≈ 1.97
+/// over all ids), though no small bound holds for any one walk.
 fn permute(keys: &[u64], half: u32, n: u64, x: u64) -> u64 {
     debug_assert!(x < n && n <= 1 << (2 * half));
     let mask = (1u64 << half) - 1;

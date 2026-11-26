@@ -284,15 +284,16 @@ fn ids_remember_nothing() {
     assert!(std::mem::size_of::<Ids>() <= 48, "{}", std::mem::size_of::<Ids>());
 }
 
-/// What makes the ids unique: [`permute`] is a permutation of `0..n` for
-/// every key, checked whole on small domains (2, 4, 6 and 8 bits, `n` from
-/// 1 to the whole domain), the code the 36^6 ids go through.
+/// What makes the ids unique: [`permute`] is a permutation of `0..n`,
+/// the code the 36^6 ids go through. Checked whole on small domains: 2, 4,
+/// 6 and 8 bits, every `n` from 1 to the whole domain, every input, under
+/// three keys.
 #[test]
 fn the_permutation_is_one() {
     let keyss = [[0; 4], [1, 2, 3, 4], [u64::MAX, 0x9e37_79b9_7f4a_7c15, 7, 36u64.pow(6)]];
     for half in 1..=4 {
         let all = 1u64 << (2 * half);
-        for n in [1, 2, 3, all / 2 + 1, all - 1, all] {
+        for n in 1..=all {
             for keys in keyss {
                 let mut got: Vec<u64> = (0..n).map(|x| permute(&keys, half, n, x)).collect();
                 got.sort_unstable();
@@ -357,6 +358,23 @@ fn the_default_ids_are_well_formed_and_do_not_repeat() {
     assert!(minted.iter().all(|id| CardId::parse(id.as_str()).as_ref() == Some(id)));
 }
 
+/// The cap itself, as §5.5 states it, apart from [`CHATS_MAX`]: 256 chats
+/// show a card in the same instant, and the 257th is refused with the line
+/// §1.5 names.
+#[test]
+fn the_cap_is_256_chats() {
+    let t0 = Instant::now();
+    let mut cards = Cards::default();
+    let input = json!({ "question": "Ship it?", "options": ["Yes", "No"] });
+    let in_chat = |i: u32| json!({ "name": "ui", "input": input, "session_id": format!("s{i}"), "cwd": null });
+    for i in 0..256 {
+        cards.call(&in_chat(i), t0).unwrap_or_else(|e| panic!("chat {i}: {e:?}"));
+    }
+    let line = "cards_ui: 256 other chats showed cards in the last 10 minutes; ask in plain text";
+    assert_eq!(cards.call(&in_chat(256), t0).unwrap_err(), Refusal { code: REFUSED, message: line.into() });
+    assert_eq!(CHATS_MAX, 256);
+}
+
 fn busy() -> String {
     format!("cards_ui: {CHATS_MAX} other chats showed cards in the last 10 minutes; ask in plain text")
 }
@@ -417,13 +435,14 @@ fn at_most_chats_max_chats() {
 }
 
 /// Chats that come and go: four tables of chats, a card each, at the pace
-/// that keeps [`CHATS_MAX`] in ten minutes. Each is admitted, the table
-/// never holds more, and a chat that comes back after ten quiet minutes
-/// starts over, the table small again.
+/// that keeps [`CHATS_MAX`] in ten minutes (its step rounded up, so the
+/// oldest has left whatever the cap). Each is admitted, the table never
+/// holds more, and a chat that comes back after ten quiet minutes starts
+/// over, the table small again.
 #[test]
 fn chats_come_and_go() {
     let t0 = Instant::now();
-    let step = TEN_MINUTES / CHATS_MAX as u32;
+    let step = Duration::from_nanos(TEN_MINUTES.as_nanos().div_ceil(CHATS_MAX as u128) as u64);
     let mut rate = Rate::default();
     let mut most = 0;
     for i in 0..4 * CHATS_MAX as u32 {
