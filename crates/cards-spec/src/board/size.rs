@@ -1,16 +1,22 @@
 //! Owned bytes (§1.8): "B2 and D6 count owned bytes, container overhead
-//! included, and the caps apply to those counts". An estimate, not an
+//! included, and the caps apply to those counts". A model, not an
 //! allocator's measurement: a value's inline size plus what it owns on the
-//! heap, a `Vec` and a `VecDeque` by capacity, a `BTreeMap` entry at twice
-//! its key and value plus a node's share ([`BTREE_ENTRY`]). The card fold
-//! keeps its own bounds and isn't counted (§1.8).
+//! heap, a `String`, a `Vec` and a `VecDeque` by capacity, a `BTreeMap`
+//! entry at twice its key and value plus a node's share ([`BTREE_ENTRY`]).
+//! A block gives back what its strings and vectors hold past their length
+//! after every change ([`Block::compact`]), and a deque keeps its capacity at
+//! its cap ([`push_capped`]), so a count is its content's and its ceiling is
+//! fixed. The card fold isn't counted: [`Board::card_fold_bytes`] reports it
+//! apart.
 //!
-//! Decision (pending Haseeb), D8: §1.8's bytes per entry (6.25 KiB a live
-//! block, 96 B a tombstone, 40 B a visibility record, 16 B a last writer)
-//! are its payload figures. In owned bytes a maximal plan with its item and
-//! writer tables is ~10 KiB. The caps hold as counts per owner, as owned
-//! bytes for a revision record and a log line (≤ [`RECORD_MAX_BYTES`]), and
-//! as owned bytes for the working set (≤ [`WORKING_SET_MAX_BYTES`]).
+//! Decision D8 (§1.8): the caps are these owned bytes, and §1.8's table
+//! gives each owner's ceiling, for 64-bit targets: [`BLOCK_MAX_OWNED`] a
+//! live block (its item ids and last writers included, so nothing is
+//! charged twice), [`TOMBSTONE_MAX_OWNED`], [`RECORD_MAX_BYTES`] a record
+//! and a log line, [`VISIBILITY_MAX_OWNED`], [`RUN_MAX_OWNED`] and
+//! [`OUTCOME_MAX_OWNED`]. At their counts they sum under
+//! [`WORKING_SET_MAX_BYTES`]; the open batch is a range of the history (no
+//! bytes per call), and a run is keyed by its call's position (no tool id).
 
 use std::mem::size_of;
 
@@ -20,6 +26,31 @@ use crate::block::{Hunk, Num, Step};
 /// What a `BTreeMap` entry costs besides its key and value: a node holds
 /// 6 to 11 entries, so up to about as much again, plus its pointers.
 const BTREE_ENTRY: usize = 16;
+
+/// A listed block's share of its place's list, at most: the place's entry
+/// (as if it had the place to itself), its slot in the list, and its id.
+const LIST_ENTRY_MAX_OWNED: usize =
+    2 * (size_of::<Place>() + size_of::<Vec<Ref>>()) + BTREE_ENTRY + size_of::<Ref>() + crate::block::BLOCK_ID_MAX;
+
+/// Each owner's largest entry, in owned bytes ([`State::largest_entries`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Largest {
+    /// A live block, its item ids, last writers and list entry included:
+    /// ≤ [`BLOCK_MAX_OWNED`].
+    pub block: usize,
+    /// ≤ [`TOMBSTONE_MAX_OWNED`].
+    pub tombstone: usize,
+    /// ≤ [`RECORD_MAX_BYTES`].
+    pub record: usize,
+    /// ≤ [`VISIBILITY_MAX_OWNED`].
+    pub visibility: usize,
+    /// ≤ [`RUN_MAX_OWNED`].
+    pub run: usize,
+    /// ≤ [`OUTCOME_MAX_OWNED`].
+    pub outcome: usize,
+    /// A log line: ≤ [`RECORD_MAX_BYTES`].
+    pub log: usize,
+}
 
 /// A value's heap bytes: what it owns besides its inline size.
 pub(crate) trait Owned {
@@ -70,26 +101,25 @@ impl<T: Owned> Owned for VecDeque<T> {
 
 impl<K: Owned, V: Owned> Owned for BTreeMap<K, V> {
     fn heap(&self) -> usize {
-        let entry = 2 * (size_of::<K>() + size_of::<V>()) + BTREE_ENTRY;
-        self.iter().map(|(k, v)| entry + k.heap() + v.heap()).sum()
+        self.iter().map(|(k, v)| entry::<K, V>() + k.heap() + v.heap()).sum()
     }
 }
 
 impl Owned for BlockId {
     fn heap(&self) -> usize {
-        self.as_str().len()
+        self.capacity()
     }
 }
 
 impl Owned for ItemId {
     fn heap(&self) -> usize {
-        self.as_str().len()
+        self.capacity()
     }
 }
 
 impl Owned for Path {
     fn heap(&self) -> usize {
-        self.as_str().len()
+        self.capacity()
     }
 }
 
@@ -97,7 +127,7 @@ impl Owned for Ref {
     fn heap(&self) -> usize {
         match self {
             Ref::Block(b) => b.heap(),
-            Ref::Card(c) => c.as_str().len(),
+            Ref::Card(c) => c.capacity(),
         }
     }
 }
@@ -138,6 +168,69 @@ impl Owned for Writers {
     fn heap(&self) -> usize {
         self.0.capacity() * size_of::<(Path, Writer)>() + self.0.iter().map(|(p, _)| p.heap()).sum::<usize>()
     }
+}
+
+impl Block {
+    /// Gives back what its strings and vectors hold past their length, so
+    /// its owned bytes are its content's (an append or a sanitized string
+    /// can leave more). Run after every change to it.
+    pub(crate) fn compact(&mut self) {
+        fn opt(s: &mut Option<String>) {
+            if let Some(s) = s {
+                s.shrink_to_fit();
+            }
+        }
+        opt(&mut self.title);
+        match &mut self.body {
+            Body::Plan(p) => {
+                p.steps.shrink_to_fit();
+                for s in &mut p.steps {
+                    s.label.shrink_to_fit();
+                    opt(&mut s.note);
+                }
+            }
+            Body::Status(s) => {
+                s.text.shrink_to_fit();
+                opt(&mut s.detail);
+            }
+            Body::Diff(d) => {
+                d.file.shrink_to_fit();
+                d.hunks.shrink_to_fit();
+                for h in &mut d.hunks {
+                    opt(&mut h.at);
+                    h.lines.shrink_to_fit();
+                    for l in &mut h.lines {
+                        l.shrink_to_fit();
+                    }
+                }
+            }
+            Body::Note(n) => n.text.shrink_to_fit(),
+            Body::Metric(m) => {
+                m.label.shrink_to_fit();
+                m.value.shrink_to_fit();
+                opt(&mut m.was);
+                opt(&mut m.unit);
+                m.series.shrink_to_fit();
+            }
+            Body::File(f) => {
+                f.path.shrink_to_fit();
+                opt(&mut f.note);
+            }
+            Body::Group(g) => g.members.shrink_to_fit(),
+        }
+        self.items.0.shrink_to_fit();
+        self.writers.0.shrink_to_fit();
+    }
+
+    /// Its last writers (≤ [`WRITERS_MAX`]).
+    pub fn writer_count(&self) -> usize {
+        self.writers.0.len()
+    }
+}
+
+/// A `BTreeMap` entry's owned bytes besides what its key and value own.
+fn entry<K, V>() -> usize {
+    2 * (size_of::<K>() + size_of::<V>()) + BTREE_ENTRY
 }
 
 impl Owned for Block {
@@ -236,9 +329,20 @@ impl State {
         ]
     }
 
-    /// One revision record's and one log line's owned bytes, the largest
-    /// kept: each ≤ [`RECORD_MAX_BYTES`].
-    pub fn largest_entries(&self) -> (usize, usize) {
-        (self.records.iter().map(Owned::owned).max().unwrap_or(0), self.log.iter().map(Owned::owned).max().unwrap_or(0))
+    /// Each owner's largest entry, in owned bytes, against its ceiling
+    /// (§1.8, D8).
+    pub fn largest_entries(&self) -> Largest {
+        fn max<T>(it: impl Iterator<Item = T>, f: impl Fn(T) -> usize) -> usize {
+            it.map(f).max().unwrap_or(0)
+        }
+        Largest {
+            block: max(self.blocks.iter(), |(k, b)| entry::<Ref, Block>() + k.heap() + b.heap() + LIST_ENTRY_MAX_OWNED),
+            tombstone: max(self.tombstones.iter(), Owned::owned),
+            record: max(self.records.iter(), Owned::owned),
+            visibility: max(self.visibility.records.keys(), |id| entry::<BlockId, Vis>() + id.heap()),
+            run: max(self.runs.iter(), Owned::owned),
+            outcome: max(self.outcomes.iter(), Owned::owned),
+            log: max(self.log.iter(), Owned::owned),
+        }
     }
 }

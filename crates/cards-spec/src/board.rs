@@ -128,6 +128,7 @@ mod state;
 
 pub use apply::check_stored;
 pub use edit::{Key, keys};
+pub use size::Largest;
 pub use state::*;
 
 /// Tombstones kept: the oldest ending is dropped (§1.8).
@@ -150,6 +151,24 @@ pub const LOG_MAX: usize = 256;
 pub const WORKING_SET_MAX_BYTES: usize = 1 << 20;
 /// A revision record's and a log entry's owned bytes (§1.8).
 pub const RECORD_MAX_BYTES: usize = 256;
+/// A live block's owned bytes, at most (§1.8, D8; 64-bit targets): its
+/// entry in the board, its id, title and body, its item ids and last
+/// writers, and its list's entry. A maximal plan is the largest: 20 steps
+/// in 4 KiB, 64 item ids, [`WRITERS_MAX`] writers.
+pub const BLOCK_MAX_OWNED: usize = 18 * 1024;
+/// The last writers a block keeps (§1.8): a plan's 20 steps, each with its
+/// label, state, stop and the user's added item, and the steps' order.
+pub const WRITERS_MAX: usize = 4 * block::PLAN_STEPS_MAX + 1;
+/// A tombstone's owned bytes, at most (§1.8).
+pub const TOMBSTONE_MAX_OWNED: usize = 96;
+/// A visibility record's owned bytes, at most (§1.8): its map entry and id.
+pub const VISIBILITY_MAX_OWNED: usize = 104;
+/// A run title's owned bytes, at most (§1.8): a summary of 80 characters,
+/// up to 320 bytes, and its position (no tool id).
+pub const RUN_MAX_OWNED: usize = 352;
+/// An edit outcome's owned bytes, at most (§1.8): one code per key of an
+/// edit within 8 KiB.
+pub const OUTCOME_MAX_OWNED: usize = 2 * 1024;
 /// A re-fold yields after this many events (§1.8).
 pub const REFOLD_SLICE: usize = 50_000;
 /// Past this many events, a re-fold is refused: `too far back to show`.

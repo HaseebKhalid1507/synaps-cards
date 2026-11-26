@@ -133,6 +133,11 @@ impl BlockId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Its heap bytes: the board's owned-byte count (§1.8).
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
 }
 
 fn id_char(c: u8) -> bool {
@@ -211,6 +216,11 @@ impl ItemId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Its heap bytes: the board's owned-byte count (§1.8).
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
     }
 }
 

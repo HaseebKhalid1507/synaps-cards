@@ -119,6 +119,7 @@ impl State {
             self.record(&b, at, Author::User, Did::Edit, &changed);
             Outcome::Applied
         };
+        b.compact();
         self.blocks.insert(id.clone(), b);
         self.keep_outcome(EditOutcome { at, id: id.clone(), result: EditResult::Applied, codes });
         self.logged(at, Author::User, Did::Edit, Some(id), outcome);

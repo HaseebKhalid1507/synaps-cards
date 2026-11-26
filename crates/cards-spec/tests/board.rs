@@ -294,8 +294,19 @@ fn check(s: &State, what: &str) {
     assert!(s.runs().count() <= RUNS_MAX, "{what}");
     assert!(s.outcomes().count() <= OUTCOMES_MAX, "{what}");
     assert!(s.log().count() <= LOG_MAX, "{what}");
-    let (record, line) = s.largest_entries();
-    assert!(record <= RECORD_MAX_BYTES && line <= RECORD_MAX_BYTES, "{what}: {record} {line}");
+    // Each owner's entries under its owned-byte ceiling (§1.8, D8).
+    let l = s.largest_entries();
+    let ceilings = [
+        (l.block, BLOCK_MAX_OWNED),
+        (l.tombstone, TOMBSTONE_MAX_OWNED),
+        (l.record, RECORD_MAX_BYTES),
+        (l.visibility, VISIBILITY_MAX_OWNED),
+        (l.run, RUN_MAX_OWNED),
+        (l.outcome, OUTCOME_MAX_OWNED),
+        (l.log, RECORD_MAX_BYTES),
+    ];
+    assert!(ceilings.iter().all(|(got, max)| got <= max), "{what}: {l:?}");
+    assert!(s.blocks().all(|b| b.writer_count() <= WRITERS_MAX && b.item_ids() <= block::ITEM_IDS_MAX), "{what}");
     let listed: Vec<&Ref> = s.lists().flat_map(|(_, l)| l.iter()).collect();
     for b in s.blocks() {
         // B1's stored-body contract, whoever wrote the body last.

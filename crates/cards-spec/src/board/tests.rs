@@ -1102,8 +1102,8 @@ fn a_record_is_a_reference_and_reads_back_its_whole_op() {
     let s = h.state();
     let rec = s.records().last().unwrap();
     assert_eq!((rec.changed, rec.paths().count()), (5, RECORD_PATHS_MAX));
-    let (record, line) = s.largest_entries();
-    assert!(record <= RECORD_MAX_BYTES && line <= RECORD_MAX_BYTES, "{record} {line}");
+    let l = s.largest_entries();
+    assert!(l.record <= RECORD_MAX_BYTES && l.log <= RECORD_MAX_BYTES, "{l:?}");
     let op = op_at(&h.events, rec.at).unwrap();
     assert_eq!(rec.at, Pos { event: at, op: Some(0) });
     assert_eq!(serde_json::to_value(&op).unwrap(), serde_json::to_value(&block::parse_call(&json!({"ops":big})).unwrap().ops[0]).unwrap());
@@ -1637,4 +1637,111 @@ fn a_stored_plan_may_be_empty_but_a_new_one_may_not() {
     assert_eq!((s.block(&r("plan")).unwrap().rev, last(&s, "plan")), (3, Outcome::Applied));
     assert!(block::parse_call(&json!({"ops":[{"op":"put","id":"p2","kind":"plan","body":{"steps":[]}}]})).is_err());
     assert!(block::parse_call(&json!({"ops":[{"op":"replace","id":"plan","kind":"plan","body":{"steps":[]}}]})).is_err());
+}
+
+/// Decision D8 (§1.8, amended): each owner's owned-byte ceiling, derived
+/// from the inline sizes and the caps (64-bit), and the ceilings at their
+/// counts, with the board's own fields, sum under 1 MiB.
+#[test]
+fn the_owned_byte_ceilings_are_derived_and_sum_under_one_mib() {
+    use crate::block::*;
+    use std::mem::size_of;
+    let entry = |k: usize, v: usize| 2 * (k + v) + 16;
+    // A user's path, the longest a writer or `changed your edit` keeps.
+    let user_path = "steps.".len() + ITEM_ID_MAX + ".label".len();
+    let around = entry(size_of::<Ref>(), size_of::<Block>())
+        + 3 * BLOCK_ID_MAX // the key, the id, the group
+        + 4 * TITLE_MAX // 80 characters, 4 bytes each at most
+        + user_path
+        + (entry(size_of::<Place>(), size_of::<Vec<Ref>>()) + size_of::<Ref>() + BLOCK_ID_MAX);
+    let items = ITEM_IDS_MAX * (size_of::<(ItemId, Option<u32>)>() + ITEM_ID_MAX);
+    let writers = |n: usize| n * (size_of::<(Path, Writer)>() + user_path);
+    // A body's strings are at most its JSON (escapes only lengthen it).
+    let bodies = [
+        PLAN_STEPS_MAX * size_of::<Step>() + PLAN_MAX_BYTES + items + writers(WRITERS_MAX),
+        HUNKS_MAX * size_of::<Hunk>() + DIFF_LINES_MAX * size_of::<String>() + DIFF_MAX_BYTES + items + writers(HUNKS_MAX),
+        NOTE_MAX_BYTES + writers(2),
+        SERIES_MAX * size_of::<Num>() + METRIC_MAX_BYTES,
+        GROUP_MAX * size_of::<BlockId>() + GROUP_MAX_BYTES,
+        STATUS_MAX_BYTES,
+        FILE_MAX_BYTES,
+    ];
+    let block = around + bodies.iter().max().unwrap();
+    assert!(block <= BLOCK_MAX_OWNED, "a block: {block}");
+    // An applied path is a kind's: `steps.<id>.label` at most; a skipped
+    // one the grammar's longest.
+    let grammar_path = FIELD_NAME_MAX + 1 + ITEM_ID_MAX + 1 + FIELD_NAME_MAX;
+    let record = size_of::<Record>() + RECORD_PATHS_MAX * (user_path + 1);
+    let line = size_of::<Logged>() + BLOCK_ID_MAX + grammar_path;
+    let tombstone = size_of::<Tombstone>() + BLOCK_ID_MAX;
+    let visibility = entry(size_of::<BlockId>(), size_of::<Vis>()) + BLOCK_ID_MAX;
+    let run = size_of::<Run>() + 4 * 80;
+    // Every key of an edit costs 16 bytes of its 8 KiB line at least.
+    let outcome = size_of::<EditOutcome>() + BLOCK_ID_MAX + message::EDIT_PATCH_MAX_BYTES / 16 + 1;
+    for (what, got, max) in [
+        ("record", record, RECORD_MAX_BYTES),
+        ("log line", line, RECORD_MAX_BYTES),
+        ("tombstone", tombstone, TOMBSTONE_MAX_OWNED),
+        ("visibility", visibility, VISIBILITY_MAX_OWNED),
+        ("run", run, RUN_MAX_OWNED),
+        ("outcome", outcome, OUTCOME_MAX_OWNED),
+    ] {
+        assert!(got <= max, "{what}: {got} > {max}");
+    }
+    let sum = size_of::<Board>() - size_of::<Fold>()
+        + LIVE_MAX * BLOCK_MAX_OWNED
+        + TOMBSTONES_MAX * TOMBSTONE_MAX_OWNED
+        + RECORDS_MAX * RECORD_MAX_BYTES
+        + VISIBILITY_MAX * VISIBILITY_MAX_OWNED
+        + RUNS_MAX * RUN_MAX_OWNED
+        + OUTCOMES_MAX * OUTCOME_MAX_OWNED
+        + LOG_MAX * RECORD_MAX_BYTES;
+    assert!(sum <= WORKING_SET_MAX_BYTES, "{sum}");
+    println!(
+        "D8 ceilings: block {block} of {BLOCK_MAX_OWNED}, record {record}, line {line}, tombstone {tombstone}, visibility {visibility}, run {run}, outcome {outcome}; sum {sum} of {WORKING_SET_MAX_BYTES}"
+    );
+}
+
+/// D8: a plan built to its maximum (20 steps in its 4 KiB, 64 item ids,
+/// the user's writes on every step) and a diff at its maximum stay under
+/// the block ceiling, measured.
+#[test]
+fn maximal_blocks_measure_under_the_block_ceiling() {
+    let mut h = H::default();
+    let id = |p: &str, i: usize| format!("{p}{i:0>w$}", w = block::ITEM_ID_MAX - p.len());
+    // 44 ids spent, then 20 live steps whose labels fill the 4 KiB.
+    let first: Vec<Value> = (0..20).map(|i| json!({"id": id("a", i), "label": "x"})).collect();
+    h.ops(json!([{"op":"put","id":"p".repeat(block::BLOCK_ID_MAX),"kind":"plan","title":"😀".repeat(80),"body":{"steps":first}}]));
+    let pid = "p".repeat(block::BLOCK_ID_MAX);
+    for round in 0..3 {
+        let gone: Vec<String> = (0..20).map(|i| format!("steps.{}", id(if round == 0 { "a" } else { ["", "b", "c"][round] }, i))).collect();
+        let n = if round == 2 { 4 } else { 20 };
+        let next: Vec<Value> = (0..n).map(|i| json!({"id": id(["b", "c", "d"][round], i), "label": "x"})).collect();
+        h.ops(json!([{"op":"patch","id":pid,"remove":gone[..n.min(20)].to_vec(),"append":{"steps":next}}]));
+    }
+    let s = h.state();
+    let b = s.block(&r(&pid)).unwrap();
+    assert_eq!(b.item_ids(), block::ITEM_IDS_MAX);
+    // The user's label, skip and stop on every step, labels as long as fit.
+    let Body::Plan(p) = &b.body else { panic!() };
+    let ids: Vec<String> = p.steps.iter().map(|s| s.id.as_str().to_string()).collect();
+    let rev = b.rev;
+    let mut set = serde_json::Map::new();
+    for i in &ids {
+        set.insert(format!("steps.{i}.label"), json!("é".repeat(60)));
+        set.insert(format!("steps.{i}.state"), json!("skipped"));
+        set.insert(format!("steps.{i}.stop"), json!(true));
+    }
+    h.edit(&pid, rev, json!({ "set": set, "order": {"steps": ids.iter().rev().collect::<Vec<_>>()} }));
+    let s = h.state();
+    let b = s.block(&r(&pid)).unwrap();
+    let l = s.largest_entries();
+    println!(
+        "D8 measured: a maximal plan {} bytes ({} writers, {} item ids, body {} B)",
+        l.block,
+        b.writer_count(),
+        b.item_ids(),
+        b.body.bytes()
+    );
+    assert!(b.writer_count() >= 3 * 20 && l.block <= BLOCK_MAX_OWNED, "{l:?}");
 }

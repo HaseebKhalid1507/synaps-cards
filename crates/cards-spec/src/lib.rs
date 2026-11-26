@@ -122,6 +122,11 @@ impl CardId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Its heap bytes: the board's owned-byte count (§1.8).
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
 }
 
 impl std::fmt::Display for CardId {

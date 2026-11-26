@@ -106,10 +106,10 @@ impl State {
 
     /// Adds `b`, listed at `index` of `place` (or not, if a member), with
     /// its r1 record.
-    fn add(&mut self, b: Block, at: Pos, did: Did, index: Option<usize>) {
+    fn add(&mut self, mut b: Block, at: Pos, did: Did, index: Option<usize>) {
+        b.compact();
         if let Some(i) = index {
-            let list = self.lists.entry(b.place).or_default();
-            list.insert(i.min(list.len()), b.id.clone());
+            self.list_at(b.place, i, b.id.clone());
         }
         self.record(&b, at, Author::Agent, did, &[]);
         self.blocks.insert(b.id.clone(), b);
@@ -121,6 +121,7 @@ impl State {
         let list = self.lists.get_mut(&place)?;
         let i = list.iter().position(|r| r == id)?;
         list.remove(i);
+        list.shrink_to_fit();
         if list.is_empty() {
             self.lists.remove(&place);
         }
@@ -130,6 +131,7 @@ impl State {
     fn list_at(&mut self, place: Place, index: usize, id: Ref) {
         let list = self.lists.entry(place).or_default();
         list.insert(index.min(list.len()), id);
+        list.shrink_to_fit();
     }
 
     fn end_of(&self, place: Place) -> usize {
@@ -248,6 +250,7 @@ impl State {
             self.agent_wrote(&mut b, p);
         }
         b.pending |= self.pending;
+        b.compact();
         let outcome = if !changed.is_empty() {
             b.rev = next;
             let paths: Vec<String> = changed.iter().map(|(p, _)| p.to_string()).collect();
@@ -374,6 +377,7 @@ impl State {
                 if let Body::Group(body) = &mut g.body {
                     body.members.extend(joined);
                 }
+                g.compact();
                 g.rev += 1;
                 g.pending |= self.pending;
                 self.record(&g, at, Author::Agent, Did::Merge, &["members".to_string()]);
@@ -431,6 +435,7 @@ impl State {
         if let Body::Group(body) = &mut group.body {
             body.members.retain(|m| id.block() != Some(m));
         }
+        group.compact();
         group.pending |= self.pending;
         match group.members() {
             [last] => {
