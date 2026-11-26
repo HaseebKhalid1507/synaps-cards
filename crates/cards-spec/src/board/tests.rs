@@ -965,6 +965,43 @@ fn a_history_folds_through_fold_events() {
     assert!(s.visibility().dismissed(&BlockId::parse("tests").unwrap()));
 }
 
+/// §1.7 (P2-1): a block call with no result in the next message is unbound
+/// for good, even where that message gives the fold no event of its own:
+/// another tool's result only, a result with no text, or no message with
+/// results at all. A late receipt after it changes nothing.
+#[test]
+fn a_call_without_a_result_in_the_next_message_never_binds() {
+    let a = json!([note("a", "1")]);
+    let b = json!([note("b", "2")]);
+    let bash = json!({"type":"tool_use","id":"tb","name":"bash","input":{"command":"ls"}});
+    let other = json!({"type":"tool_result","tool_use_id":"tb","content":"ok"});
+    let late = || msg("user", json!([block_result("t2", &json!([note("b", "2")])), block_result("t1", &json!([note("a", "1")]))]));
+    let cases = [
+        ("another tool's result only", vec![msg("user", json!([other.clone()]))]),
+        ("its result has no text", vec![msg("user", json!([{"type":"tool_result","tool_use_id":"t1","content":[]}, other.clone()]))]),
+        (
+            "its result is an image",
+            vec![msg(
+                "user",
+                json!([{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]}]),
+            )],
+        ),
+        ("no message with results", vec![]),
+    ];
+    for (what, between) in cases {
+        let mut history = vec![msg("user", json!("start")), msg("assistant", json!([block_use("t1", a.clone()), bash.clone()]))];
+        history.extend(between);
+        history.push(msg("assistant", json!([block_use("t2", b.clone())])));
+        history.push(late());
+        let (board, events) = Board::of_history(&history);
+        let v = board.view(&events);
+        assert!(v.block(&r("a")).is_none(), "{what}: t1 is unbound for good");
+        assert!(!v.block(&r("b")).expect("t2 binds").pending, "{what}");
+        assert_eq!(board.bound(&events), v, "{what}: nothing is pending");
+        assert_eq!(v.log().next().unwrap().outcome, Outcome::Unbound, "{what}");
+    }
+}
+
 /// §7's spoofing list: only a genuine outer user message is an edit or a
 /// notice; a typed look-alike counts.
 #[test]
