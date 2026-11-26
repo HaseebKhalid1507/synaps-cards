@@ -1,10 +1,10 @@
-# synaps-cards v2: the editable transcript (blocks), design v1.2
+# synaps-cards v2: the editable transcript (blocks), design v1.3
 
-**Author:** Zero · **Status:** design only, no code. v1.2 answers Shady's second review (synaps-cards #7, round 2 on `32bd281`: REVISE, H 0 · M 5 · L 2, `review-blocks-design-shady.md`). v1.1 answered the first (H 2 · M 5 · L 2) and took in Haseeb's five decisions (§9). **Builds on** `docs/design.md` v1.2, the cards design, which stays in force. **Hard rule, unchanged:** zero changes to SynapsCLI. Everything below is the cards extension plus the desk.
+**Author:** Zero · **Status:** design only, no code. v1.3 answers Shady's third review (synaps-cards #7, round 3 on `725bb52`: REVISE, H 0 · M 3 · L 1, `review-blocks-design-shady.md`). v1.2 answered the second (H 0 · M 5 · L 2), and v1.1 the first (H 2 · M 5 · L 2) and took in Haseeb's five decisions (§9). **Builds on** `docs/design.md` v1.2, the cards design, which stays in force. **Hard rule, unchanged:** zero changes to SynapsCLI. Everything below is the cards extension plus the desk.
 
 **Why this exists.** Haseeb: "the cards feel underwhelming… treat the entire transcript as something that can be edited / taken control of by the agent. They should also be able to mold the right rail too." He picked two mocks, `interact/widgets/` and `interact/wild2/` (`interact/PICK.md`). This document turns their union into a contract that the shipped stack can actually carry. Where the mocks assumed things the stack can't do, §0.2 says so.
 
-**Read at** (re-checked for v1.2; all three are still the tips. The desk repository is `synaps-desk`, whose `main` is `cbae9df`. Round 2's `9fa77fb` is the `main` of the older `synaps-desktop` repository, from 2026-11-14):
+**Read at** (re-checked for v1.3; all three are still the tips. The desk repository is `synaps-desk`, whose `main` is `cbae9df`. Round 2's `9fa77fb` is the `main` of the older `synaps-desktop` repository, from 2026-11-14):
 - SynapsCLI `origin/dev` `0a71ea0d`, cited as `CLI:`. `ae/` is `crates/agent-engine/src/`.
 - synaps-desktop `origin/main` `cbae9df`, cited as `DESK:`. `sc/` is `crates/synaps-client/src/` and `sd/` is `crates/synaps-desktop/src/`.
 - synaps-cards `origin/main` `335e456`, cited as `SPEC:`. `cs/` is `crates/cards-spec/src/` and `cx/` is `crates/cards-ext/src/`. `design §n` is `docs/design.md`.
@@ -22,7 +22,7 @@
   - `replace`, and remove-then-put, start a new incarnation.
   - Item ids are never reused within an incarnation, and the user's items get `u-` ids that the agent can't mint.
   - A hand-back names its incarnation and base revision, so a stale edit can't land on a different block (§1.2, §1.4). So does every click and key: an action on a stale incarnation does nothing, and says so (§6.2).
-- **Bounded, by owner.** The board's working set is ≤ 1 MiB per conversation, with every part capped. Revision records point into history rather than copying ops. The overlay, the memo, drafts, the archive and `blocks.json` each have their own cap, and nothing recoverable is evicted silently (§1.8). Groups are one level deep, so they can't cycle (§1.3).
+- **Bounded, by owner.** The board's working set is ≤ 1 MiB per conversation, with every part capped. Revision records point into history rather than copying ops. The overlay, the memo, drafts, the archive, `blocks.json` and the user's unsent wishes each have their own cap. Nothing recoverable is evicted silently, and an unsent wish is never evicted at all (§1.8). Groups are one level deep, so they can't cycle (§1.3).
 - **Blocks:**
   - **Kinds:** plan, status, diff, note, metric and file.
   - **Targets:** `transcript` (the default) or `rail`. In the rail, `slot` is `upper` (the default, between Prompt cache and Files) or `end` (after Files).
@@ -31,9 +31,22 @@
 - **Cost.** A typical 8-round turn spends about 455 output tokens on ops, plus at most one closing round. That is an estimate. B5 measures it, and the default turns on only if B5 meets its gate (§2.8).
 - **The user's side:**
   - **Content edits go to the agent.** They arrive as `[block plan edited r4] …` plus a patch carrying the incarnation tag. The user wins on text and order, never on execution truth: a step that started or finished keeps its state (§3.4).
-  - **Dismissals go to the agent too,** as a versioned line such as `[block tests v3 dismissed]` riding the user's next message, never as a message of their own. A later version always wins, so a retried old dismissal can't undo a Show, and a dismissal outlives the block's removal. Once in history, every desk shares them (§3.5).
+  - **Dismissals go to the agent too,** as a versioned line such as `[block tests v3 dismissed]` riding the user's next message, never as a message of their own. The higher version always wins, every send carries only the desk's latest wish, and a dismissal outlives the block's removal. Once in history, every desk shares them (§3.5).
   - **Presentation stays local:** hold, collapse, pin, rail slot, unpack, and viewing a revision.
-- **Motion.** Heights come from structure and bounded line counts. A pointer lease keeps what's under a moving pointer where it is, and a target that changed in the last 600 ms takes no click (§6.2). A change glows once (480 ms), and then blocks ask for no frames.
+- **Motion.** Heights come from structure and bounded line counts. A pointer lease keeps what's under a moving or pressed pointer where it is. A target an agent op just moved takes no click for 600 ms, and keys and the user's own changes are never held back (§6.2). A change glows once (480 ms), and then blocks ask for no frames.
+
+## Changes from v1.2
+
+Shady's round 3 on `725bb52` closed M4, the tag's strength and L2, and accepted the spoofing boundary. v1.3 amends the contract where round 3 found gaps. There is no new architecture.
+
+| # | Shady found | v1.2 | v1.3 |
+|---|---|---|---|
+| M1a | A per-id ordinal outlives the tombstone that could remember it | The id's ordinal, 1, 2, 3… per generation | **A creation number** (§1.2): one board-wide count of incarnations per generation, in commit order. It's one integer with nothing per id, so tombstone eviction can't reset it |
+| M1b | The desk-wide file cap could evict pending wishes | Desires lived in `blocks.json`, under its LRU caps | **A reserved store** (§1.8): `block-desires.json`, ≤ 64 per conversation, ≤ 512 per desk, 64 KiB. No cap evicts a desire: past one, a new dismiss or show is refused before it draws, and accepted means written. The ~3.6 MiB are labelled payload sums, and B2 counts owned bytes |
+| M2a | An exact-text Resend could carry a stale wish past a newer local one | "The fold finds it stale wherever the resend lands" | **One rule** (§3.5, §3.7): notice lines are never part of a message's identity. Every send builds its trailer from the latest desires, a Resend included. An old notice already sent applies if it lands first, until the newer wish rides the next send. The description now teaches the version rule (§2.6) |
+| M2b | Retirement compared the floor where admission compared the record | Two predicates | **One helper,** `effective_version(id)`: the record's version, else the floor. Admission, attachment, settlement, restart and feedback all use it |
+| M3 | The 600 ms rule swallowed the user's own input | Any identity or rect change blocked clicks and keys | **Just moved** (§6.2): it blocks only a pointer action, and only on a target an agent op moved or replaced in the last 600 ms. Keys and the user's own changes are never blocked. A press holds the lease, so a lease ending can't void a click |
+| L1 | The no-endpoint branch calibrated against an endpoint | "Calibrated against that endpoint" | **Calibrated against the provider's reported usage** (§2.8), by a fit over fixed probe pairs. A provider that can't be probed gets a labelled estimate that can't flip the default |
 
 ## Changes from v1.1
 
@@ -87,7 +100,7 @@ Shady's round 2 on `32bd281`. The highs stayed closed, and Haseeb's five decisio
 | Delivery and the memo | design §3.4–§3.5; `DESK:sd/deliver.rs:1-40`, `:337` | A hand-back takes typed text's paths. B4 generalizes the memo, and adds a second layer for what applied (§3.7) |
 | `sanitize`, the input gate, and keys that never authorize | `SPEC:cs/sanitize.rs`; `DESK:sd/live.rs:179`; design §5.1 | Every agent string is sanitized. Only an input-holder edits. No block key is an authorize key |
 | Workers are refused, and the rate limiter | `SPEC:cx/tool.rs:31-37`, `:104-118` | The same `chat_of` rule, with blocks' own limits |
-| Desk-local persistence | `DESK:sd/recall.rs:44-63`, `:97-113` | `blocks.json` uses the same atomic, private, swept writer |
+| Desk-local persistence | `DESK:sd/recall.rs:44-63`, `:97-113` | `blocks.json` and `block-desires.json` use the same atomic, private, swept writer |
 
 ### 0.2 What the mocks assumed that the stack can't do, and what replaces it
 
@@ -132,10 +145,11 @@ The fold is still one: the board wraps `cards_spec::fold::Fold` (§1.7).
 - **An incarnation** is one life of an id:
   - **It starts** when an op creates content under the id: a `put` on an id with no live block, a `merge` into a fresh id, or a `replace` (which ends the live one and starts the next in the same place).
   - **It ends** at a `replace` or a `remove`, or at compaction, which empties the board.
-  - **Its tag** is 128 bits: the first 32 hex digits of SHA-256 over `blocks/1`, NUL, the **generation**, NUL, the id, NUL, the id's **ordinal** (decimal), NUL, the creating call's tool id, NUL, and the op's index in its call (decimal).
+  - **Its tag** is 128 bits: the first 32 hex digits of SHA-256 over `blocks/1`, NUL, the **generation**, NUL, the id, NUL, the **creation number** (decimal), NUL, the creating call's tool id, NUL, and the op's index in its call (decimal).
     - **The generation** is the SHA-256 of the history's first message: its `role` and `content` as normalized JSON, with `_synaps_*` keys left out. A compaction starts a new one, as its first message is the summary (`CLI:crates/agent-core/src/core/compaction.rs:213-229`). The session id can't serve, because an in-place compaction keeps it (`CLI:ae/runtime/compaction.rs:737-746`). A copy of the history keeps its tags.
-    - **The ordinal** counts the id's incarnations in this generation: 1 for the first, 2 after a `replace` or a remove-then-put, and so on. A creation that a rollback took back gives its ordinal to the next one, under another tool id.
-    - **The guarantee.** Within one generation, two incarnations of an id differ in ordinal, so their tags hash different inputs. Two tags then collide with a chance of about 2⁻¹²⁸, and B1 adds no collision rule. Across generations, the first messages differ unless two are byte-identical, and the creating tool ids, which providers mint unique, differ too. v1.1's 32 bits were a check, not identity.
+    - **The creation number** counts every incarnation of every id in this generation, in the fold's commit order (§1.7): 1 for the generation's first, and one more at each incarnation that starts. A creation the fold skips takes no number. The board keeps one integer for it and nothing per id, so it never depends on a tombstone the caps evicted (§1.8). Streaming and replay agree: the overlay is a clone of the bound board, counter included, and the commit order is the history's.
+    - **A rollback** gives the number of a creation it took back to the next creation, which is another call, under another tool id. A draft over the rolled-back incarnation goes stale at the re-fold that drops it (§3.2), before any reuse.
+    - **The guarantee.** Within one generation, two incarnations differ in creation number, so their tags hash different inputs. Two tags then collide with a chance of about 2⁻¹²⁸, and B1 adds no collision rule. Across generations, the first messages differ unless two are byte-identical, and the creating tool ids, which providers mint unique, differ too. v1.1's 32 bits were a check, not identity.
     - Every desk derives the same tag from the same history. The tag guards against stale edits, not against a user who types a look-alike: any input-holder can type anything (§7).
 - **What an incarnation owns:** kind, title, body, its revisions (r1 is its creation), its item ids (§1.4), and each field's last writer.
 - **What the id's slot owns:** target, slot, place, group membership, collapse and dismissal. So a `replace` keeps the block where it is and in its group, and starts its content fresh.
@@ -335,6 +349,7 @@ The history is the record. Everything else has an owner, a count and a byte cap,
 |---|---|---|
 | Live blocks (groups and members included): kind, title, place, body | 32, ≤ 6.25 KiB each. A body is its kind's cap, ≤ 6 KiB (§1.5) | A creating op is skipped and marked. The extension refuses a body over its cap, and the fold skips a patch that would exceed it |
 | Tombstones: id, tag, last rev, a reference for `why` | 64, ≤ 96 B each | The oldest ending is dropped. A stale edit naming a dropped tag finds no live incarnation, so nothing applies |
+| The creation number (§1.2) | One integer per generation | None: it only counts. Nothing is kept per id, so no tombstone eviction can reset it |
 | Revision records: a **reference** (message, call, op), the author, the op kind, the count of changed paths and the first ≤ 4 of them | 64 per live incarnation and 1,024 across the board, ≤ 256 B each | The oldest are dropped, and the counter keeps counting. **A record never holds its op:** the op, its `why` and its other paths are read from the history at the reference |
 | Materialized past bodies | 8 per incarnation, 192 KiB across the board | Least recently viewed first, then re-folded on demand |
 | Item ids per incarnation, live and removed | 64, ≤ 24 B each | Appends are skipped (§1.4) |
@@ -357,9 +372,10 @@ The history is the record. Everything else has an owner, a count and a byte cap,
 | Drafts: holds and orphans (§3.2, §5.2) | Id, tag, base, the intents by path, field text | **8 per session**, holds and orphans together, across compactions. ≤ 8 KiB each | A 9th take is refused: `8 drafts open · hand back or discard one`. A compaction turns holds into orphans in place, so it never needs a 9th, and no draft is ever dropped for space |
 | The archive (§5.2) | The predecessor's final blocks and op log, read-only | **One per session**, ≤ 256 KiB. The next compaction replaces it, so there's never a chain | Lost at a desk restart |
 | Renderer caches, per pane (D5) | Shaped text and layout per drawn block | ≤ 32 blocks, plus the one revision in view | Dropped with what isn't drawn, and re-shaped on demand |
-| `blocks.json`, per desk (§3.5) | Pins, slot moves, desires (§3.5), soft dismissals | ≤ 64 entries and 16 KiB per conversation, ≤ 256 conversations, ≤ 1 MiB for the file | Oldest first, desires last. Desires never go silently: with 64 of them, a new dismiss or show is refused, `64 changes waiting · send a message first` |
+| `blocks.json`, per desk (§3.5) | Presentation: pins, slot moves, soft dismissals | ≤ 64 entries and 16 KiB per conversation, ≤ 256 conversations, ≤ 1 MiB | Oldest first, then the least recently touched conversation. It's presentation, so no wish is lost |
+| `block-desires.json`, per desk (§3.5) | The user's unsent wishes: id, state, version, ≤ 64 B each, by conversation | ≤ 64 per conversation and ≤ 512 per desk, in a reserved 64 KiB that no other owner uses | **No cap evicts a desire.** A new dismiss or show past a cap is refused before anything draws: `64 changes waiting · send a message first`, or `512 changes waiting · send in another conversation, or discard`, where `discard` lists them by conversation. A desire leaves only when it settles, when the user cancels or discards it, or at a compaction (§5.2) |
 
-So one session's blocks hold at most ~3.6 MiB in memory: 1 MiB each for the board, the overlay and the scratch, ~290 KiB of memo, 64 KiB of drafts and 256 KiB of archive. Renderer caches are per pane on top. The file is ≤ 1 MiB per desk.
+So one session's blocks hold at most ~3.6 MiB in memory: 1 MiB each for the board, the overlay and the scratch, ~290 KiB of memo, 64 KiB of drafts and 256 KiB of archive. Renderer caches are per pane on top. The two files are ≤ 1 MiB and 64 KiB per desk. These are payload sums, not allocator measurements: B2 and D6 count owned bytes, container overhead included, and the caps apply to those counts.
 
 **The honest boundary is the history.** The board never copies it whole. But the transcript keeps a block call's input whole (≤ 8 KiB), where another tool's keeps a 4 KiB preview (`DESK:sc/transcript.rs:63`, `:336-342`), just as card inputs are kept today. So the transcript grows with the history by at most 4 KiB more per block call than today, at a pace the rate limit bounds (§7). Nothing here bounds the history itself: its length is up to the daemon.
 
@@ -370,7 +386,9 @@ So one session's blocks hold at most ~3.6 MiB in memory: 1 MiB each for the boar
 - maximal multi-KiB patches kept as revision records: each record stays ≤ 256 B, and re-reading it returns the whole op;
 - successive compactions while holding drafts: never more than 8, and none dropped;
 - the memo full of recoverable entries: Hand back is off, and nothing is evicted;
-- the board, the overlay, the scratch and the archive at their caps together.
+- the board, the overlay, the scratch and the archive at their caps together;
+- 200 ids created and removed, past the tombstone cap, then the first id put again: a fresh creation number, and the same tag streaming and replayed;
+- the desire file full across many conversations, then one more dismiss: refused before it draws; then a restart: every accepted desire is still there.
 
 ### 1.9 Compaction, `/new`, a resume
 
@@ -438,9 +456,9 @@ The last step's outcome often comes in the last tool result, after which the age
 > Keep a few living blocks in the user's desktop app instead of narrating progress: a plan that ticks, a status, a diff, a note, a metric, a file. They sit in the transcript, or in the right rail ("target":"rail"; "slot":"end" for its bottom). One call takes {"ops":[…]} (up to 16) and returns at once. "ok" means valid, not seen: never retry for lack of a sign.
 > Ops: put creates (id, kind, title, body, at {"after":id}); on an existing id it does nothing. patch: set, append, remove, order by path like "steps.fix.label"; items by id, never index; "state":{"fix":"done"} ticks; name each path once. replace swaps the body (give why) and drops the user's unsent edit, so prefer patch. collapse (id, ids, or run:true with a summary folds this run's tool calls), merge (ids into a group), move (no target: here), remove. A finished card can be replaced as "card:<id>".
 > Put ops in a message that already calls tools, after its reads and edits. A call in your final message costs a round: make at most one closing call per turn, only when the end state matters. Patch on real transitions, not chatter. At most 6 blocks, 4 in the rail. Don't restate what the app shows: the running tool, changed files (use a diff with "from":"edits"), tokens. Never start a step marked stop: end your turn and say why.
-> A user message "[block <id> edited r<N>] …" carries their edit as a patch on its next line. It applies where it still can: started or finished steps keep their state. A last line "[block <id> v<N> dismissed]" means they hid it: stop patching it, and don't put, move or recreate it, even under another id; you may remove it. "[block <id> v<N> shown]" means it's back: bring it up to date. After a compaction your blocks are gone: put again only what's useful. To ask the user, use cards_ui.
+> A user message "[block <id> edited r<N>] …" carries their edit as a patch on its next line. It applies where it still can: started or finished steps keep their state. A last line "[block <id> v<N> dismissed]" means they hid it: stop patching it, and don't put, move or recreate it, even under another id; you may remove it. "[block <id> v<N> shown]" means it's back: bring it up to date. Per id, only a v<N> above all earlier ones counts. After a compaction your blocks are gone: put again only what's useful. To ask the user, use cards_ui.
 
-About 465 tokens by the proxy tokenizers (cl100k 465, o200k 459): 15 more than v1.1's, for the versions and "stop patching it". v1's text measured 397–401 there, not the 330 it claimed. The schema stays shallow, about 420 tokens: `ops` is an array of objects with `op` and `kind` enums, plus `id`, `target`, `slot` and `at`. The kind bodies are described rather than spelled out per kind. B5 measures the whole definition, and the gate caps it (§2.8).
+About 479 tokens by the proxy tokenizers (cl100k 479, o200k 473): 29 more than v1.1's, for the versions, "stop patching it" and v1.3's version rule. v1's text measured 397–401 there, not the 330 it claimed. The schema stays shallow, about 420 tokens: `ops` is an array of objects with `op` and `kind` enums, plus `id`, `target`, `slot` and `at`. The kind bodies are described rather than spelled out per kind. B5 measures the whole definition, and the gate caps it (§2.8).
 
 ### 2.7 An estimate for a typical turn
 
@@ -488,8 +506,8 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 - **Runs.** Each task runs with blocks on and with blocks off, on the same model and prompt, three times each, interleaved. A gate row passes only if it passes on the pooled runs **and** in at least 2 of the 3 repeats, so one lucky run isn't a licence.
 
 **How the attributed numbers are counted:**
-- **Block-call output:** the compact JSON of each `cards_block` call's input, as sent. It is counted with the provider's token-count endpoint where there is one. Otherwise a proxy tokenizer is used, calibrated against that endpoint on ≥ 200 recorded calls, and the PR reports the ratio's median and spread.
-- **Framing:** one fixed allowance per call, for the name, id and wrapper. It is calibrated once: a probe message with one block call, minus the same message without it, minus the arguments' own count.
+- **Block-call output:** the compact JSON of each `cards_block` call's input, as sent. It is counted with the provider's token-count endpoint where there is one. Otherwise a proxy tokenizer is used, **calibrated against the provider's own reported usage, never against itself:** a fixed calibration set of ≥ 200 recorded calls of varied length, each sent as a probe pair that differs only by that call. Fitting each pair's difference in reported input tokens to `framing + ratio × proxy count` gives the ratio, and the framing allowance below as the intercept. The PR reports the fit and its spread. A provider that can't be probed this way gets an uncalibrated estimate, labelled so, and its runs can't flip the default (B6).
+- **Framing:** one fixed allowance per call, for the name, id and wrapper. It is calibrated once. With an endpoint, it's a probe message with one block call, minus the same message without it, minus the arguments' own count. Without one, it's the fit's intercept above.
 - **Result input:** each result's tokens, counted the same way, times the rounds left in the turn that re-read it.
 - **The definition:** a fixed-prefix control, never the on − off workload delta, since the histories diverge. The same system prompt, tools and first message are counted with `block` declared and without it.
 
@@ -528,7 +546,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 | **Hand back** an edit | content | yes: a user message (§3.3) | yes, by history | in the journal |
 | **Restore** a revision | content: a desk-built edit (§3.6) | yes | yes | in the journal |
 | Answer a question | content | yes: today's card answer | yes | in the journal |
-| **Dismiss**, and **show** again | a notice (decision 2) | yes: a line riding the user's next message (§3.5) | yes, once delivered | in the journal; `blocks.json` until then |
+| **Dismiss**, and **show** again | a notice (decision 2) | yes: a line riding the user's next message (§3.5) | yes, once delivered | in the journal; `block-desires.json` until then |
 | **Take** (hold) and edit a draft | a local lease | no | no | no (in memory) |
 | **Pin** to the rail and back; move between **rail slots** | presentation | no | no | `blocks.json` |
 | Collapse or expand, unpack a group | presentation | no | no | no |
@@ -558,7 +576,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
   - Paths that would fail now are listed in the footer, e.g. "1 change no longer applies: deploy already ran". They are left out of the patch and of line 1.
   - If nothing is left, Hand back is off: "nothing left to hand back".
   - The fold checks the same guards again where the message lands. More agent changes can arrive between the send and the message's place in history.
-- **A stale draft.** If the incarnation ended while held (a `replace`, a `remove`, a compaction), the header turns to `the agent rewrote this block (r1)` or `this block is gone`, and Hand back is off. **A stale patch is never sent.** The choices are:
+- **A stale draft.** If the incarnation ended while held (a `replace`, a `remove`, a compaction, or a rollback that took its creation back), the header turns to `the agent rewrote this block (r1)` or `this block is gone`, and Hand back is off. **A stale patch is never sent.** The choices are:
   - **Copy to composer:** line 1's words, without the `[block …]` prefix, go into the composer, to edit and send as typed text if the user wants;
   - **Discard.**
 - **Cancel:**
@@ -667,23 +685,24 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
   When more than 8 are waiting, the rest ride the next message. A line with one id is ~7 tokens, input only.
 - **The version.** Each conversation generation (§1.2) counts its visibility changes. A desk mints a notice's version as one more than the highest it has seen: in any notice of this generation's history (the fold keeps that number), and in its own desires (below). Two desks may mint the same number, for different ids or for the same one.
 - **The fold** keeps a **visibility record** per id: dismissed or shown, and the version that set it (§1.8). It reads notices from the last lines of a genuine user message, after that message's edit (§1.7). For each id a notice names:
-  - **It applies** only if its version is above the id's record, or above the **floor** if the id has no record. It sets the record whether or not a block is live under the id.
+  - **It applies** only if its version is above `effective_version(id)`: the version of the id's record if it has one, else the **floor**. It sets the record whether or not a block is live under the id. This one helper serves the fold's admission and every desk rule below (attaching, settling, reconciling at a restart, the feedback), so they can't disagree.
   - **Otherwise it's stale,** and changes nothing. The op log says `stale v3: v5 is later`. Of two equal versions, the first in history wins.
   - **An absent id is recorded** like a live one. So a block the agent removed before the dismissal landed stays dismissed when it's put again, and what the agent read agrees with the board.
   - **An id named twice** in one message's notices, in one line or across both, applies neither, and is marked. The desk never builds such a message.
-  - **The floor** is the highest version of any evicted record (§1.8 keeps 64). It keeps an evicted record's old notices stale. The cost: a notice for an id with no record, minted before 64 other ids' changes landed, is stale too, and its desk says so (below).
+  - **The floor** is the highest version of any evicted record (§1.8 keeps 64). It keeps an evicted record's old notices stale. The cost: a notice for an id with no record, minted before 64 other ids' changes landed, is stale too, and its desk says so (below). The agent isn't told about the floor, so it may read such a notice as current until the user's next dismiss or show of that id.
   - **Wrappers stay whole.** Only the user's own text is read, by the host's rule (`SPEC:cs/fold.rs:302-343`, `:362-428`). That rules out three things:
     - an `<event …>` payload, which ends with `</event>` (`DESK:sc/events.rs:261-263`);
     - the summary message, whose last line is the host's (`CLI:crates/agent-core/src/core/compaction.rs:213-229`);
     - an extension's saved block, which that rule removes first.
 
     A typed look-alike counts, as for edits.
-- **The desk keeps a desire per id, never a queue of notices.** For each id this desk changed, it keeps the latest desired state, its version, and the carrier the notice went on, if any (`blocks.json`, §1.8). At every send, it attaches a notice for each id whose desire is above the fold's record and isn't already in flight:
+- **The desk keeps a desire per id, never a queue of notices.** For each id this desk changed, it keeps the latest desired state and its version (`block-desires.json`, §1.8), and in memory the carrier the notice went on, if any. At every send, it attaches a notice for each id whose desire is above `effective_version(id)` and isn't already in flight:
   - **Only the latest desire is ever attached.** Dismiss and then Show attach at most the Show, so a superseded notice is never re-armed.
+  - **Accepted means written.** The caps are checked in memory, and the desire is written before the dismiss or show draws. A failed write refuses it with the error, so a restart never loses a desire the user saw accepted.
   - **In flight** means sent on a message that no settled history has shown yet, or lost. For a hand-back, its memo entry says which (§3.7). A settled history without the carrier (a dropped steer, a refused send, a rollback) clears the carrier, and the desire rides the next message at the same version.
-  - **Settled.** Once the id's record, or the floor, is at or above the desire's version, the desire is done and dropped. If the shared state differs from the desire, the block or its tombstone says why and draws the shared state: `changed by a later message` when another desk's notice or a typed one landed first, or `not applied · dismiss again` when the floor made it stale.
-  - **A desk restart** keeps the desires and loses the carriers. It reconciles them against the history it attaches to: a desire the record already meets is done, and the rest ride again. A copy still queued in the daemon may land as well, and the second of two equal versions is stale.
-  - **Exact-text Resend stays safe.** A hand-back's notice lines keep their versions. If a later desire has superseded one, the fold finds it stale wherever the resend lands. Resend then says `its notice line is out of date: only the edit counts`.
+  - **Settled.** Once `effective_version(id)` is at or above the desire's version, the desire is done and dropped. A retained record below it keeps the desire waiting, however high the floor: `tests` at v2 with the floor at 100 still takes a delayed Show at v3. If the shared state differs from the desire, the block or its tombstone says why and draws the shared state: `changed by a later message` when another desk's notice or a typed one landed first, or `not applied · dismiss again` when the id has no record and the floor made it stale.
+  - **A desk restart** keeps the desires and loses the carriers. It reconciles them against the history it attaches to: a desire at or below `effective_version(id)` is done, and the rest ride again. A copy still queued in the daemon may land as well, and the second of two equal versions is stale.
+  - **One rule for old notices.** Notice lines are never part of a message's identity. Every send builds its trailer from this desk's desires at that moment, a Resend included (§3.7), so no send carries a wish older than this desk's latest for that id. But a message already sent can't change, and an unsent wish can't touch the shared fold. So if an older notice lands first (a carrier still queued in the daemon, or another desk's), it applies: other desks and the agent see it until the newer wish lands, while this desk draws its own desire. The newer wish rides this desk's next send, and the higher version wins whichever lands later.
 - **Shared once delivered.** Before delivery, a dismissal is this desk's: it draws at once here, and other desks draw the record. Once in history, it's every desk's, and another desk shows the block dismissed when that history lands (§5.4).
 - **Show again:** `u` on the tombstone, or `show` in the rail's footer.
   - **A dismissal not yet sent** is simply cancelled: the desire goes, and nothing is sent.
@@ -698,12 +717,13 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 - **Across a compaction,** the successor's history holds no records, because it's a new generation. The desk carries the predecessor's dismissed ids across the compaction (`CompactionApplied`, `DESK:sc/transcript.rs:1798-1803`; a linked successor names its predecessor, `DESK:sd/favourites.rs:600`), but only as **soft** dismissals. A block put again with one of those ids draws as its tombstone, `dismissed before compaction · u show`, never fully hidden, because it may be a different block. Soft dismissals are local, and `x` on one sends a real notice, versioned in the new generation.
 - **Tests (B2, D6):**
   - dismiss and Show while a carrier is queued;
-  - a lost carrier, then Show, then the hand-back's Resend;
+  - a lost carrier, then Show, then the hand-back's Resend: it carries `shown` at the new version, never the old `dismissed`;
+  - an old carrier landing before the newer wish is sent: it applies on every desk until the next send carries the newer one;
   - two desks' opposite notices at one version;
   - the agent removing the block between the click and delivery, then putting it again;
   - one id in both trailers;
   - a restart and a compaction with a carrier in flight;
-  - 65 ids' changes, and the floor;
+  - 65 ids' changes, and the floor; a retained record at v2, the floor at 100, and a delayed Show at v3: admitted, attached and settled alike;
   - `<event>`, summary and saved-block wrappers ending in a line that looks like a notice;
   - never a notice sent on its own.
 
@@ -723,11 +743,10 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 
 **Undo.** `Ctrl/Cmd+Z` in block walk undoes the last local action, one level per block: a collapse, an unpack, a pin, a slot move, or a dismissal not yet sent, which cancels its desire. A delivered dismissal is undone with Show. Sent content can't be undone: hand back another edit, or restore.
 
-**`blocks.json`,** the desk's presentation store:
-- It is keyed by conversation (the transcript's journal id), and holds pins, slot moves, desires (§3.5) and soft dismissals.
-- **Per conversation:** ≤ 64 entries and ≤ 16 KiB. The oldest goes first, and desires go last, never silently (§1.8).
-- **In all:** ≤ 256 conversations, the least recently touched dropped first, and ≤ 1 MiB for the file.
-- It uses recall's writer: atomic, mode 0600, swept (`DESK:sd/recall.rs:44-63`).
+**The desk's two stores,** keyed by conversation (the transcript's journal id), with the caps of §1.8:
+- **`blocks.json` is presentation:** pins, slot moves and soft dismissals. Past a cap, the oldest goes, then the least recently touched conversation.
+- **`block-desires.json` is the user's unsent wishes,** in their own reserved budget. Nothing evicts one, and a cap refuses the new one. Dropping a conversation from `blocks.json` leaves its desires alone.
+- Both use recall's writer: atomic, mode 0600, swept (`DESK:sd/recall.rs:44-63`).
 
 ### 3.6 Revisions
 
@@ -745,9 +764,9 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 - **Sending.** A hand-back takes the card path exactly: `Steer` when busy, `Submit` when idle, on the block's Live attachment (`client.on(seq)`), through D2a's send (`DESK:sd/answer.rs:619-636`).
 - **Two layers, never mixed:**
   - **Delivery** (`cards_spec::memo`, generalized by B4 to a subject) answers "did my message reach the chat?".
-    - There is one entry per hand-back, matched by its exact text, all lines.
+    - There is one entry per hand-back, matched by the exact text of its edit: every line but the notice lines, which belong to the desires and are rebuilt at every send (§3.5).
     - Its binding is (block id, tag, base) as sent. **Agent ticks never move it**: the base is what was sent, not the block's current revision.
-    - Its states are the cards': sending, queued, held, checking, in the chat, unconfirmed and not sent. Resend is only by a click, and only of the exact text (design §3.5).
+    - Its states are the cards': sending, queued, held, checking, in the chat, unconfirmed and not sent. Resend is only by a click, and only of the exact edit text (design §3.5), with a trailer built from the desires at that moment.
   - **Application** (`cards_spec::board`) answers "what did it do?". For each hand-back in history, it records each path as applied, as a conflict (and why), or as later overwritten by the agent. The hand-back's row draws it: `applied 3 of 4 · deploy already ran`.
   - "In the chat" never means "applied".
 - **Supersession is by coverage.**
@@ -793,7 +812,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
     - `u` shows a dismissed block again.
   - **Leaving.** `Esc` returns to the composer, never to the window, so a second `Esc` can't deny a prompt (design §5.1).
   - **Activation** is the entered-card rule: keys act from the first frame that paints the walk ring, and only fresh bare presses count (`DESK:sd/ask_keys.rs:17-40`).
-  - **Every key acts on the painted target** (§6.2): the walked block's id and tag, and the item under the step cursor, as the ring last painted them. If the board's incarnation or item differs now, or changed in the last 600 ms, the key does nothing and the block says why.
+  - **Every key acts on the painted target** (§6.2): the walked block's id and tag, and the item under the step cursor, as the ring last painted them. If the board's incarnation or item differs now, the key does nothing and the block says why. A key names its target by identity, never by position, so the just-moved rule (§6.2) never blocks one.
 - **A status line** shows the current mode's keys, as point's does.
 - **Mouse:** hovering a header shows `rev · edit · rail · ⇅ · fold · ×`. These **overlay the header's right end and never reflow it** (point). A chevron folds, and a drag grip moves a plan step.
 - **`Ctrl/Cmd+O` opens the op log,** the mutation stream (wild2, point's WIRE).
@@ -859,7 +878,7 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 - **One fold builds the board, from the Full history.** The desk runs Full (design §2.1). It keeps block calls' input whole, as it keeps card inputs past the 4 KiB preview cut (`DESK:sc/transcript.rs:63`, `:336-342`).
 - **A mid-turn attach** gets the calls from the replay ring, as any row does. **A late desk** draws exactly what the others draw, dismissals included once delivered, minus their local presentation.
 - **A daemon restart** reloads the journal. An op or an edit that wasn't saved is lost as any message is (design §4). A hand-back the desk can't confirm shows Resend while the memo holds it (§3.7).
-- **A desk restart** keeps what `blocks.json` holds: pins, slots, desires and soft dismissals. It loses drafts, folds, the memo and the archive, as cards lose the memo (design §4).
+- **A desk restart** keeps what the two stores hold: pins, slots and soft dismissals, and every desire. It loses drafts, folds, the memo and the archive, as cards lose the memo (design §4).
 
 ### 5.2 Compaction
 
@@ -933,7 +952,7 @@ So an agent op can change a block's height only by changing its structure (a ste
 **Above the viewport,** the list keeps its anchor (`DESK:sd/app.rs:1312-1330`, the hold, or the follow it keeps). A pill, `2 blocks changed above ↑`, sits at the list's top edge (a layer, as sticky headers are, `DESK:sd/sticky.rs:1-9`). Clicking it walks to them.
 
 **The pointer lease.** It starts when the pointer moves over the transcript list or the rail's agent zone. It lasts while the pointer moves, and for 1.5 s after it last moved.
-- **The promise is the weaker one, and it's stated.** Nothing moves under a *moving* pointer. A parked pointer releases the lease. Otherwise a mouse left over the transcript would freeze the agent's changes under it for as long as the user is away. After the lease, a click is protected by the painted target and the just-changed rule, below.
+- **The promise is the weaker one, and it's stated.** Nothing moves under a *moving* or pressed pointer. A parked pointer releases the lease. Otherwise a mouse left over the transcript would freeze the agent's changes under it for as long as the user is away. After the lease, a click is protected by the painted target and the just-moved rule, below.
 - **Position.** The row under the pointer keeps its screen y. If something above it grows or shrinks, the content above scrolls instead: the list's anchor becomes that row and its offset, the existing hold extended. Nothing under the pointer slides.
 - **Identity.** A change that would put something else under the pointer isn't drawn yet:
   - a `move` or `remove` of that block, or a `merge` taking it;
@@ -950,11 +969,15 @@ So an agent op can change a block's height only by changing its structure (a ste
     - content: take, restore, keep or drop, strike, stop;
     - shared: dismiss, show;
     - presentation: fold, pin, slot, unpack.
-- **Down and up.** The target is taken at pointer-down, and pointer-up acts only on that same target, if it's still current. A change that lands between the two, or a lease that ends between them, makes the click a no-op, with the same note.
-- **Just changed.** A target whose identity or screen rect changed in the last 600 ms takes no pointer-down and no key, and says `this changed just now`.
+- **Down and up.** The target is taken at pointer-down, and pointer-up acts only on that same target, if it's still current. **A press holds the lease** until pointer-up, so nothing deferred draws under a held button, and a long press can't expire into a no-op. The bound board can still change between the two (a settled history, a rollback): a target that changed there makes the click a no-op, with the same note.
+- **Just moved.** A pointer-down on a target that **an agent op** moved or replaced in the last 600 ms does nothing, once, and says `this moved just now`. It's never queued to act later: the user clicks again.
+  - **Moved** means its painted screen rect or its incarnation changed in a frame that drew an agent op. Anchoring that keeps it in place on screen isn't a move.
+  - **An agent op** is an op applied to the board or the overlay, or a deferred change released (below). The user's own changes never start the window: a scroll, a window or pane resize, their own expand, fold, pin, slot or edit, a walk. A frame that draws both counts as the agent's: the safe side, and rare.
+  - **A slide counts once:** the window runs 600 ms from the end of its motion, not from each frame of it.
+  - **Keys are exempt,** and so are `Esc`, navigation, text fields and IME. A key acts on the walked target by identity (§3.8), so a displacement can't misdirect it.
   - 600 ms is time to see the change, with margin over a visual reaction (~250 ms). It's the idea behind a browser's delay before a security dialog's buttons take input.
-  - It's a timestamp compared when input arrives: no timer and no frame.
-- **Release.** When the lease ends, the pointer leaves, or a key acts, everything that waited draws at once, with one glow, and those rects count as just changed. A moved block slides (Full) or appears (Reduced, Off), as §6.3 says.
+  - It's a timestamp per hit region, compared when input arrives: no timer and no frame.
+- **Release.** When the lease ends, the pointer leaves, or a key acts, everything that waited draws at once, with one glow, and the targets it moves or replaces count as just moved. A moved block slides (Full) or appears (Reduced, Off), as §6.3 says.
 - **Keys** act on the walked block's painted target, never on a position. The key is checked first, and the lease is released after. A key on a stale target is a no-op with the note, and the release then shows why.
 - **Frames.** The lease's end is **one timer wake**, 1.5 s after the last move, armed only while a change waits under the lease. It draws that change and its glow (≤ 480 ms). With nothing waiting, the lease arms nothing (§6.3).
 
@@ -965,8 +988,9 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 - B is removed, moved or merged;
 - B is removed and put again, or replaced by a block of the same kind, while its old view is painted: the click is a no-op with the note, and never lands on the new B;
 - an item removed or replaced under the pointer;
-- pointer-down before the lease ends, and pointer-up after;
-- a resting pointer clicking 2 s after a change drew (it acts) and 300 ms after (it doesn't);
+- a resting pointer clicking 300 ms after an agent op moved its target (a no-op, once, never replayed), 700 ms after (it acts), and 300 ms after an op moved something else (it acts);
+- the user's own change, then an action at once: a scroll then `e`, a walk that scrolls then a key, an expand then navigation, a fast resize then a click, `Esc` and IME input while rows move. All act;
+- a press held 2 s while an agent op waits: it acts on what it pressed, and the op draws at release. A rollback that drops its target between down and up makes it a no-op;
 - a key after a release, on a stale incarnation;
 - the expiry wake, armed only with a change waiting;
 - a 5th rail section promoted, and a fifth user expansion (§4);
@@ -1028,8 +1052,9 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 | An edit message | line 1 ≤ 200 characters, line 2 ≤ 8 KiB, ≤ 2 notice lines of ≤ 8 ids |
 | An incarnation tag | 128 bits, 32 hex digits (§1.2) |
 | A notice | ≤ 8 ids a line, one line per kind, a version ≤ 999,999,999, an id once per message (§3.5) |
-| Retained state | §1.8: the board's working set ≤ 1 MiB per conversation; the overlay, scratch, memo, drafts and archive capped per session; nothing recoverable evicted silently |
+| Retained state | §1.8: the board's working set ≤ 1 MiB per conversation; the overlay, scratch, memo, drafts and archive capped per session; nothing recoverable evicted silently, and no desire evicted at all |
 | `blocks.json` | ≤ 64 entries and 16 KiB per conversation, ≤ 256 conversations, ≤ 1 MiB |
+| `block-desires.json` | ≤ 64 desires per conversation, ≤ 512 per desk, 64 KiB reserved; refused past a cap, never evicted |
 
 - **Rate**, per chat (`chat_of`):
   - ≤ 30 calls a minute and ≤ 120 ops a minute;
@@ -1049,12 +1074,12 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 
 | PR | Contents | Useful alone because | Tests | Size | Risk |
 |---|---|---|---|---|---|
-| **B0** (this, v1.2) | `docs/blocks.md` | It fixes the contract before any type exists | — | ~1,090 lines of doc | — |
-| **B1** `cards-spec::block` | The op and kind types; validation (`sanitize` reused); the path grammar, item ids and the `u-` reservation; the overlap rule; normalization with byte-ordered map keys; the 128-bit incarnation tag and the generation key; the `blocks/1` envelope and digest; the edit grammar with `of`; the versioned notice grammar; `schema-blocks.json` | The extension and the desk share one validator | A valid and invalid fixture per op and kind; every cap at ±1; paths (indices, `u-` ids, depth); overlaps; golden digests and tags; byte-identical output with and without `preserve_order`; message and notice round trips, look-alikes, cut lines; every normative example in this doc as a round-trip fixture (L2); notice versions at their bounds | ~1.4k + ~1.2k | medium: a new grammar |
-| **B2** `cards-spec::board` | The reference fold (§1.7–§1.8): commit at the result message; incarnations and item identity; the guards; groups; caps and eviction by owner (§1.8); revision records as references into history; visibility records, versions and the floor (§3.5); edit outcomes; the op log; a re-fold API with a work budget | It replays real journals into boards. D5 builds on it | **Property tests:** retained size under the caps for adversarial streams (put/patch/remove loops, maximal bodies, item churn, merges); any split of a history equals the whole; live overlay = history fold = reattach fold; call, result and user interleavings; cancelled and unbound creates followed by patches; caps reached by pending calls; unknown catalogs; overlapping paths. **Traces:** §3.4's list; §3.5's notice list; §1.8's retention list; graph rules; `card:` ops on open cards skipped, receipts kept, the namespaces apart; §7's spoofing list | ~1.6k + ~2k | **high**: it is the protocol |
+| **B0** (this, v1.3) | `docs/blocks.md` | It fixes the contract before any type exists | — | ~1,114 lines of doc | — |
+| **B1** `cards-spec::block` | The op and kind types; validation (`sanitize` reused); the path grammar, item ids and the `u-` reservation; the overlap rule; normalization with byte-ordered map keys; the 128-bit incarnation tag, the generation key and the creation number; the `blocks/1` envelope and digest; the edit grammar with `of`; the versioned notice grammar; `schema-blocks.json` | The extension and the desk share one validator | A valid and invalid fixture per op and kind; every cap at ±1; paths (indices, `u-` ids, depth); overlaps; golden digests and tags; byte-identical output with and without `preserve_order`; message and notice round trips, look-alikes, cut lines; every normative example in this doc as a round-trip fixture (L2); notice versions at their bounds | ~1.4k + ~1.2k | medium: a new grammar |
+| **B2** `cards-spec::board` | The reference fold (§1.7–§1.8): commit at the result message; incarnations and item identity; the guards; groups; caps and eviction by owner (§1.8); revision records as references into history; visibility records, versions, the floor and `effective_version` (§3.5); edit outcomes; the op log; a re-fold API with a work budget | It replays real journals into boards. D5 builds on it | **Property tests:** retained size under the caps for adversarial streams (put/patch/remove loops, maximal bodies, item churn, merges); any split of a history equals the whole; live overlay = history fold = reattach fold; call, result and user interleavings; cancelled and unbound creates followed by patches; caps reached by pending calls; unknown catalogs; overlapping paths. **Traces:** §3.4's list; §3.5's notice list; §1.8's retention list, tombstone churn included; graph rules; `card:` ops on open cards skipped, receipts kept, the namespaces apart; §7's spoofing list | ~1.6k + ~2k | **high**: it is the protocol |
 | **B3** `cards-ext` `block` | The second tool behind `extension.cards.blocks` (default off); batch validation; worker refusal; rate limits; the ≤ 64-byte result; the description (§2.6). It lands after D5 and D6 | **Agents can keep blocks**, opt-in. The TUI shows JSON panels | Framing; golden results; every refusal; the rate windows; the gate on and off in `initialize`; a smoke run in a real daemon (`scripts/smoke.py`) | ~350 + ~350 | low |
 | **B5a** first measurement | B5's harness (§2.8) on the opt-in slice: read-only blocks and the rail. Its PR fixes the task set, the turn, the classifier and the counting method before any run | Chatter shows before the editors are built | The report, with the calibration of the proxy and the framing allowance | ~200 + notes | medium: little code, real measurement risk |
-| **B4** memo subjects | `cards_spec::memo` over a subject: a card answer or a block edit. Delivery and application kept apart; supersession by coverage keys (§3.7); a binding agent ticks don't move; a block cap that never evicts a recoverable entry | D8's hand-back gets D2a's delivery truth | The S3 memo suite run again for block edits, plus §3.7's matrix; two appends of different items; a memo full of recoverable entries | ~400 + ~700 | **high**: partial intent in a reviewed state machine |
+| **B4** memo subjects | `cards_spec::memo` over a subject: a card answer or a block edit. Delivery and application kept apart; supersession by coverage keys (§3.7); a binding agent ticks don't move; a block cap that never evicts a recoverable entry | D8's hand-back gets D2a's delivery truth | The S3 memo suite run again for block edits, plus §3.7's matrix; matching without notice lines, and a Resend's rebuilt trailer; two appends of different items; a memo full of recoverable entries | ~400 + ~700 | **high**: partial intent in a reviewed state machine |
 | **B5b** the eval | The full harness and gate (§2.8) on B5a's frozen set; description tuning | The evidence for the default | The report against the gate: three repeats, reported and attributed columns apart | ~100 + notes | medium: measurement |
 | **B6** default on | `blocks` defaults to `true`. The opt-out for TUI-only users leads the release note and the README (§5.5). It ships only if B5b met the gate | Blocks for everyone | `initialize` with the new default | ~10 | low code; the decision is the risk |
 | **B7** (later) `blocks/2` | `at:"top"` | D9's strip | Catalog tests; a `blocks/1` desk reads it plain | ~150 + ~150 | low |
@@ -1063,9 +1088,9 @@ D5 ships the lease and painted targets for the transcript, and D6 for the rail. 
 
 | PR | Contents | Useful alone because | Tests | Size | Risk |
 |---|---|---|---|---|---|
-| **D5** blocks, read-only | Bind block calls (pending at `ToolUse`, confirmed at the result); the overlay re-run; the bound prefix; block inputs kept whole; the six kinds at their anchors; in-place updates with glow; collapse, merge and `collapse run` titles; `card:` replace; "doing · turn ended"; edit previews with their labels; the pointer lease in the list; painted targets, down/up and the 600 ms rule; bounded caches and the re-fold budget | **The transcript becomes a living document** | A render per kind and state at 320 px and wide; binding and re-run; a split history; the three-way equivalence; list anchoring above the view, and the pill; §6.2's lease tests; Reduced and Off; presents and app renders counted after the last glow (`DESK:sd/bench.rs:42`) | ~1.8k + ~1.1k | medium–high: list geometry |
-| **D6** the rail | Both slots; the cap across them, and the fifth-expansion rule; groups in one slot; NOW's priority; overflow per kind; the lease and painted targets in the rail; dismiss and show as versioned desires, with notices riding typed text and the composer chip; `blocks.json` with its caps; soft dismissals across compaction; pins and slot moves; the strip count | **The agent molds the rail** | Slot order; the cap across slots; a notice rides a typed `Submit` and a `Steer`, never alone; a dropped steer re-arms the desire, and a Show supersedes it; §3.5's notice list and §4's cap tests; dismissed stays dismissed across reattach, restart and a second desk; pin and slot outrank `move`; the file's caps and crash sweep; the strip | ~1.2k + ~1k | **medium–high**: a persistent, shared visibility state machine |
-| **D7** block walk and views | `Ctrl/Cmd+G` walk, `j k z c x p m u`, `[ ]` revisions, the op log (`Ctrl/Cmd+O`) with its archive tab, the hover-action overlay, local undo | **Keyboard-first navigation** | Activation on paint; bare presses only; `Esc` to the composer, never denying a prompt; no reflow on hover; keys act on painted targets, checked before the lease releases | ~700 + ~500 | medium: key precedence |
+| **D5** blocks, read-only | Bind block calls (pending at `ToolUse`, confirmed at the result); the overlay re-run; the bound prefix; block inputs kept whole; the six kinds at their anchors; in-place updates with glow; collapse, merge and `collapse run` titles; `card:` replace; "doing · turn ended"; edit previews with their labels; the pointer lease in the list; painted targets, down/up with the held lease, and the just-moved rule; bounded caches and the re-fold budget | **The transcript becomes a living document** | A render per kind and state at 320 px and wide; binding and re-run; a split history; the three-way equivalence; list anchoring above the view, and the pill; §6.2's lease tests; Reduced and Off; presents and app renders counted after the last glow (`DESK:sd/bench.rs:42`) | ~1.8k + ~1.1k | medium–high: list geometry |
+| **D6** the rail | Both slots; the cap across them, and the fifth-expansion rule; groups in one slot; NOW's priority; overflow per kind; the lease and painted targets in the rail; dismiss and show as versioned desires, with notices riding typed text and the composer chip; `blocks.json`, and `block-desires.json` with its reserve; soft dismissals across compaction; pins and slot moves; the strip count | **The agent molds the rail** | Slot order; the cap across slots; a notice rides a typed `Submit` and a `Steer`, never alone; a dropped steer re-arms the desire, and a Show supersedes it; §3.5's notice list and §4's cap tests; dismissed stays dismissed across reattach, restart and a second desk; pin and slot outrank `move`; both files' caps and crash sweep; a full desire file refuses before drawing, and a restart loses no desire; the strip | ~1.2k + ~1k | **medium–high**: a persistent, shared visibility state machine |
+| **D7** block walk and views | `Ctrl/Cmd+G` walk, `j k z c x p m u`, `[ ]` revisions, the op log (`Ctrl/Cmd+O`) with its archive tab, the hover-action overlay, local undo | **Keyboard-first navigation** | Activation on paint; bare presses only; `Esc` to the composer, never denying a prompt; no reflow on hover; keys act on painted targets, checked before the lease releases, and never meet the just-moved rule | ~700 + ~500 | medium: key precedence |
 | **D8** take, edit, hand back | Drafts over the bound board; the plan, note and proposed-diff editors; the pre-check; stale drafts and orphans with Copy to composer; edit and restore messages, with notices, through B4 and D2a's send; outcomes on the hand-back rows; `another edit arrived`; `changed your edit`; read-only without input authority | **The user edits the agent's document** | §3.4's traces end to end; §3.7's matrix; compaction during a hold, a send and a queue; a hand-back refused, dequeued or held; 8 drafts across successive compactions; the never-resolves-a-prompt tests (click and key); IME in label fields | ~1.6k + ~1.4k | **high**: partial intent, delivery, focus |
 | **D9** the top strip | `at:"top"` in the sticky layer, with B7 | wild2's pinned mission | Layer tests; the cap of 1 | ~400 + ~200 | low |
 
