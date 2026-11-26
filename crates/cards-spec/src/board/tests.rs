@@ -2095,3 +2095,64 @@ fn a_refold_that_finds_nothing_keeps_nothing() {
     assert_eq!(rf.state(), None);
     assert_eq!(rf.owned_bytes(), fresh);
 }
+
+/// A tool id used again in one batch belongs to its latest call, block call
+/// or not: an earlier block call with it is unbound even with the same ops,
+/// and a block call after another tool took the id gets the id's result.
+#[test]
+fn a_tool_id_used_again_in_a_batch_binds_only_its_latest_call() {
+    let ops = json!([{"op":"patch","id":"n","set":{"text":"y"}}]);
+    let mut h = H::default();
+    h.ops(json!([note("n", "x")]));
+    h.events.push(Event::ResultsEnd);
+    let first = h.events.len();
+    h.events.push(Event::Call { tool_id: "t".into(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+    h.events.push(Event::Call { tool_id: "t".into(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+    h.bind("t", &ops);
+    h.events.push(Event::ResultsEnd);
+    let s = h.state();
+    let rec = s.records().last().unwrap();
+    assert_eq!((rec.rev, rec.at), (2, Pos { event: first + 1, op: Some(0) }));
+    assert_eq!(s.log().nth(1).map(|l| (l.at, l.outcome.clone())), Some((Pos::event(first), Outcome::Unbound)));
+    // Another tool's call between them: the latest block call still binds.
+    let ops = json!([{"op":"patch","id":"n","set":{"text":"z"}}]);
+    let later = h.events.len() + 2;
+    h.events.push(Event::Call { tool_id: "u".into(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+    h.events.push(Event::Call { tool_id: "u".into(), name: "bash".into(), input: Value::Null });
+    h.events.push(Event::Call { tool_id: "u".into(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+    h.bind("u", &ops);
+    h.events.push(Event::ResultsEnd);
+    let s = h.state();
+    assert_eq!(note_text(&s, "n"), "z");
+    assert_eq!(s.records().last().unwrap().at, Pos { event: later, op: Some(0) });
+}
+
+/// A hand-built stream without `ResultsEnd`: an op's batch ends at a call
+/// after its result, as the fold's does, so a call of the next message
+/// that takes the tool id again doesn't take the target's result away; and
+/// a batch the history hasn't ended yet gives only its bound prefix, so a
+/// target after a call still waiting for its result has no revision yet.
+#[test]
+fn a_refold_ends_the_targets_batch_where_the_fold_does() {
+    let put = json!([note("n", "a")]);
+    let receipt = block::parse_call(&json!({ "ops": put })).unwrap().receipt().to_string();
+    let events = vec![
+        Event::Call { tool_id: "t0".into(), name: "cards_block".into(), input: json!({ "ops": put }) },
+        Event::Result { tool_id: "t0".into(), text: receipt.clone() },
+        Event::Call { tool_id: "t0".into(), name: "bash".into(), input: Value::Null },
+        Event::Result { tool_id: "t0".into(), text: "ok".into() },
+        Event::User { text: "go".into() },
+    ];
+    let s = Board::fold(generation(), &events).bound(&events);
+    assert_eq!(s.records().next().unwrap().at, Pos { event: 0, op: Some(0) });
+    assert_eq!(refold(&events, AT_PUT).unwrap().block(&r("n")).unwrap().rev, 1);
+    // Still open: the call before the target waits for its result.
+    let other = json!([note("m", "b")]);
+    let open = vec![
+        Event::Call { tool_id: "t1".into(), name: "cards_block".into(), input: json!({ "ops": other }) },
+        Event::Call { tool_id: "t0".into(), name: "cards_block".into(), input: json!({ "ops": put }) },
+        Event::Result { tool_id: "t0".into(), text: receipt },
+    ];
+    assert!(Board::fold(generation(), &open).bound(&open).block(&r("n")).is_none());
+    assert_eq!(refold(&open, Target::Revision(Pos { event: 1, op: Some(0) })), None);
+}
