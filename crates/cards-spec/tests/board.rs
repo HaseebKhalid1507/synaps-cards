@@ -65,6 +65,9 @@ fn steps(r: &mut Rng, n: usize, label: usize) -> Vec<Value> {
 }
 
 fn body(r: &mut Rng, kind: &str) -> Value {
+    if r.chance(20) {
+        return big_body(r, kind);
+    }
     match kind {
         "plan" => {
             let n = 1 + r.below(4);
@@ -78,12 +81,39 @@ fn body(r: &mut Rng, kind: &str) -> Value {
     }
 }
 
-fn id(r: &mut Rng) -> String {
-    r.pick(&IDS).to_string()
+/// A body at or near its kind's caps: 20 steps of long ids and labels, a
+/// diff of 6 hunks and 120 lines, or from the edits, a note of 1,500
+/// characters over 30 lines, a full constant series. Some pass the byte
+/// cap, and the extension refuses those.
+fn big_body(r: &mut Rng, kind: &str) -> Value {
+    let long = |p: &str, i: usize| format!("{p}{i:0>w$}", w = block::ITEM_ID_MAX - p.len());
+    let c = *r.pick(&["a", "é", "😀"]);
+    match kind {
+        "plan" => {
+            let n = 15 + r.below(6);
+            let steps: Vec<Value> = (0..n).map(|i| json!({"id": long("s", i), "label": c.repeat(10 + r.below(40))})).collect();
+            json!({ "steps": steps })
+        }
+        "note" => json!({"text": (0..30).map(|_| c.repeat(1 + r.below(49))).collect::<Vec<_>>().join("\n")}),
+        "status" => json!({"text": c.repeat(80), "detail": c.repeat(120), "progress": {"n": 3, "of": 7}}),
+        "metric" => json!({"label": "L", "value": "0", "series": vec![0; block::SERIES_MAX]}),
+        "diff" if r.chance(40) => json!({"file": c.repeat(200), "state": "editing", "from": "edits"}),
+        "diff" => {
+            let hunks: Vec<Value> = (0..6).map(|i| json!({"id": long("h", i), "lines": vec![c.repeat(1 + r.below(12)); 20]})).collect();
+            json!({"file": "f.rs", "state": "proposed", "hunks": hunks})
+        }
+        _ => json!({"path": c.repeat(200), "line": 1, "note": c.repeat(80), "state": "reading"}),
+    }
 }
 
+fn id(r: &mut Rng) -> String {
+    if r.chance(40) { format!("n{}", r.below(40)) } else { r.pick(&IDS).to_string() }
+}
+
+/// A block id: the few the edits name, or one of 40 more, so 32 live blocks
+/// are reachable.
 fn block_id(r: &mut Rng) -> String {
-    r.pick(&IDS[..9]).to_string()
+    if r.chance(40) { format!("n{}", r.below(40)) } else { r.pick(&IDS[..9]).to_string() }
 }
 
 fn at(r: &mut Rng, v: &mut Value) {
@@ -109,7 +139,10 @@ fn op(r: &mut Rng) -> Value {
         }
         3..=5 => {
             let mut v = json!({"op":"patch","id":id(r)});
-            match r.below(8) {
+            match r.below(11) {
+                8 => v["set"] = json!({"text": format!("{}\n{}", text(r, 30), text(r, 30))}),
+                9 => v["append"] = json!({"hunks": [{"id": format!("h{}", 3 + r.below(4)), "lines": ["+z"]}]}),
+                10 => v["append"] = json!({"series": [0]}),
                 0 => v["set"] = json!({"text": text(r, 300)}),
                 1 => v["set"] = json!({"title": text(r, 60)}),
                 2 => v["state"] = json!({ *r.pick(&ITEMS): *r.pick(&["doing", "done", "todo", "failed"]) }),
@@ -132,7 +165,7 @@ fn op(r: &mut Rng) -> Value {
             let mut ids: Vec<String> = (0..1 + r.below(4)).map(|_| id(r)).collect();
             ids.sort();
             ids.dedup();
-            let into = block_id(r);
+            let into = if r.chance(70) { format!("grp{}", r.below(3)) } else { block_id(r) };
             ids.retain(|i| *i != into);
             if ids.is_empty() {
                 ids.push("zz".into());
@@ -226,9 +259,12 @@ fn history_of(r: &mut Rng, turns: usize, complete: bool) -> (Vec<Event>, Vec<std
     let mut tool = 0;
     for _ in 0..turns {
         let mut calls: Vec<(String, Value, &str)> = Vec::new();
-        for _ in 0..1 + r.below(3) {
+        // Now and then a burst of calls in one message, and a provider's
+        // long tool id.
+        let n = if r.chance(4) { 20 + r.below(20) } else { 1 + r.below(3) };
+        for _ in 0..n {
             tool += 1;
-            let t = format!("toolu_{tool:04}");
+            let t = if r.chance(5) { format!("toolu_{tool:04}_{}", "x".repeat(2048)) } else { format!("toolu_{tool:04}") };
             let (name, input) = match r.below(12) {
                 0 => ("cards_ui", ask()),
                 1 => ("bash", Value::Null),
@@ -344,6 +380,8 @@ fn check(s: &State, what: &str) {
 fn random_histories_keep_the_caps_at_every_event() {
     let mut r = Rng(0xb0a2_d001);
     let mut ops = 0;
+    // What the streams did, not only tried: each transition must occur.
+    let mut seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for case in 0..40 {
         let (events, _) = history(&mut r, 60);
         let mut b = Board::new(generation());
@@ -353,9 +391,58 @@ fn random_histories_keep_the_caps_at_every_event() {
             check(&v, &format!("case {case} event {i}"));
             check(&b.bound(&events), &format!("case {case} event {i} (bound)"));
             ops = ops.max(v.log().count());
+            *seen.entry("max live".into()).or_default() = seen.get("max live").copied().unwrap_or(0).max(v.live());
+            if v.blocks().any(|x| x.pending) {
+                *seen.entry("pending".into()).or_default() += 1;
+            }
+        }
+        let s = b.view(&events);
+        assert!(b.owned_bytes() <= WORKING_SET_MAX_BYTES, "case {case}");
+        for l in s.log() {
+            let what = match &l.outcome {
+                Outcome::SkippedPath(_, why) => format!("{:?} path {why:?}", l.did),
+                Outcome::Skipped(why) => format!("{:?} skipped {why:?}", l.did),
+                Outcome::Stale { .. } => format!("{:?} stale", l.did),
+                o => format!("{:?} {o:?}", l.did),
+            };
+            *seen.entry(what).or_default() += 1;
+        }
+        if s.tombstones().count() > 0 {
+            *seen.entry("tombstones".into()).or_default() += 1;
+        }
+        if s.blocks().any(|x| x.kind == Kind::Group) {
+            *seen.entry("groups".into()).or_default() += 1;
         }
     }
     assert_eq!(ops, LOG_MAX, "the streams reach the log's cap");
+    let count = |want: &str| seen.iter().filter(|(k, _)| k.starts_with(want)).map(|(_, n)| n).sum::<usize>();
+    for want in [
+        "Put Applied",
+        "Patch Applied",
+        "Patch NoChange",
+        "Replace Applied",
+        "Collapse Applied",
+        "Run Applied",
+        "Merge Applied",
+        "Move Applied",
+        "Remove Applied",
+        "Call Unbound",
+        "Edit Applied",
+        "Edit skipped Rewritten",
+        "Notice Applied",
+        "Notice stale",
+        "Patch path FromEdits",
+        "Patch path Removed",
+        "Patch path NotKind",
+        "Put skipped Full",
+        "Merge skipped InGroup",
+        "pending",
+        "tombstones",
+        "groups",
+    ] {
+        assert!(count(want) > 0, "never: {want}; seen {seen:?}");
+    }
+    assert_eq!(seen["max live"], block::LIVE_MAX, "{seen:?}");
 }
 
 #[test]
