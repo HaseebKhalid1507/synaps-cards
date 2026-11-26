@@ -451,8 +451,9 @@ fn any_split_of_a_history_folds_to_the_whole() {
     for case in 0..30 {
         let (events, _) = history(&mut r, 40);
         let whole = Board::fold(generation(), &events);
-        for _ in 0..6 {
-            let k = r.below(events.len() + 1);
+        // Every split of the first three histories, six of the rest.
+        let splits: Vec<usize> = if case < 3 { (0..=events.len()).collect() } else { (0..6).map(|_| r.below(events.len() + 1)).collect() };
+        for k in splits {
             // A reattach: the history up to k, then the rest as it comes.
             let mut b = Board::fold(generation(), &events[..k]);
             let again = b.clone();
@@ -693,24 +694,37 @@ fn adversarial_streams_stay_under_one_mib() {
     for _ in 0..70 {
         call(&mut events, json!([{"op":"collapse","run":true,"summary":"😀".repeat(80)}]));
     }
-    let s = state(&events);
-    for _ in 0..40 {
+    // 40 hand-backs on p0, each rewriting every label as long as before,
+    // so the plan stays at its size; then a 32nd block.
+    let mut rb = Board::fold(generation(), &events);
+    for round in 0..40 {
+        rb.read(&events);
+        let s = rb.view(&events);
         let b = s.block(&Ref::parse("p0").unwrap()).unwrap();
         let Body::Plan(p) = &b.body else { panic!() };
         let mut set = serde_json::Map::new();
         for st in &p.steps {
-            set.insert(format!("steps.{}.label", st.id.as_str()), json!("y"));
-            set.insert(format!("steps.{}.stop", st.id.as_str()), json!(false));
+            set.insert(format!("steps.{}.label", st.id.as_str()), json!(if round % 2 == 0 { "😁" } else { "😀" }.repeat(30)));
+            set.insert(format!("steps.{}.stop", st.id.as_str()), json!(round % 2 == 0));
         }
         let e = Edit::new(b.id.clone(), b.rev, b.tag, &json!({ "set": set })).unwrap();
         events.push(Event::User { text: message::build(&e, &Summary::default()).unwrap() });
     }
+    call(&mut events, json!([{"op":"put","id":"last","kind":"note","title":"😀".repeat(80),"body":{"text":"😀".repeat(500)}}]));
     let s = state(&events);
-    check(&s, "adversarial");
     assert_eq!(
         (s.live(), s.records().count(), s.log().count(), s.visibility().len(), s.runs().count(), s.outcomes().count()),
-        (31, RECORDS_MAX, LOG_MAX, VISIBILITY_MAX, RUNS_MAX, OUTCOMES_MAX)
+        (32, RECORDS_MAX, LOG_MAX, VISIBILITY_MAX, RUNS_MAX, OUTCOMES_MAX)
     );
+    let p0 = s.block(&Ref::parse("p0").unwrap()).unwrap();
+    assert!(p0.body.bytes() > 3_500 && p0.writer_count() >= 40, "p0 stays at its size: {} B", p0.body.bytes());
+    // Every prefix, not only the end: the board read event by event.
+    let mut b = Board::new(generation());
+    for i in 0..events.len() {
+        b.read(&events[..=i]);
+        check(&b.view(&events), &format!("adversarial event {i}"));
+        assert!(b.owned_bytes() <= WORKING_SET_MAX_BYTES, "event {i}");
+    }
     assert!(s.blocks().filter(|b| b.item_ids() == block::ITEM_IDS_MAX).count() >= 16);
     let total = s.owned_bytes();
     eprintln!("adversarial working set: {total} bytes; by owner {:?}", s.owned_by_owner());
@@ -801,4 +815,161 @@ fn every_record_refolds_to_its_revision() {
         }
     }
     assert!(checked >= 500, "{checked}");
+}
+
+fn assistant(content: Vec<Value>) -> Value {
+    json!({ "role": "assistant", "content": content })
+}
+
+fn user_results(content: Vec<Value>) -> Value {
+    json!({ "role": "user", "content": content })
+}
+
+fn tool_result(id: &str, content: Value) -> Value {
+    json!({ "type": "tool_result", "tool_use_id": id, "content": content })
+}
+
+/// §1.7 (P2-1), from raw messages through `fold::events`: a block call
+/// applies exactly when its own result, in the message right after its own,
+/// binds it. Results go missing, come without text, as an image, cancelled,
+/// late (in a later message), or the next message is the assistant's again;
+/// other tools' calls and results ride along.
+#[test]
+fn raw_histories_bind_a_call_only_by_its_result_in_the_next_message() {
+    let mut r = Rng(0x7a40_e5d1);
+    let mut kinds = [0usize; 7];
+    for case in 0..300 {
+        let mut messages = vec![json!({"role":"user","content":"start"})];
+        let mut expect: Vec<(String, bool)> = Vec::new();
+        let mut withheld: Vec<Value> = Vec::new();
+        for turn in 0..6 {
+            // Earlier turns' receipts, held back: from here on they are late.
+            let mut late = std::mem::take(&mut withheld);
+            let mut uses = Vec::new();
+            let mut results = Vec::new();
+            let mut turn_expect = Vec::new();
+            for k in 0..1 + r.below(3) {
+                let t = format!("toolu_{case}_{turn}_{k}");
+                if r.chance(25) {
+                    uses.push(json!({"type":"tool_use","id":t,"name":"bash","input":{"command":"ls"}}));
+                    if r.chance(80) {
+                        results.push(tool_result(&t, json!("a\nb")));
+                    }
+                    continue;
+                }
+                let id = format!("b{turn}{k}");
+                let ops = json!([{"op":"put","id":id,"kind":"note","body":{"text":"x"}}]);
+                uses.push(json!({"type":"tool_use","id":t,"name":"cards_block","input":{"ops":ops}}));
+                let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+                let way = r.below(7);
+                kinds[way] += 1;
+                let binds = match way {
+                    0 => {
+                        withheld.push(tool_result(&t, json!(receipt)));
+                        false
+                    }
+                    1 => {
+                        results.push(tool_result(&t, json!([])));
+                        false
+                    }
+                    2 => {
+                        results.push(tool_result(
+                            &t,
+                            json!([{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]),
+                        ));
+                        false
+                    }
+                    3 => {
+                        results.push(tool_result(&t, json!("Tool execution was cancelled.")));
+                        false
+                    }
+                    4 => {
+                        results.push(tool_result(&t, json!([{"type":"text","text":receipt}])));
+                        true
+                    }
+                    _ => {
+                        results.push(tool_result(&t, json!(receipt)));
+                        true
+                    }
+                };
+                turn_expect.push((id, binds));
+            }
+            messages.push(assistant(uses));
+            // Late receipts of earlier turns ride in this message: too late.
+            if r.chance(50) {
+                results.append(&mut late);
+            } else {
+                withheld.append(&mut late);
+            }
+            if r.chance(85) || turn == 5 {
+                messages.push(user_results(results));
+                expect.extend(turn_expect);
+                if r.chance(40) {
+                    messages.push(json!({"role":"user","content":"go on"}));
+                }
+            } else {
+                // The next message is the assistant's: this turn's calls
+                // never get a result.
+                kinds[6] += 1;
+                expect.extend(turn_expect.into_iter().map(|(id, _)| (id, false)));
+            }
+        }
+        let (board, events) = Board::of_history(&messages);
+        let s = board.bound(&events);
+        assert_eq!(s, board.view(&events), "case {case}: the last message's results are in, nothing pending");
+        for (id, binds) in &expect {
+            assert_eq!(s.block(&Ref::parse(id).unwrap()).is_some(), *binds, "case {case}: {id}");
+        }
+        check(&s, &format!("case {case}"));
+    }
+    assert!(kinds.iter().all(|&n| n > 20), "{kinds:?}");
+}
+
+/// §1.8: the board, the overlay and the scratch at their caps together, with
+/// a burst of pending maximal calls on top: each ≤ 1 MiB.
+#[test]
+fn the_board_the_overlay_and_the_scratch_stay_under_their_caps_together() {
+    let mut events = Vec::new();
+    let long = |p: &str, i: usize| format!("{p}{i:0>w$}", w = block::ITEM_ID_MAX - p.len());
+    let mut tool = 0;
+    let mut call = |events: &mut Vec<Event>, ops: Value, bind: bool| {
+        tool += 1;
+        let t = format!("toolu_{tool:05}_{}", "x".repeat(1024));
+        let receipt = block::parse_call(&json!({ "ops": ops })).unwrap().receipt().to_string();
+        events.push(Event::Call { tool_id: t.clone(), name: "cards_block".into(), input: json!({ "ops": ops }) });
+        if bind {
+            events.push(Event::Result { tool_id: t, text: receipt });
+            events.push(Event::ResultsEnd);
+        }
+    };
+    for k in 0..32 {
+        let steps: Vec<Value> = (0..20).map(|i| json!({"id": long("s", i), "label": "😀".repeat(30)})).collect();
+        call(&mut events, json!([{"op":"put","id":long("p", k),"kind":"plan","title":"😀".repeat(80),"body":{"steps":steps}}]), true);
+    }
+    for round in 0..70 {
+        let ops: Vec<Value> =
+            (0..16).map(|k| json!({"op":"patch","id":long("p", (round * 16 + k) % 32),"set":{"title": format!("{round}-{k}")}})).collect();
+        call(&mut events, json!(ops), true);
+    }
+    let mut b = Board::fold(generation(), &events);
+    let committed = b.owned_bytes();
+    // A burst of pending calls, each a maximal patch.
+    for k in 0..200 {
+        let labels: serde_json::Map<String, Value> =
+            (0..20).map(|i| (format!("steps.{}.label", long("s", i)), json!("é".repeat(100)))).collect();
+        call(&mut events, json!([{"op":"patch","id":long("p", k % 32),"set":labels}]), false);
+    }
+    b.read(&events);
+    let overlay = b.view(&events);
+    let rec = overlay.records().next().unwrap().clone();
+    let mut rf = Refold::to(generation(), &events, Target::Revision(rec.at)).unwrap();
+    while !rf.step(1000) {}
+    let scratch = rf.state().unwrap();
+    let all = [b.owned_bytes(), overlay.owned_bytes(), scratch.owned_bytes()];
+    eprintln!("board {}, overlay {}, scratch {} bytes", all[0], all[1], all[2]);
+    assert_eq!(b.owned_bytes(), committed, "pending calls add nothing to the board");
+    assert!(all.iter().all(|&n| n <= WORKING_SET_MAX_BYTES), "{all:?}");
+    check(&overlay, "overlay");
+    check(scratch, "scratch");
+    assert_eq!(overlay.live(), 32);
 }
