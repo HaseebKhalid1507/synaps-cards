@@ -77,7 +77,16 @@
 //! 6. re-folds ([`Refold`]) in small steps, the 30 ms clock checked between
 //!    them (a step can't be preempted, and does at most its budget of
 //!    work), one scratch at a time; `too far back to show` on a [`TooFar`]
-//!    from a step as from [`Refold::to`].
+//!    from a step as from [`Refold::to`]; a re-fold whose revision or
+//!    history changed dropped, not finished ([`Refold::visited`] is its
+//!    progress: [`Refold::position`] can stand still through a commit);
+//! 7. the board's work off the UI frame: [`Board::read`], [`Board::view`]
+//!    and [`Board::bound`] run to their end and can't be cancelled, so they
+//!    run off the frame, live events coalesced, not one fold a render or a
+//!    chunk; only a finished, coherent board is published, the last one
+//!    drawn until then (never a [`Refold`] run to its end on the frame, or
+//!    a synchronous [`Board::view`] as a peek), and a take whose bound
+//!    board went stale is disabled or checked again.
 //!
 //! **Decisions.** Where the design left a contract or something the user
 //! sees open, B2 took a default, made in one function marked `Decision Dn`.
