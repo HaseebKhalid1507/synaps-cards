@@ -8,7 +8,8 @@ the results) or `judged` (taskset.py).
 event-started turns are listed apart, outside every denominator.
 
 **A gate row** passes only if it passes on the pooled runs **and** in at
-least 2 of the 3 repeats (§2.8). Where §2.8 leaves the population open,
+least 2 of the 3 repeats (§2.8): always 2 of repeats 1, 2 and 3, a repeat
+with no runs failing every row. Where §2.8 leaves the population open,
 the reading here is the stricter one, and each is stated:
 - *block-call output per turn* is over the on-turns that made at least one
   block call (a turn with none adds a zero that would pull the median
@@ -40,18 +41,37 @@ rounds of their own). One off-run plays its task's category if:
 - *interactive*: the user's answer or hand-back was sent, not skipped
   (no card showing, or none to answer).
 
-A task holds its shape if more than half its off-runs played it (2 of 3).
+A task holds its shape if at least 2 of its 3 off-runs (repeats 1–3)
+played it; a run that isn't there didn't.
 The shape holds if every category has at least §2.8's minimum of tasks
 holding theirs (`taskset.CATEGORIES`), and **the gate passes only if the
 shape holds**: a run that didn't play §2.8's set didn't measure it. Every
-task short of its shape is named; a change of the set, if one is needed,
-is made before B5b's first run (eval/README.md).
+task short of its shape is named.
+
+**The verdict** keeps what the rows say apart from what they license:
+- `rows_pass`: every gate row passes (pooled and 2 of 3). Descriptive.
+- `eligible_for_b6`: the run is the experiment §2.8 prescribes, so its rows
+  can flip the default. Every condition is checked and each one missing is
+  named (`not_eligible_because`): a real run (a dry run is never data); a
+  counter that can flip the default (the endpoint, or a fitted proxy:
+  count.py); the frozen task set (its digest); exactly three repeats; the
+  plan's runs, every runnable task × both arms × repeats 1–3, each there
+  once, none stopped (an interrupted run is incomplete, not a smaller
+  experiment); every user-initiated turn of every run measured (turns.py:
+  its `idle`, every response's usage); no task left out (B6 needs the D8
+  hand-backs' both arms, which B5a doesn't run: §8.1's B5b); and the set's
+  shape.
+- `verdict`: `not eligible` unless it is eligible, whatever the rows say;
+  then `passes` or `fails`. `gate_pass` is the verdict `passes`.
 """
 
+import collections
 import json
 import statistics
 
 from . import classify, count, taskset, turns
+
+REPEATS = (1, 2, 3)  # §2.8: "three times each"
 
 GATE = {
     "block_output_per_turn": {"kind": "attributed", "median": 500, "p90": 900, "target": 400},
@@ -209,7 +229,7 @@ def set_shape(records, turn_rows):
             if rec.get("category") == cat and rec["arm"] == "off":
                 ok = played(cat, rows_of_run.get((rec["task"], rec["repeat"]), []), rec.get("steps", []))
                 runs.setdefault(rec["task"], []).append(ok)
-        held = sorted(t for t, oks in runs.items() if 2 * sum(oks) > len(oks))
+        held = sorted(t for t, oks in runs.items() if sum(oks) >= 2)
         need = taskset.CATEGORIES[cat]
         out[cat] = {"plays": says, "tasks": len(runs), "held": len(held), "need": need,
                     "short_of": sorted(set(runs) - set(held))}
@@ -218,24 +238,66 @@ def set_shape(records, turn_rows):
     return out
 
 
-def build(records, counter, definition, not_run, meta):
-    """The whole report (module docs)."""
+def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
+    """Why the run can't flip the default: empty when it can (module docs,
+    "The verdict")."""
+    out = []
+    if meta.get("mode") != "real":
+        out.append(f"a {meta.get('mode')} run, never data")
+    c = counter.describe()
+    if not c.get("can_flip_default"):
+        out.append(f"the counter is {c.get('kind')}, which can't flip the default" + (f": {c['why_not']}" if c.get("why_not") else ""))
+    frozen = taskset.FROZEN.read_text().split()[0]
+    if meta.get("taskset") != frozen:
+        out.append(f"task set {str(meta.get('taskset'))[:12]}, not the frozen {frozen[:12]}")
+    if meta.get("repeats") != len(REPEATS):
+        out.append(f"{meta.get('repeats')} repeats, not §2.8's {len(REPEATS)}")
+    if plan is None:
+        out.append("no plan to check the runs against")
+    else:
+        want = collections.Counter(plan)
+        have = collections.Counter((r["task"], r["arm"], r["repeat"]) for r in records)
+        missing, extra = want - have, have - want
+        if missing:
+            out.append(f"{sum(missing.values())} of the plan's {sum(want.values())} runs missing (an interrupted run is incomplete)")
+        if extra:
+            out.append(f"{sum(extra.values())} runs the plan doesn't have, or twice")
+    stopped = [r for r in records if r.get("stopped")]
+    if stopped:
+        out.append(f"{len(stopped)} runs stopped: " + ", ".join(sorted({r['stopped'] for r in stopped})))
+    measured = collections.defaultdict(list)
+    for r in turn_rows:
+        measured[(r["task"], r["arm"], r["repeat"])].append(r.get("measured", False))
+    bad = [rec for rec in records if not measured.get((rec["task"], rec["arm"], rec["repeat"]))
+           or not all(measured[(rec["task"], rec["arm"], rec["repeat"])])]
+    if bad:
+        out.append(f"{len(bad)} runs with a turn not measured (no idle, an error, aborted, or a response with no usage)")
+    if not_run:
+        out.append(f"{len(not_run)} tasks not run ({', '.join(t['id'] for t in not_run)}): B6 needs them, both arms (B5b)")
+    if not shape["holds"]:
+        out.append("the set's shape doesn't hold")
+    return out
+
+
+def build(records, counter, definition, not_run, meta, plan=None):
+    """The whole report (module docs). `plan` is the run's prescribed runs,
+    `(task, arm, repeat)` (harness.plan, three repeats), for eligibility."""
     turn_rows, event_started, judged = [], [], []
     for rec in records:
         rows, ev = per_turn(rec, counter)
         turn_rows += rows
         event_started += [dict(e, task=rec["task"], arm=rec["arm"], repeat=rec["repeat"]) for e in ev]
-        judged.append({"task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "pass": rec["judge"]["pass"]})
-    repeats = sorted({r["repeat"] for r in records})
+        if (rec.get("judge") or {}).get("pass") is not None:
+            judged.append({"task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "pass": rec["judge"]["pass"]})
     pooled = rows_of(turn_rows, judged, definition)
+    ran = {rec["repeat"] for rec in records}
     by_repeat = {r: rows_of([x for x in turn_rows if x["repeat"] == r], [j for j in judged if j["repeat"] == r], definition)
-                 for r in repeats}
+                 if r in ran else {k: {"pass": False, "runs": 0} for k in GATE} for r in REPEATS}
     gate = {}
     for k in GATE:
-        held = [r for r in repeats if by_repeat[r][k]["pass"]]
-        need = min(2, len(repeats))
+        held = [r for r in REPEATS if by_repeat[r][k]["pass"]]
         gate[k] = {"kind": GATE[k]["kind"], "pooled": pooled[k], "repeats_passing": held,
-                   "pass": pooled[k]["pass"] and len(held) >= need}
+                   "pass": pooled[k]["pass"] and len(held) >= 2}
     on = [r for r in turn_rows if r["arm"] == "on"]
     also = {
         "closing_input": sum(r["closing"]["input"] for r in on),
@@ -254,11 +316,15 @@ def build(records, counter, definition, not_run, meta):
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
     }
     shape = set_shape(records, turn_rows)
+    rows_pass = all(g["pass"] for g in gate.values())
+    why_not = eligibility(records, turn_rows, counter, not_run, meta, plan, shape)
+    verdict = "not eligible" if why_not else ("passes" if rows_pass else "fails")
     return {
         "meta": meta | {"counter": counter.describe()},
         "turns": len(turn_rows), "event_started": event_started,
         "not_run": [{"task": t["id"], "needs": t["needs"], "why": f"needs {', '.join(t['needs'])}, not run"} for t in not_run],
-        "gate": gate, "set_shape": shape, "gate_pass": all(g["pass"] for g in gate.values()) and shape["holds"],
+        "gate": gate, "set_shape": shape, "rows_pass": rows_pass,
+        "eligible_for_b6": not why_not, "not_eligible_because": why_not, "verdict": verdict, "gate_pass": verdict == "passes",
         "also": also,
         "outcomes": judged,
         "turn_rows": turn_rows,
@@ -290,7 +356,9 @@ def markdown(rep):
                      + (f", short: {', '.join(f'`{t}`' for t in s[c]['short_of'])}" if s[c]["short_of"] else "")
                      for c in SHAPE)
     lines += ["", f"The set's shape, blocks off: {'holds' if s['holds'] else '**does not hold**'}: {cats}.",
-              f"Gate: {'passes' if rep['gate_pass'] else '**fails**'} (every row, pooled and in 2 of 3 repeats, and the set's shape)."]
+              f"Gate rows: {'every row passes' if rep['rows_pass'] else '**not every row passes**'} (pooled and in 2 of 3 repeats).",
+              "Eligible for B6: " + ("yes" if rep["eligible_for_b6"] else "**no**: " + "; ".join(rep["not_eligible_because"])) + ".",
+              f"Gate: {rep['verdict'] if rep['verdict'] == 'passes' else '**' + rep['verdict'] + '**'}."]
     lines += ["", f"Also reported: `{json.dumps({k: v for k, v in rep['also'].items() if k != 'reported_per_arm'}, sort_keys=True)}`", ""]
     if rep["not_run"]:
         lines.append("Not run: " + ", ".join(f"`{t['task']}` ({t['why']})" for t in rep["not_run"]) + ".")

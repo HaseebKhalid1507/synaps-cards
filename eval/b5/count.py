@@ -87,6 +87,9 @@ class Scripted(Calibrated):
     kind = "scripted"
     can_flip_default = False
 
+    def describe(self):
+        return super().describe() | {"why_not": "the dry run's, against the scripted model"}
+
 
 class Uncalibrated(Counter):
     kind = "uncalibrated"
@@ -101,7 +104,8 @@ class Uncalibrated(Counter):
         return self.proxy(text)
 
     def describe(self):
-        return super().describe() | {"proxy": self.proxy_name, "framing": UNCALIBRATED_FRAMING}
+        return super().describe() | {"proxy": self.proxy_name, "framing": UNCALIBRATED_FRAMING,
+                                     "why_not": "a provider that can't be probed: §2.8's uncalibrated estimate"}
 
 
 class Endpoint(Counter):

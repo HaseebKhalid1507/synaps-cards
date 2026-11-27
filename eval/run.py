@@ -119,6 +119,8 @@ def dry(a, tasks, frozen):
 
 
 def real(a, tasks, frozen):
+    if a.repeats != len(report.REPEATS):
+        raise SystemExit(f"a real run is §2.8's {len(report.REPEATS)} repeats, not --repeats {a.repeats}")
     if not (a.model and a.budget_usd and a.approved and a.desk):
         raise SystemExit("a real run takes --model, --budget-usd, --approved MODEL@USD and --desk (run.py's docs)")
     if a.approved != f"{a.model}@{a.budget_usd:g}":
@@ -233,10 +235,11 @@ def run_all(a, tasks, iso, model_id, the_desk, work, model=None, tap=None, budge
 
 
 def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, mode, model):
-    _, not_run = harness.plan(tasks, a.repeats)
+    # Eligibility checks the runs against the prescribed plan: three repeats, whatever --repeats was.
+    order, not_run = harness.plan(tasks, len(report.REPEATS))
     meta = {"mode": mode, "model": model, "head": daemon_rec.get("head"), "taskset": frozen, "repeats": a.repeats,
             "synaps": daemon_rec.get("synaps_version"), "daemon": daemon_rec, "secs": round(time.time() - started, 1)}
-    rep = report.build(records, counter, definition, not_run, meta)
+    rep = report.build(records, counter, definition, not_run, meta, plan=[(t["id"], arm, r + 1) for r, t, arm in order])
     (work / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
     (work / "report.md").write_text(report.markdown(rep))
     print(report.markdown(rep))

@@ -10,7 +10,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from b5 import count, desk, estimate, harness, providers, report, spend, taskset
+import run
+from b5 import calibrate, count, desk, estimate, harness, providers, report, spend, taskset
 from b5.calibrate import compact
 from wire import BLOCK, PUT, Wire
 
@@ -352,6 +353,139 @@ class _Counter:
         return {"kind": "test"}
 
 
+def qualifying():
+    """A fitted proxy (count.Calibrated): a counter that can flip the default.
+    0.3 tokens a character, a framing of 9."""
+    receipt = len(calibrate.RECEIPT)
+    pts = [(x, 9.0 + 0.3 * (receipt + x)) for x in range(10, 10 + 3 * calibrate.CALIBRATION_MIN, 3)]
+    return count.Calibrated(calibrate.fit(pts, "chars", receipt), len)
+
+
+def thirds(s):
+    """A proxy for the uncalibrated counter: a token per 3 characters."""
+    return len(s) // 3
+
+
+def frozen_meta(**kw):
+    return {"mode": "real", "taskset": taskset.FROZEN.read_text().split()[0], "repeats": 3} | kw
+
+
+class Eligibility(unittest.TestCase):
+    """The verdict (report.py's "The verdict"): rows that pass license
+    nothing unless the run is §2.8's experiment. Every run here is built
+    on the session wire and read by the real parser, as Shady's
+    counterexamples were: the frozen set's runnable tasks, each category
+    as it plays, every gate row passing."""
+
+    @staticmethod
+    def run_events(task, arm, cut=False):
+        w = Wire().start(task["turns"][0]["say"])
+        cat, ids = task["category"], []
+        if cat == "no_tool":
+            w.round(text="An answer.")
+        elif cat == "short":
+            w.results(w.round([("read", {"path": "a"})]))
+            w.round(text="An answer.")
+        else:
+            if cat == "interactive":
+                w.results(w.round([("cards_ui", {"question": "Which?"})]), "Card cabc123 is showing (cards/1 #1): Which?")
+                w.round(text="Waiting.")
+                w.done()
+                w.start("[card cabc123] Which? → A")
+            for k in range(5):
+                calls = [("bash", {"k": k})] + ([("cards_block", BLOCK)] if arm == "on" and k in (0, 4) else [])
+                got = w.round(calls)
+                ids += got[1:]
+                w.results(got)
+            if cut:
+                w.stream("llm", "response_start").stream("llm", "text", text="Done.")
+            else:
+                w.round(text="Done.")
+        return w.done().events, ids
+
+    def records(self, repeats=(1, 2, 3), drop=0, cut=None):
+        recs = []
+        for r, t, arm in harness.plan(TASKS, 3)[0]:
+            if r + 1 not in repeats:
+                continue
+            events, ids = self.run_events(t, arm, cut=(t["id"], arm, r + 1) == cut)
+            lines = [{"tool_id": i, "event": n, "op": 0, "author": "agent", "did": "patch", "outcome": "applied",
+                      "dismissed_before": False} for n, i in enumerate(ids)]
+            recs.append({"task": t["id"], "category": t["category"], "arm": arm, "repeat": r + 1, "events": events,
+                         "fold": {"lines": lines}, "judge": {"pass": True},
+                         "steps": [{"step": "answer", "card": "cabc123"}] if t["category"] == "interactive" else []})
+        return recs[:len(recs) - drop]
+
+    def build(self, recs, counter=None, not_run=(), **meta):
+        plan = [(t["id"], arm, r + 1) for r, t, arm in harness.plan(TASKS, 3)[0]]
+        return report.build(recs, counter or qualifying(), 900, list(not_run), frozen_meta(**meta), plan=plan)
+
+    def test_one_repeat_and_an_uncalibrated_counter_is_not_eligible(self):
+        # Shady's first counterexample: it passed the gate.
+        rep = self.build(self.records(repeats=(1,)), count.Uncalibrated(thirds, "thirds"), repeats=1)
+        self.assertFalse(rep["gate_pass"], "one repeat with an uncalibrated counter is no licence")
+        self.assertEqual(rep["verdict"], "not eligible")
+        why = " / ".join(rep["not_eligible_because"])
+        for part in ("uncalibrated", "1 repeats", "240 runs missing"):
+            self.assertIn(part, why)
+
+    def test_three_repeats_with_an_uncalibrated_counter_are_not_eligible(self):
+        rep = self.build(self.records(), count.Uncalibrated(thirds, "thirds"))
+        self.assertTrue(rep["rows_pass"])
+        self.assertFalse(rep["gate_pass"])
+        self.assertEqual(len(rep["not_eligible_because"]), 1)
+        self.assertIn("the counter is uncalibrated", rep["not_eligible_because"][0])
+
+    def test_the_d8_tasks_not_run_leave_it_not_eligible(self):
+        d8 = [t for t in TASKS if t["needs"]]
+        rep = self.build(self.records(), not_run=d8)
+        self.assertFalse(rep["gate_pass"])
+        self.assertEqual(len(rep["not_eligible_because"]), 1)
+        self.assertIn(f"{len(d8)} tasks not run", rep["not_eligible_because"][0])
+        self.assertIn("Gate: **not eligible**", report.markdown(rep))
+
+    def test_an_interrupted_run_is_incomplete_not_a_smaller_experiment(self):
+        # A budget stop after two whole repeats: they pass, 2 of 3.
+        rep = self.build(self.records(repeats=(1, 2)))
+        self.assertTrue(all(g["repeats_passing"] == [1, 2] for g in rep["gate"].values()))
+        self.assertFalse(rep["gate_pass"])
+        self.assertIn("80 of the plan's 240 runs missing (an interrupted run is incomplete)", rep["not_eligible_because"])
+        rep = self.build(self.records(drop=5))
+        self.assertFalse(rep["gate_pass"])
+        self.assertIn("5 of the plan's 240 runs missing", " / ".join(rep["not_eligible_because"]))
+        rep = self.build(self.records()[:-1] + [dict(self.records()[-1], stopped="over budget")])
+        self.assertFalse(rep["gate_pass"])
+        self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
+
+    def test_a_run_with_a_turn_not_measured_is_not_eligible(self):
+        coding = next(t["id"] for t in TASKS if t["category"] == "coding")
+        rep = self.build(self.records(cut=(coding, "on", 2)))
+        self.assertFalse(rep["gate_pass"])
+        self.assertIn("1 runs with a turn not measured", " / ".join(rep["not_eligible_because"]))
+
+    def test_a_dry_run_and_another_task_set_are_never_eligible(self):
+        recs = self.records()
+        self.assertIn("a dry run, never data", self.build(recs, mode="dry")["not_eligible_because"])
+        self.assertIn("not the frozen", " / ".join(self.build(recs, taskset="0" * 64)["not_eligible_because"]))
+
+    def test_the_whole_plan_measured_real_and_calibrated_is_eligible(self):
+        recs = self.records()
+        rep = self.build(recs)
+        self.assertEqual((rep["not_eligible_because"], rep["verdict"], rep["gate_pass"]), ([], "passes", True))
+        self.assertIn("Eligible for B6: yes.", report.markdown(rep))
+        worse = [dict(r, judge={"pass": False}) if r["arm"] == "on" and r["repeat"] < 3 and r["task"] == recs[0]["task"] else r
+                 for r in recs]
+        rep = self.build(worse)
+        self.assertEqual((rep["eligible_for_b6"], rep["verdict"], rep["gate_pass"]), (True, "fails", False))
+
+    def test_a_real_run_takes_three_repeats(self):
+        argv = ["--provider", "anthropic", "--synaps", "/nonexistent/synaps", "--model", "claude-haiku-4-5", "--budget-usd", "5",
+                "--approved", "claude-haiku-4-5@5", "--desk", "/nonexistent/desk", "--repeats", "1"]
+        with self.assertRaises(SystemExit) as e:
+            run.main(argv)
+        self.assertIn("3 repeats", str(e.exception))
+
+
 class SetShape(unittest.TestCase):
     """§2.8's set as the run played it, blocks off (report.py's "The set's
     shape"): 20 coding tasks of ≥ 6 rounds, 10 short of 1–2, 5 with no tool
@@ -432,10 +566,11 @@ class SetShape(unittest.TestCase):
         for r in rows:
             by.setdefault((r["task"], r["arm"], r["repeat"]), []).append(r)
         orig = (report.per_turn, report.rows_of)
-        report.per_turn = lambda rec, counter: (by[(rec["task"], rec["arm"], rec["repeat"])], [])
+        report.per_turn = lambda rec, counter: ([dict(x, measured=True) for x in by[(rec["task"], rec["arm"], rec["repeat"])]], [])
         report.rows_of = lambda *a: {k: {"pass": True} for k in report.GATE}
         try:
-            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], _Counter(), 900, [], {"mode": "test"})
+            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], qualifying(), 900, [], frozen_meta(),
+                                plan=[(r["task"], r["arm"], r["repeat"]) for r in recs])
         finally:
             report.per_turn, report.rows_of = orig
 
@@ -449,7 +584,8 @@ class SetShape(unittest.TestCase):
         self.assertFalse(rep["gate_pass"], "a run that didn't play §2.8's set didn't measure it")
         md = report.markdown(rep)
         self.assertIn("The set's shape, blocks off: **does not hold**: coding 19 of 20 (≥ 6 rounds; ≥ 20), short: `coding-7`, short 10", md)
-        self.assertIn("Gate: **fails**", md)
+        self.assertIn("Gate: **not eligible**", md)
+        self.assertIn("Eligible for B6: **no**: the set's shape doesn't hold.", md)
 
 
 if __name__ == "__main__":
