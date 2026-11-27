@@ -4,19 +4,25 @@ session/wire.rs` 869-1030: `WireSessionEvent`, `WireLlmEvent`,
 `WireSessionStreamEvent`, `WireAgentEvent`).
 
 **A turn** is one run from its `turn_started` to the session's `idle`,
-steers included. Its `trigger` (`session/types.rs` 1631-1639) says who
-started it: `user` is a user's message, and `queued_auto` is the user's
-own steer that missed the last drain and started the next turn
-(`actor.rs` 3391-3395). Both are user-initiated and count. `event_auto`,
-`plugin_command`, `compaction` and `driver_auto` are event-started turns:
-reported apart, outside every denominator.
+steers included. It is **complete** only at its `idle`: a `session: done`
+with no `idle` after it (the stream cut off) leaves it `incomplete`. Its
+outcome is `done` at the `idle` unless an `error` or `aborted` came first.
+Its `trigger` (`session/types.rs` 1631-1639) says who started it: `user`
+is a user's message, and `queued_auto` is the user's own steer that missed
+the last drain and started the next turn (`actor.rs` 3391-3395). Both are
+user-initiated and count. `event_auto`, `plugin_command`, `compaction` and
+`driver_auto` are event-started turns: reported apart, outside every
+denominator.
 
 **A round** is one provider response: one `session: usage` event. The
 engine sends exactly one per request (`runtime/api.rs` 3444, "THE
 invariant"), so a round is counted when its usage comes. Its calls and text
 are the `llm` events since its `response_start`; a `response_reset`
 (a retried stream) drops what the round had drawn, since the retry streams
-it again.
+it again. **A response whose usage never came** (a stream that failed, was
+cut, or was retried into an error) is no round: it would count as zero
+tokens. It is kept apart, in the turn's `unmeasured`, and a turn with one
+isn't `measured`: the report keeps it out of an eligible run (report.py).
 
 **A call** comes in either of the wire's two forms (`wire.rs` 980-982):
 `tool_use_start` (its name and id) then `tool_use_delta`s (its arguments as
@@ -89,7 +95,15 @@ class Turn:
     # In wire order: ("user", text, is_steer), ("round", Round), ("result", Result).
     timeline: list = field(default_factory=list)
     steers: list = field(default_factory=list)  # (text, delivered) as `steered` reported them
-    outcome: str = "incomplete"  # done, error, aborted, incomplete (no `idle` seen)
+    outcome: str = "incomplete"  # done, error, aborted (at the `idle`), incomplete (no `idle` seen)
+    unmeasured: list = field(default_factory=list)  # responses whose usage never came (module docs)
+    saw_done: bool = False  # a `session: done` came (diagnostic: the `idle` decides)
+
+    @property
+    def measured(self):
+        """Complete (its `idle`, no error, not aborted), and every response
+        it streamed has its usage."""
+        return self.outcome == "done" and self.t_end is not None and not self.unmeasured
 
     @property
     def user_initiated(self):
@@ -115,6 +129,13 @@ def turns(events):
     def close():
         nonlocal turn
         if turn is not None:
+            # A response whose usage never came is no round (module docs).
+            turn.unmeasured = [r for r in turn.rounds if r.usage is None]
+            if turn.unmeasured:
+                turn.rounds = [r for r in turn.rounds if r.usage is not None]
+                turn.timeline = [x for x in turn.timeline if x[0] != "round" or x[1].usage is not None]
+                for i, r in enumerate(turn.rounds):
+                    r.index = i
             out.append(turn)
         turn = None
 
@@ -186,7 +207,7 @@ def turns(events):
                 r.usage["model"] = s.get("model")
                 r.t_end = t
             elif sess == "done":
-                turn.outcome = "done"
+                turn.saw_done = True
             elif sess == "error":
                 turn.outcome = "error"
         elif s.get("kind") == "agent" and s.get("agent") == "steering_delivered":

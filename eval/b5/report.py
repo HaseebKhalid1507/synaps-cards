@@ -109,6 +109,7 @@ def per_turn(rec, counter):
         mine = [ln for ln in lines if ln.get("tool_id") in ids and ln.get("author") == "agent" and ln.get("did") in count.OP_DIDS]
         rows.append({
             "task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "trigger": t.trigger, "outcome": t.outcome,
+            "measured": t.measured, "unmeasured_rounds": len(t.unmeasured),
             "rounds": len(t.rounds),
             "tool_calls": sum(len(r.calls) for r in t.rounds),
             "output": sum(r.output for r in t.rounds),

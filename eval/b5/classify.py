@@ -20,7 +20,9 @@ This is the one reading the classifier adds to the text.
 
 A `cards_ui` result counts as another tool's: a card is the turn's work.
 A turn that ended with no response after its anchor (cancelled, or an
-error) has k = 0: no closing rounds, and `complete` is false.
+error) has k = 0: no closing rounds, and `complete` is false. So is a turn
+that isn't `measured` (turns.py: no `idle`, an error, aborted, or a
+response with no usage, which could hide a closing round).
 """
 
 from dataclasses import dataclass
@@ -64,5 +66,5 @@ def closing(turn, block_tool=BLOCK_TOOL):
         closing_cache_read=u("cache_read_input_tokens"),
         closing_cache_write=u("cache_creation_input_tokens"),
         rounds=rs,
-        complete=bool(rs) and turn.outcome == "done",
+        complete=bool(rs) and turn.measured,
     )

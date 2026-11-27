@@ -89,6 +89,57 @@ class Turns(unittest.TestCase):
         a, b = turns(w.done().events)
         self.assertEqual((a.outcome, b.outcome), ("incomplete", "done"))
 
+    def test_done_with_no_idle_is_no_complete_turn(self):
+        # The stream ends after `done`, before the turn's `idle`, and the
+        # response never got its usage: no round, nothing complete.
+        w = Wire().start()
+        w.stream("llm", "response_start").stream("llm", "text", text="Fixed.").stream("session", "done")
+        t = one(w)
+        self.assertEqual((len(t.rounds), t.outcome, t.t_end, closing(t).complete), (0, "incomplete", None, False))
+        self.assertEqual((len(t.unmeasured), t.measured, t.saw_done), (1, False, True))
+
+    def test_a_response_whose_usage_never_came_is_no_round(self):
+        # Two measured rounds, then a final response that streamed text and
+        # was cut before its usage: zero tokens it wasn't.
+        w = Wire().start()
+        w.results(w.round([("bash", {})]))
+        w.results(w.round([("cards_block", BLOCK)]))
+        w.stream("llm", "response_start").stream("llm", "text", text="Done.")
+        t = one(w.done())
+        self.assertEqual([x[0] for x in t.timeline], ["user", "round", "result", "round", "result"])
+        self.assertFalse(closing(t).complete, "an unmeasured response could hide a closing round")
+        self.assertEqual((len(t.rounds), [r.index for r in t.rounds], len(t.unmeasured)), (2, [0, 1], 1))
+        self.assertEqual(t.unmeasured[0].text, "Done.")
+        self.assertEqual((t.outcome, t.measured), ("done", False))
+
+    def test_a_terminal_failure_is_no_round_and_no_measured_turn(self):
+        w = Wire().start()
+        w.stream("llm", "response_start").stream("llm", "text", text="Let me")
+        w.stream("session", "error", message="overloaded").ev({"ev": "idle"})
+        t = one(w)
+        self.assertEqual((len(t.rounds), t.outcome), (0, "error"))
+        self.assertEqual((len(t.unmeasured), t.measured), (1, False))
+
+    def test_a_retry_that_fails_is_no_round(self):
+        w = Wire().start()
+        w.results(w.round([("bash", {})]))
+        w.stream("llm", "response_start").stream("llm", "text", text="Half")
+        w.stream("llm", "response_reset").stream("llm", "text", text="Half again")
+        w.stream("session", "error", message="stream reset twice").ev({"ev": "idle"})
+        t = one(w)
+        self.assertEqual((len(t.rounds), t.outcome), (1, "error"))
+        self.assertEqual(([r.resets for r in t.unmeasured], t.measured), ([1], False))
+
+    def test_a_turn_with_its_idle_and_every_usage_is_measured(self):
+        w = Wire().start()
+        w.results(w.round([("bash", {})]))
+        w.round(text="Done.")
+        self.assertTrue(one(w.done()).measured)
+        w = Wire().start()
+        w.results(w.round([("bash", {})]))
+        w.ev({"ev": "aborted", "context_saved": True}).ev({"ev": "idle"})
+        self.assertEqual((one(w).outcome, one(w).measured), ("aborted", False))
+
     def test_steers_sit_where_the_engine_delivered_them(self):
         w = Wire().start()
         w.results(w.round([("bash", {})]))
