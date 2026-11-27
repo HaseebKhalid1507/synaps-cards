@@ -291,7 +291,7 @@ impl<'e> Reading<'e> {
         let skip = self.seen.chained();
         if self.i < skip {
             self.chain = link(self.chain, digest(b));
-        } else if self.chain == self.seen.older {
+        } else {
             let seen = self.left.is_none() && self.i < self.seen.n && digest(b) == self.seen.last[self.i - skip];
             if !seen {
                 self.left.get_or_insert(self.i);
@@ -312,7 +312,9 @@ impl<'e> Reading<'e> {
         (self.i >= self.seen.chained() && self.chain == self.seen.older).then(|| self.left.unwrap_or(self.i))
     }
 
-    /// What the history shows of ours: nothing, where it isn't placed.
+    /// What the history shows of ours: nothing, where it isn't placed (the
+    /// one place that rule is kept; what was read past the chain then
+    /// counts for nothing).
     fn look(&self) -> Look {
         match self.placed() {
             Some(_) => Look { ours: self.ours, superseded: self.covered },
@@ -449,11 +451,12 @@ impl Entry {
         }
     }
 
-    /// The memo's half of the Resend gate: unconfirmed, the incarnation
-    /// live, and the history neither holds ours nor covers it. The desk
-    /// adds `input_gate()`.
+    /// The entry's half of the Resend gate: unconfirmed, and the history
+    /// neither holds ours nor covers it. The memo checks the incarnation's
+    /// one flight first (live, and no other edit of it out); the desk adds
+    /// `input_gate()`.
     fn gate(&self, edits: &dyn Edits) -> bool {
-        if self.retired.is_some() || self.state != State::Unconfirmed || !edits.live(&self.id, &self.of) {
+        if self.retired.is_some() || self.state != State::Unconfirmed {
             return false;
         }
         let look = self.look(edits);

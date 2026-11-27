@@ -1926,3 +1926,53 @@ fn the_hand_back_query_and_the_hand_back_agree() {
     assert_eq!(c.memo.may_hand_back(&e, &summary(), &h), Err(Refusal::Gone));
     assert_eq!(c.memo.hand_back(&e, &summary(), &trailer(9), &h, c.now).map(drop), Err(Refusal::Gone));
 }
+
+/// P2-2, the rule's one point: a history that differs below the kept
+/// digests and runs past them, with ours, or an edit covering ours, past
+/// the part the chain covers. It can't be placed, so neither counts: ours
+/// is neither confirmed nor retired, and ends unconfirmed.
+#[test]
+fn a_history_that_differs_below_the_kept_digests_is_no_evidence_past_them() {
+    let n = SEEN_MAX + 2;
+    for cover in [false, true] {
+        let mut d = Desk::new();
+        for i in 0..n {
+            let t = theirs(&d, set("steps.test.label", json!(format!("Test {i}"))));
+            d.lands(&t);
+        }
+        let t = d.queued(false);
+        let first = d.history.iter().position(|e| matches!(e, Event2::User { .. })).unwrap();
+        d.history.truncate(first);
+        for i in 0..3 {
+            let o = theirs(&d, set("steps.fix.label", json!(format!("Fix {i}"))));
+            d.lands(&o);
+        }
+        let last = if cover { theirs(&d, skip("bandaid")) } else { t.clone() };
+        d.lands(&last);
+        d.settles();
+        assert_eq!((d.state(), d.retired()), (Some(State::Queued), None), "cover {cover}: no evidence");
+        d.on(Event::Idle);
+        d.settles();
+        assert_eq!((d.state(), d.retired()), (Some(State::Unconfirmed), None), "cover {cover}");
+    }
+}
+
+/// P2-4: the adapter's line-1 filter is only a shortcut. Every body §3.3's
+/// grammar reads as an edit of `id` passes it, a converted card's
+/// (`card:<id>`) included, and it takes no other id for `id`, not even one
+/// it is a prefix of.
+#[test]
+fn the_line_1_filter_passes_every_edit_of_its_id_and_no_other() {
+    let d = Desk::new();
+    let (tag, rev) = d.live(PLAN);
+    let body = |id: &Ref| Desk::body(&Edit::new(id.clone(), rev, tag, &skip("bandaid")).unwrap());
+    let (plan, planx, card, bare) = (r(PLAN), r("planx"), r("card:c4f9x2a"), r("c4f9x2a"));
+    for id in [&plan, &planx, &card, &bare] {
+        let b = body(id);
+        assert!(message::parse(&b).is_some_and(|e| e.id == *id), "{b}");
+        assert!(names(&b, id), "{b}");
+    }
+    for (of, id) in [(&plan, &planx), (&planx, &plan), (&card, &bare), (&bare, &card)] {
+        assert!(!names(&body(of), id), "{} isn't {id}", body(of));
+    }
+}
