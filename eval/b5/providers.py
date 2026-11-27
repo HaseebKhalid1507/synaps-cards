@@ -131,6 +131,7 @@ class Anthropic:
 
     def __init__(self, model, api_key, base=ANTHROPIC):
         self.model, self.key, self.base = model.split("/", 1)[-1], api_key, base.rstrip("/")
+        self.count_url, self.models = f"{self.base}/v1/messages/count_tokens", set()
 
     def headers(self):
         return {"x-api-key": self.key, "anthropic-version": ANTHROPIC_VERSION}
@@ -142,7 +143,7 @@ class Anthropic:
             b["system"] = body["system"]
         if body.get("tools"):
             b["tools"] = body["tools"]
-        return post(f"{self.base}/v1/messages/count_tokens", b, self.headers())["input_tokens"]
+        return post(self.count_url, b, self.headers())["input_tokens"]
 
 
 class OpenAICompatible:
@@ -152,6 +153,7 @@ class OpenAICompatible:
     def __init__(self, model, base, api_key=None, on_usage=None):
         self.model, self.base, self.key = model.split("/", 1)[-1], base.rstrip("/"), api_key
         self.on_usage = on_usage
+        self.count_url, self.models = f"{self.base}/chat/completions", set()  # the models that answered
 
     def count(self, body):
         """A one-token completion's reported input for a neutral body. The
@@ -159,7 +161,10 @@ class OpenAICompatible:
         stop the run."""
         req = to_chat(body, self.model) | {"max_tokens": 1, "stream": False}
         headers = {"authorization": f"Bearer {self.key}"} if self.key else {}
-        u = post(f"{self.base}/chat/completions", req, headers)["usage"]
+        r = post(self.count_url, req, headers)
+        u = r["usage"]
+        if r.get("model"):
+            self.models.add(r["model"])
         if self.on_usage is not None:
             cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
             self.on_usage({"input_tokens": u["prompt_tokens"] - cached, "cache_read_input_tokens": cached,

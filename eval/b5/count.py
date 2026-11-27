@@ -3,11 +3,15 @@ provider's responses, by a stated method. Never billing, and always
 labelled with the counter that made them (`Counter.kind`):
 
 - `endpoint`: the provider's token-count endpoint. A call's output is its
-  own probe pair's difference less the receipt's content (calibrate.py),
-  exactly; a text's count is the user message with it less without it.
+  arguments' count (the compact JSON of its input, counted as text) plus
+  the one framing allowance calibrated for the run (calibrate.py's
+  `endpoint`); a text's count is the user message with it less without it.
 - `calibrated`: the proxy tokenizer, fitted to the provider's reported
   usage over the calibration set: a call is `framing + ratio ×
   proxy(compact(input))`, a text `ratio × proxy(text)`.
+
+Either can flip the default only if its calibration qualifies
+(calibrate.py's "Qualifying"); `describe` says why not when it doesn't.
 - `uncalibrated`: the proxy with ratio 1 and §2.7's ~8-token framing, for a
   provider that can't be probed. Its runs can't flip the default (B6).
 - `scripted`: the dry run's, against the scripted model. Never data.
@@ -39,9 +43,9 @@ of a `remove` of several. So an op's lines are grouped, and it counts once:
 """
 
 import json
-import statistics
 
-from .calibrate import RECEIPT, compact, pair, text_probe
+from . import calibrate
+from .calibrate import compact, text_probe
 from .turns import BLOCK_TOOL
 
 OP_DIDS = ("put", "patch", "replace", "collapse", "run", "merge", "move", "remove")
@@ -64,10 +68,13 @@ class Counter:
 
 class Calibrated(Counter):
     kind = "calibrated"
-    can_flip_default = True
 
     def __init__(self, fit, proxy):
         self.fit, self.proxy = fit, proxy
+
+    @property
+    def can_flip_default(self):
+        return not calibrate.problems(self.fit)
 
     def call(self, call_input):
         return self.fit.framing + self.fit.ratio * self.proxy(compact(call_input))
@@ -76,7 +83,8 @@ class Calibrated(Counter):
         return self.fit.ratio * self.proxy(text)
 
     def describe(self):
-        return super().describe() | {"fit": self.fit.summary()}
+        why = calibrate.problems(self.fit)
+        return super().describe() | {"fit": self.fit.summary()} | ({"why_not": "; ".join(why)} if why else {})
 
 
 class Scripted(Calibrated):
@@ -123,34 +131,34 @@ class NoCounter(Counter):
 class Endpoint(Counter):
     """`count(body)` is the provider's token-count endpoint over a neutral
     request (calibrate.py); `tools` are the definitions every probe
-    carries. Counts are kept by text, so a call counted once costs nothing
-    the second time."""
+    carries; `framing` is the allowance calibrate.endpoint measured, `raw`
+    what it came from. Counts are kept by text, so a text counted once
+    costs nothing the second time."""
 
     kind = "endpoint"
-    can_flip_default = True
 
-    def __init__(self, count, tools):
-        self.count, self.tools, self.memo = count, tools, {}
-        self.receipt = None
+    def __init__(self, count, tools, framing, raw=None, models=()):
+        self.count, self.tools, self.framing, self.raw, self.models = count, tools, framing, raw, tuple(models)
+        self.memo, self.base = {}, None
 
-    def _diff(self, key, bodies):
-        if key not in self.memo:
-            w, wo = bodies()
-            self.memo[key] = self.count(w) - self.count(wo)
-        return self.memo[key]
+    @property
+    def can_flip_default(self):
+        return self.raw is not None and not calibrate.endpoint_problems(self.framing, self.raw, self.models)
 
     def text(self, text):
-        return self._diff(("text", text), lambda: text_probe(text, self.tools))
+        if text not in self.memo:
+            w, wo = text_probe(text, self.tools)
+            if self.base is None:
+                self.base = self.count(wo)
+            self.memo[text] = self.count(w) - self.base
+        return self.memo[text]
 
     def call(self, call_input):
-        if self.receipt is None:
-            self.receipt = self.text(RECEIPT)
-        return self._diff(("call", compact(call_input)), lambda: pair(call_input, self.tools)) - self.receipt
+        return self.text(compact(call_input)) + self.framing
 
-    def framing(self, calls):
-        """§2.8's framing allowance, measured: the median over `calls` of a
-        call's output less its arguments' own count."""
-        return statistics.median(self.call(c) - self.text(compact(c)) for c in calls)
+    def describe(self):
+        why = ["no calibration"] if self.raw is None else calibrate.endpoint_problems(self.framing, self.raw, self.models)
+        return super().describe() | {"framing": self.framing} | ({"why_not": "; ".join(why)} if why else {})
 
 
 def ops(fold_lines, tool_ids):

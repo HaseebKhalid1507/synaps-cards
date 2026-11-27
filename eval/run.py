@@ -113,8 +113,10 @@ def dry(a, tasks, frozen):
         tools = _block_tools(iso)
         prov = providers.OpenAICompatible("stub", model.url)
         fit, pairs = calibrate.calibrate(calls, tools, lambda b: prov.count(b), proxy.bytes4, "bytes4")
+        fit.models = tuple(sorted(prov.models))
         counter = count.Scripted(fit, proxy.bytes4)
-        (work / "calibration.json").write_text(json.dumps({"fit": fit.summary(), **pairs}, indent=1))
+        (work / "calibration.json").write_text(json.dumps({"config": calibrate.config(prov, tools), "counter": counter.describe(),
+                                                           "fit": fit.summary(), **pairs}, indent=1))
         model.requests.clear()
         records = []
         definition = run_all(a, tasks, iso, "local/stub", d, work, records, model=model, dry=True,
@@ -165,16 +167,19 @@ def real(a, tasks, frozen):
         iso.install()
         iso.start()
         tools = _block_tools(iso)
+        calls, _ = calibrate.load()
         if prov.has_endpoint:
-            counter = count.Endpoint(prov.count, tools)
-            calls, _ = calibrate.load()
-            (work / "calibration.json").write_text(json.dumps({"framing": counter.framing(calls)}, indent=1))
+            framing, raw = calibrate.endpoint(calls, tools, prov.count)
+            counter = count.Endpoint(prov.count, tools, framing, raw, sorted(prov.models))
+            body = {"framing": framing, **raw}
         else:
-            calls, _ = calibrate.load()
             px = proxy.get(a.proxy)
-            fit, pairs = calibrate.calibrate(calls, tools, prov.count, px, a.proxy)
+            fit, raw = calibrate.calibrate(calls, tools, prov.count, px, a.proxy)
+            fit.models = tuple(sorted(prov.models))
             counter = count.Calibrated(fit, px)
-            (work / "calibration.json").write_text(json.dumps({"fit": fit.summary(), **pairs}, indent=1))
+            body = {"fit": fit.summary(), **raw}
+        (work / "calibration.json").write_text(json.dumps({"config": calibrate.config(prov, tools), "counter": counter.describe(),
+                                                           **body}, indent=1))
         tap.take()
         definition = run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget,
                              count_request=prov.count)

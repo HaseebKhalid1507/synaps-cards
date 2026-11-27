@@ -523,17 +523,17 @@ class _Counter:
         return {"kind": "test"}
 
 
+def thirds(s):
+    """A proxy for the tests: a token per 3 characters."""
+    return len(s) // 3
+
+
 def qualifying():
     """A fitted proxy (count.Calibrated): a counter that can flip the default.
-    0.3 tokens a character, a framing of 9."""
-    receipt = len(calibrate.RECEIPT)
-    pts = [(x, 9.0 + 0.3 * (receipt + x)) for x in range(10, 10 + 3 * calibrate.CALIBRATION_MIN, 3)]
-    return count.Calibrated(calibrate.fit(pts, "chars", receipt), len)
-
-
-def thirds(s):
-    """A proxy for the uncalibrated counter: a token per 3 characters."""
-    return len(s) // 3
+    0.9 provider tokens a proxy token, a framing of 9."""
+    receipt = thirds(calibrate.RECEIPT)
+    pts = [(x, 9.0 + 0.9 * (receipt + x)) for x in range(10, 10 + 3 * calibrate.CALIBRATION_MIN, 3)]
+    return count.Calibrated(calibrate.fit(pts, "thirds", receipt), thirds)
 
 
 def frozen_meta(**kw):

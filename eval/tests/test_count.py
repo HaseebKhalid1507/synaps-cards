@@ -2,7 +2,7 @@ import json
 import random
 import unittest
 
-from b5 import calibrate
+from b5 import calibrate, providers
 from b5.calibrate import RECEIPT, compact, fit, pair
 from b5.count import Calibrated, Endpoint, Uncalibrated, attribute, definition, prefix_diff
 from b5.turns import turns
@@ -140,29 +140,115 @@ class Counting(unittest.TestCase):
         self.assertEqual(a["unseen_ops"], 1)
         self.assertAlmostEqual(a["unseen_tokens"], len(compact(BLOCK["ops"][0])), places=6)
 
-    def test_an_endpoint_call_is_its_pair_less_the_receipt(self):
-        asked = []
-
-        def count(body):
-            asked.append(1)
-            return sum(len(json.dumps(m)) for m in body["messages"])
-
-        e = Endpoint(count, TOOLS)
-        w, wo = pair(PUT, TOOLS)
-        tw, two = calibrate.text_probe(RECEIPT, TOOLS)
-        want = (count(w) - count(wo)) - (count(tw) - count(two))
-        asked.clear()
-        self.assertEqual(e.call(PUT), want)
-        n = len(asked)
-        self.assertEqual(e.call(PUT), want)
-        self.assertEqual(len(asked), n, "a call counted once is remembered")
-        self.assertEqual(e.kind, "endpoint")
-
     def test_an_uncalibrated_count_says_so_and_cant_flip_the_default(self):
         u = Uncalibrated(chars, "chars")
         self.assertEqual(u.call(BLOCK), 8 + len(compact(BLOCK)))
         self.assertEqual((u.describe()["kind"], u.can_flip_default), ("uncalibrated", False))
-        self.assertTrue(Calibrated(fitted(), chars).can_flip_default)
+        self.assertTrue(Calibrated(fitted(intercept=9.0 + len(RECEIPT)), chars).can_flip_default)
+
+
+def endpoint_count(wobble=lambda args: 0, drift=None):
+    """A token-count endpoint: a token a character of text and of a call's
+    compact arguments, 7 for a call's wrapper (plus `wobble(args)`: the
+    framing a serialization adds) and 4 for a result's. `drift`, a list,
+    makes each count of the bare probe one more than the last."""
+    def count(body):
+        n = len(body.get("system") or "")
+        for m in body["messages"]:
+            for part in m["content"]:
+                if part["type"] == "text":
+                    n += len(part["text"])
+                elif part["type"] == "tool_use":
+                    a = compact(part["input"])
+                    n += len(a) + 7 + wobble(a)
+                elif part["type"] == "tool_result":
+                    n += len(part["content"]) + 4
+        if drift is not None and len(body["messages"]) == 3 and len(body["messages"][1]["content"]) == 1:
+            drift.append(1)
+            n += len(drift)
+        return n
+    return count
+
+
+CALLS = [{"ops": [{"op": "remove", "id": "x" * (1 + k % 23)}] * (1 + k % 16)} for k in range(210)]
+
+
+class EndpointCounting(unittest.TestCase):
+    """With an endpoint (§2.8, "Framing"): a call is its arguments' count
+    plus one allowance, calibrated once over the set and applied to every
+    call (calibrate.py's `endpoint`)."""
+
+    def test_a_call_is_its_arguments_count_plus_the_one_allowance(self):
+        # A call's own framing is 9, or 10 when its arguments' length is a
+        # multiple of 5 (the wobble): the allowance is the median, 9, and
+        # every call gets it, not its own.
+        count = endpoint_count(wobble=lambda a: int(len(a) % 5 == 0))
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, count)
+        self.assertEqual(framing, 9)
+        e = Endpoint(count, TOOLS, framing, raw)
+        odd = next(c for c in CALLS if len(compact(c)) % 5 == 0)  # its own framing is 10
+        self.assertEqual(e.call(odd), (len(compact(odd)) + 1) + 9)
+        w, wo = pair(odd, TOOLS)
+        self.assertNotEqual(e.call(odd), count(w) - count(wo) - (len(RECEIPT) + 1), "not its own pair")
+        self.assertEqual(e.describe()["framing"], 9)
+
+    def test_the_calibration_keeps_every_raw_difference_and_its_request_count(self):
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, endpoint_count())
+        self.assertEqual(len(raw["pairs"]), 210)
+        p = raw["pairs"][0]
+        self.assertEqual((p["diff"] - p["args"] - raw["receipt"], p["framing"]), (9, 9))
+        self.assertEqual(raw["requests"], 2 * 210 + 3 + 2, "a with and an args count per call, 3 baselines, the receipt and its base")
+        self.assertEqual(raw["baselines"], [raw["baselines"][0]] * 3)
+        self.assertTrue(Endpoint(endpoint_count(), TOOLS, framing, raw).can_flip_default)
+
+    def test_a_spread_framing_or_a_moving_baseline_cant_flip_the_default(self):
+        count = endpoint_count(wobble=lambda a: len(a) % 20)
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, count)
+        e = Endpoint(count, TOOLS, framing, raw)
+        self.assertFalse(e.can_flip_default)
+        self.assertIn("interquartile", e.describe()["why_not"])
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, endpoint_count(drift=[]))
+        self.assertIn("the baseline moved", Endpoint(None, TOOLS, framing, raw).describe()["why_not"])
+        self.assertFalse(Endpoint(None, TOOLS, 9).can_flip_default, "an allowance with no calibration behind it")
+
+
+class Qualifying(unittest.TestCase):
+    """A fitted proxy flips the default only if its fit is sound by the
+    bounds fixed before any data (calibrate.py's `QUALIFY`)."""
+
+    def test_a_sound_fit_qualifies(self):
+        self.assertEqual(calibrate.problems(fitted(ratio=1.2, intercept=9 + 1.2 * len(RECEIPT))), [])
+
+    def test_a_pathological_slope_or_framing_doesnt(self):
+        self.assertIn("ratio 3.0000 outside", calibrate.problems(fitted(ratio=3.0, intercept=9 + 3 * len(RECEIPT)))[0])
+        self.assertIn("framing -37.00 outside", calibrate.problems(fitted())[0])
+        self.assertFalse(Calibrated(fitted(), chars).can_flip_default)
+        self.assertIn("framing -37.00", Calibrated(fitted(), chars).describe()["why_not"])
+
+    def test_a_loose_fit_or_one_pair_that_moves_it_doesnt(self):
+        rng = random.Random(3)
+        loose = [(x, 9 + len(RECEIPT) + x + rng.uniform(-300, 300)) for x in range(10, 610, 3)]
+        self.assertTrue(any(p.startswith("r²") for p in calibrate.problems(fit(loose, "chars", len(RECEIPT)))))
+        lever = [(x, 9 + len(RECEIPT) + x) for x in range(10, 220)] + [(5000, 9 + len(RECEIPT) + 5000 * 1.3)]
+        self.assertTrue(any("left-one-out" in p for p in calibrate.problems(fit(lever, "chars", len(RECEIPT)))))
+
+    def test_a_moving_baseline_or_a_second_model_doesnt(self):
+        f = fitted(intercept=9.0 + len(RECEIPT))
+        f.baselines, f.models = (100, 100, 101), ("m-1", "m-2")
+        self.assertEqual(calibrate.problems(f), ["the baseline moved: [100, 100, 101]", "more than one model answered: ['m-1', 'm-2']"])
+
+    def test_the_proxys_calibration_counts_its_baseline_three_times(self):
+        f, raw = calibrate.calibrate(CALLS, TOOLS, endpoint_count(), chars, "chars")
+        self.assertEqual((raw["requests"], len(raw["baselines"]), f.baselines), (213, 3, tuple(raw["baselines"])))
+
+    def test_the_artifact_names_what_it_ran_against_and_no_secret(self):
+        c = calibrate.config(providers.Anthropic("claude-haiku-4-5", "sk-secret"), TOOLS)
+        self.assertEqual((c["provider"], c["model"], c["count_url"]), ("anthropic", "claude-haiku-4-5",
+                                                                       "https://api.anthropic.com/v1/messages/count_tokens"))
+        self.assertEqual(c["probe"]["receipt"], RECEIPT)
+        self.assertEqual(len(c["tools_sha256"]), 64)
+        self.assertEqual(len(c["calibration_set_sha256"]), 64)
+        self.assertNotIn("sk-secret", json.dumps(c))
 
 
 class Definition(unittest.TestCase):
