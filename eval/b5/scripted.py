@@ -41,6 +41,17 @@ CARDS = {
     "ledger-card-zero": {"question": "Leave zero-balance accounts out of the trial balance?", "options": ["Show them", "Hide them"]},
 }
 SHORT_READ = {"ledger": "ledger/accounts.py", "shelf": "shelf/loans.py"}
+PROPOSAL = {  # a hand-back task's proposal, blocks on (`--d8-stand-in`)
+    "plan": {"op": "put", "id": "proposal", "kind": "plan", "title": "The plan", "body": {"steps": [{"id": "s1", "label": "Do it"}]}},
+    "diff": {"op": "put", "id": "proposal", "kind": "diff", "title": "The change",
+             "body": {"file": "ledger/importer.py", "state": "proposed", "hunks": [{"id": "h1", "lines": ["+x"]}]}},
+    "note": {"op": "put", "id": "proposal", "kind": "note", "title": "The plan", "body": {"text": "The plan."}},
+}
+
+
+def hand_back(task):
+    """The kind a hand-back task proposes in, or None."""
+    return next((s["hand_back"]["block"]["kind"] for s in task["turns"] if "hand_back" in s), None)
 
 
 def _text(content):
@@ -99,7 +110,9 @@ def turn_rounds(task, ws, on, seg):
         return [[("read", {"path": str(Path(ws) / SHORT_READ[task["workspace"]])})]]
     if task["id"] in CARDS and seg == 0:
         return [[("cards_ui", CARDS[task["id"]])]]
-    return coding_rounds(task, ws, on, first=(seg == 0 or task["id"] in CARDS))
+    if hand_back(task) and seg == 0:  # the proposal: a block with blocks on, the reply's text off
+        return [[("cards_block", {"ops": [PROPOSAL[hand_back(task)]]})]] if on else []
+    return coding_rounds(task, ws, on, first=(seg == 0 or task["id"] in CARDS or bool(hand_back(task))))
 
 
 def final_text(task, seg):
@@ -108,6 +121,8 @@ def final_text(task, seg):
         return c["reference"]
     if task["id"] in CARDS and seg == 0:
         return "Waiting for your answer."
+    if hand_back(task) and seg == 0:
+        return "Here is my proposal. Waiting for your edits."
     return f"Done: {task['id']}, the tests pass."
 
 
@@ -186,6 +201,8 @@ class Scripted:
         on = "cards_block" in names
         msgs = req.get("messages", [])
         seg = sum(1 for m in msgs if m.get("role") == "user" and _text(m.get("content")).startswith("[card "))
+        if cur is not None and hand_back(cur["task"]):
+            seg = sum(1 for m in msgs if m.get("role") == "user") - 1
         made = {c.get("id") for m in msgs if m.get("role") == "assistant" for c in m.get("tool_calls") or []}
         if cur is None:
             return self.text("No run is being played."), tokens("No run is being played.")

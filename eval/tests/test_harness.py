@@ -95,6 +95,61 @@ class CardAnswer(unittest.TestCase):
                          [{"task": "t", "arm": "on", "repeat": 1, "why": "no option is ['Hide them']"}])
 
 
+class HandBack(unittest.TestCase):
+    """The hand-back, both arms (taskset.py's `hand_back`): on, the desk
+    takes the agent's live block of the kind; with none, or off, the user
+    sends the plain message."""
+
+    HB = {"block": {"kind": "plan"}, "edit": {"append_step": "Also add `queue`."}, "say": "Go ahead.", "message": "Go ahead, and add `queue`."}
+
+    def setUp(self):
+        self.helper, self.boards = harness.helper, []
+        harness.helper = lambda cards_eval, cmd, payload: self.boards.pop(0)
+        self.grace, harness.QUEUED_GRACE = harness.QUEUED_GRACE, 0
+
+    def tearDown(self):
+        harness.helper, harness.QUEUED_GRACE = self.helper, self.grace
+
+    def turn(self, arm, starter, board=None):
+        if board is not None:
+            self.boards.append(board)
+        turn = [{"ev": "turn_started", "trigger": "user", "user_text": "x"}, {"ev": "idle"}]
+        s, d = _Session([turn]), _Desk()
+        sent, hands = [], []
+        d.send = lambda conv, carry, body, history: sent.append(body) or {"text": body, "notices": []}
+        d.hand_back = lambda conv, spec, history: hands.append(spec) or {"text": "Go ahead.\n[edited]", "notices": []}
+        r = harness.Runner(_Iso([]), "m", d, Path("/nonexistent"))
+        r.arm = arm
+        rec = {"steps": [], "sent": []}
+        r.turn(s, "j1", starter, [], rec)
+        return sent, hands, rec
+
+    def test_on_the_desk_hands_back_the_latest_live_block_of_the_kind(self):
+        board = {"blocks": [{"id": "old", "kind": "plan", "dismissed": False, "pending": False},
+                            {"id": "notes", "kind": "note", "dismissed": False, "pending": False},
+                            {"id": "plan2", "kind": "plan", "dismissed": False, "pending": False}]}
+        sent, hands, rec = self.turn("on", {"hand_back": self.HB}, board)
+        self.assertEqual((sent, hands), ([], [{"block": {"id": "plan2"}, "edit": self.HB["edit"], "say": "Go ahead."}]))
+        self.assertEqual(rec["steps"], [{"step": "hand_back", "as": "block", "block": "plan2"}])
+
+    def test_on_with_no_such_block_the_plain_message_goes_instead(self):
+        sent, hands, rec = self.turn("on", {"hand_back": self.HB}, {"blocks": [{"id": "n", "kind": "note", "dismissed": False, "pending": False}]})
+        self.assertEqual((sent, hands), (["Go ahead, and add `queue`."], []))
+        self.assertEqual(rec["steps"], [{"step": "hand_back", "as": "message", "said_instead": "no live plan block"}])
+
+    def test_off_the_opening_asks_for_the_reply_and_the_edit_is_the_message(self):
+        sent, _, rec = self.turn("off", {"say": "Plan it in a plan block.", "say_off": "Plan it."})
+        self.assertEqual(sent, ["Plan it."])
+        sent, hands, rec = self.turn("off", {"hand_back": self.HB})
+        self.assertEqual((sent, hands, rec["steps"]), (["Go ahead, and add `queue`."], [], [{"step": "hand_back", "as": "message"}]))
+        sent, _, _ = self.turn("on", {"say": "Plan it in a plan block.", "say_off": "Plan it."})
+        self.assertEqual(sent, ["Plan it in a plan block."])
+
+    def test_the_stand_in_hands_back_for_the_dry_run(self):
+        out = desk.StandIn().hand_back("c1", {"block": {"id": "plan"}, "edit": {"keep": "all"}, "say": "Apply it."}, [])
+        self.assertTrue(out["text"].startswith("Apply it.\n[stand-in hand-back of block plan: "))
+
+
 class _Desk(desk.StandIn):
     def __init__(self, refuse=None):
         super().__init__()

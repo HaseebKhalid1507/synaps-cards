@@ -39,6 +39,28 @@ class Shape(unittest.TestCase):
         bad = [dict(cards[0], turns=[cards[0]["turns"][0], {"answer": {"prefer": ["hide"]}}])]
         self.assertIn(f"{cards[0]['id']}: an answer names the labels it picks", taskset.problems(bad + TASKS[1:]))
 
+    def test_a_hand_back_is_frozen_in_both_arms(self):
+        # §2.8's intent, the user's call: the same task with the user's edit
+        # as a plain message. The edit is the task's, not the proposal's, and
+        # the message carries it; the prompts differ only by where the
+        # proposal goes.
+        import re
+        hands = [t for t in TASKS if any("hand_back" in s for s in t["turns"])]
+        self.assertEqual(len(hands), 3)
+        for t in hands:
+            with self.subTest(task=t["id"]):
+                (hb,) = [s["hand_back"] for s in t["turns"] if "hand_back" in s]
+                self.assertTrue(taskset.HAND_BACK <= set(hb))
+                (edit,) = hb["edit"].items()
+                self.assertIn(edit[0], taskset.EDITS)
+                self.assertNotIn("skip", hb["edit"], "an edit that depends on the agent's plan")
+                for code in re.findall(r"`([^`]+)`", str(edit[1])):
+                    self.assertIn(code, hb["message"])
+                say, off = t["turns"][0]["say"], t["turns"][0]["say_off"]
+                self.assertIn(f"{hb['block']['kind']} block", say)
+                self.assertNotIn("block", off)
+                self.assertIn("check", t)
+
     def test_the_set_is_frozen(self):
         self.assertEqual(taskset.digest(), taskset.FROZEN.read_text().split()[0],
                          "the task set changed: it is frozen (§2.8); a deliberate change updates tasks/set.sha256")

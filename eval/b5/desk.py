@@ -25,18 +25,23 @@ carries the session's `history` as the daemon holds it
 - `{"op": "settle", "conversation", "history", "lost": [ticket, …]}`: a
   settled history (D6b's `Desires::settle`, `lost`). → `{"ok": true,
   "feedback": […]}`.
-- `{"op": "hand_back", "conversation", "block": {"kind": …} | {"id": …},
-  "edit": {…}, "say": "…", "history"}` (D8): take the block, edit it as
-  `edit` says, hand it back. → `{"text": the hand-back message, with its
-  notices}`. `edit` is the task's (tasks/set.json): `{"skip":
-  "last_step"}`, `{"keep": "all"}` or `{"append_text": "…"}`.
+- `{"op": "hand_back", "conversation", "block": {"id": …}, "edit": {…},
+  "say": "…", "history"}` (D8): take block `id` (the harness picks it: the
+  agent's latest live block of the task's kind), edit it as `edit` says,
+  hand it back with `say`. → `{"text": the hand-back message, with its
+  notices}` or `{"ok": false, "refused": "…"}`. `edit` is the task's
+  (tasks/set.json), never the agent's proposal's: `{"append_step":
+  "label"}` (a plan's new last step), `{"append_text": "…"}` (a note's
+  text, appended) or `{"keep": "all"}` (a diff's every hunk kept).
 
 **The stand-in** (`StandIn`) speaks the same protocol in process, for the
 dry run only: it mints `v<N>` as one more than any version in the history
 and its own desires, attaches at most 8 ids per line, dismissals first,
-never on an empty body or a card answer, and settles nothing. Its `impl`
-says so, and a real run refuses it. It proves the harness's side of the
-seam; it is never data.
+never on an empty body or a card answer, and settles nothing. Its hand-back
+(for the dry run's `--d8-stand-in`) is `say` and a line naming the block
+and the edit, a stand-in for D8's message. Its `impl` says so, and a real
+run refuses it. It proves the harness's side of the seam; it is never
+data.
 """
 
 import json
@@ -140,6 +145,9 @@ class StandIn(Desk):
             return {"text": body + "".join("\n" + ln for ln in lines), "notices": rode, "ticket": len(rode) or None}
         if op == "settle":
             return {"ok": True, "feedback": []}
+        if op == "hand_back":
+            return {"text": f"{req['say']}\n[stand-in hand-back of block {req['block']['id']}: {json.dumps(req['edit'], ensure_ascii=False)}]",
+                    "notices": []}
         return {"ok": False, "refused": f"the stand-in has no {op}"}
 
 

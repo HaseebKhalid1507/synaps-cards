@@ -25,8 +25,20 @@ workspace, then the task's seed edits (a bug put in on purpose). Its
   it may pick, so the answer means what the check judges. A card with no
   such option, or two, is an interaction failure: nothing is sent, the step
   says why, and the run is judged as it stands;
-- `hand_back`: the user edits a block and hands it back (D8), then the
-  edit message starts a turn.
+- `hand_back` (D8, both arms frozen here; §2.8's "hands back an edit"):
+  the user edits the agent's proposal and sends the edit, which starts a
+  turn. The edit is fixed by the task, never by what the agent proposed
+  (`append_step`, `append_text` or `keep: all`), and so is its plain
+  form, `message`: the same intent, as the user would type it.
+  - blocks **on**: the desk takes the agent's live block of the step's
+    `kind` (the latest, not dismissed, not pending), edits it as `edit`
+    says and hands it back with `say` (desk.py). With no such block, the
+    user sends `message` instead, and the step says so;
+  - blocks **off**: the user sends `message`. The task's opening asks for
+    the proposal in the reply (`say_off`) rather than in a block (`say`):
+    the one place a task's prompt differs between the arms, and only by
+    where the proposal goes.
+  The judge is the edited request's: a check of what the edit asks.
 
 **Judged per task** (`judge`), the same in both arms:
 - `tests`: the workspace's own tests and the task's hidden check
@@ -72,6 +84,8 @@ STEPS = ("say", "steer", "dismiss", "answer", "hand_back")
 NEEDS = ("D8",)
 CHECK_NAME = "test_b5_check.py"
 EXPECT = {"numbers", "items", "ordered", "all", "none"}
+HAND_BACK = {"block", "edit", "say", "message"}
+EDITS = {"append_step", "append_text", "keep"}
 NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
 ITEM_SPLIT = re.compile(r"[,;\n]|\band\b")
 ITEM_EDGE = re.compile(r"^(?:\s|[-*•]|\d+[.)]\s)*[\s`'\"“”‘’(\[]*|[\s`'\"“”‘’)\].:!]*$")
@@ -127,6 +141,9 @@ def problems(tasks, root=TASKS):
                 out.append(f"{where}: an answer names the labels it picks")
             elif keys[0] == "hand_back" and "D8" not in t["needs"]:
                 out.append(f"{where}: a hand-back needs D8")
+            elif keys[0] == "hand_back" and not (HAND_BACK <= set(s["hand_back"]) and set(s["hand_back"]["edit"]) <= EDITS
+                                                 and len(s["hand_back"]["edit"]) == 1 and "say_off" in turns[0]):
+                out.append(f"{where}: a hand-back has {', '.join(sorted(HAND_BACK))}, one edit of {sorted(EDITS)}, and an opening say_off")
         c = t["check"]
         if "tests" in c and not (root / c["tests"]).is_file():
             out.append(f"{where}: no check {c['tests']}")

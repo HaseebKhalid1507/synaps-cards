@@ -3,7 +3,7 @@
 three repeats, interleaved, against the eval's own isolated daemon
 (b5/daemon.py), then the report (b5/report.py).
 
-    eval/run.py --dry-run --synaps PATH [--work DIR] [--tasks ID,…] [--repeats N] [--keep]
+    eval/run.py --dry-run --synaps PATH [--work DIR] [--tasks ID,…] [--repeats N] [--keep] [--d8-stand-in]
     eval/run.py --provider anthropic --model claude-… --budget-usd 40 --approved claude-…@40 \\
                 --desk 'CMD' --synaps PATH [--work DIR]
     eval/run.py --estimate [--json]
@@ -11,7 +11,8 @@ three repeats, interleaved, against the eval's own isolated daemon
 **The dry run** is free: the provider is the scripted model (b5/scripted.py)
 served here, the counter is calibrated against it with its own tokenizer
 (`bytes4`), and the desk is the stand-in (b5/desk.py). It proves the
-harness end to end: install, the reloads, every runnable task in both arms,
+harness end to end: install, the reloads, every runnable task in both arms
+(with `--d8-stand-in`, the hand-back tasks too, against the stand-in's D8),
 the steers, the card answers, the dismiss notices, the fold report, the
 judge, the calibration, the definition control and the report. Its numbers
 are a stand-in's and say so; they are never data.
@@ -71,6 +72,8 @@ def main(argv=None):
     ap.add_argument("--approved", help="MODEL@USD: the approval of this model and budget, written out")
     ap.add_argument("--desk", help="synaps-desk's b5-desk/1 adapter command")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--d8-stand-in", action="store_true",
+                    help="a dry run's D8: the stand-in desk hands back, so the hand-back tasks run in both arms (never data)")
     a = ap.parse_args(argv)
 
     if a.estimate:
@@ -98,6 +101,8 @@ def dry(a, tasks, frozen):
         if unknown:
             raise SystemExit(f"no such task: {', '.join(sorted(unknown))}")
         tasks = [t for t in tasks if t["id"] in keep]
+    if a.d8_stand_in:  # the hand-back tasks, both arms, against the stand-in's D8 (desk.py)
+        tasks = [dict(t, needs=[n for n in t["needs"] if n != "D8"]) for t in tasks]
     work = Path(a.work or tempfile.mkdtemp(prefix="b5-dry-")).resolve()
     work.mkdir(parents=True, exist_ok=True)
     model = scripted.Scripted()
@@ -136,6 +141,8 @@ def real(a, tasks, frozen):
         raise SystemExit(f"--approved {a.approved!r} isn't this run's {a.model}@{a.budget_usd:g}")
     if a.tasks:
         raise SystemExit("a real run runs the whole frozen set")
+    if a.d8_stand_in:
+        raise SystemExit("--d8-stand-in is the dry run's: a real run takes D8 from synaps-desk")
     work = Path(a.work or tempfile.mkdtemp(prefix="b5-run-")).resolve()
     work.mkdir(parents=True, exist_ok=True)
     budget = spend.Budget(a.budget_usd, a.model, ledger=work / "paid.jsonl")

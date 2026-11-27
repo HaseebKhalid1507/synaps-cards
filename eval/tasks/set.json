@@ -997,7 +997,8 @@
       "seed": [],
       "turns": [
         {
-          "say": "Plan the reservations feature in a plan block, then stop and wait: I'll edit the plan before you implement anything. `Loans.reserve(isbn, member)` queues a member for a book (no one twice), and while a book has a queue only its first member may borrow it."
+          "say": "Plan the reservations feature in a plan block, then stop and wait: I'll edit the plan before you implement anything. `Loans.reserve(isbn, member)` queues a member for a book (no one twice), and while a book has a queue only its first member may borrow it.",
+          "say_off": "Plan the reservations feature, then stop and wait: I'll edit the plan before you implement anything. `Loans.reserve(isbn, member)` queues a member for a book (no one twice), and while a book has a queue only its first member may borrow it."
         },
         {
           "hand_back": {
@@ -1005,14 +1006,15 @@
               "kind": "plan"
             },
             "edit": {
-              "skip": "last_step"
+              "append_step": "Also add `Loans.queue(isbn)`: the ids of the members waiting for a book, in order."
             },
-            "say": "Go ahead with the plan as I left it."
+            "say": "Go ahead with the plan as I left it.",
+            "message": "Go ahead with your plan, with one more step: also add `Loans.queue(isbn)`, the ids of the members waiting for a book, in order."
           }
         }
       ],
       "check": {
-        "tests": "checks/shelf-handback-plan.py"
+        "tests": "checks/shelf-reserve.py"
       },
       "solution": "solutions/shelf-reserve.json"
     },
@@ -1027,7 +1029,8 @@
       "seed": [],
       "turns": [
         {
-          "say": "Propose, as a proposed diff block, the change that lets `importer.read_csv` read `;`-separated files with a decimal comma (`1.200,50`), detecting the delimiter from the header line. Then wait for my review before you apply anything."
+          "say": "Propose, as a proposed diff block, the change that lets `importer.read_csv` read `;`-separated files with a decimal comma (`1.200,50`), detecting the delimiter from the header line. Then wait for my review before you apply anything.",
+          "say_off": "Propose, in your reply as a unified diff, the change that lets `importer.read_csv` read `;`-separated files with a decimal comma (`1.200,50`), detecting the delimiter from the header line. Then wait for my review before you apply anything."
         },
         {
           "hand_back": {
@@ -1037,7 +1040,8 @@
             "edit": {
               "keep": "all"
             },
-            "say": "Apply what I kept."
+            "say": "Apply what I kept.",
+            "message": "Apply your proposed change as it is."
           }
         }
       ],
@@ -1057,7 +1061,8 @@
       "seed": [],
       "turns": [
         {
-          "say": "Write your plan for a year-end close, `Journal.close_year(year, equity=\"3000\")`, as a note block, then wait for my edits before writing code."
+          "say": "Write your plan for a year-end close, `Journal.close_year(year, equity=\"3000\")`, as a note block, then wait for my edits before writing code.",
+          "say_off": "Write your plan for a year-end close, `Journal.close_year(year, equity=\"3000\")`, in your reply, then wait for my edits before writing code."
         },
         {
           "hand_back": {
@@ -1067,7 +1072,8 @@
             "edit": {
               "append_text": " Date the entry December 31, memo `Close <year>`, and return None when there is nothing to close."
             },
-            "say": "Go."
+            "say": "Go.",
+            "message": "Add this to your plan: date the entry December 31, memo `Close <year>`, and return None when there is nothing to close. Then go."
           }
         }
       ],

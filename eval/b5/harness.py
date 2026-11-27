@@ -157,7 +157,7 @@ class Runner:
         `idle` isn't this one's end."""
         seen = len(s.events)
         if "say" in starter:
-            self.send(s, conv, "submit", starter["say"], rec)
+            self.send(s, conv, "submit", starter["say_off"] if self.arm == "off" and "say_off" in starter else starter["say"], rec)
         elif "answer" in starter:
             card = _last_card(s.events)
             if card is None:
@@ -171,9 +171,25 @@ class Runner:
             rec["steps"].append({"step": "answer", "card": a.get("card"), "values": a.get("values")})
             self.send(s, conv, "answer", a["text"], rec)
         elif "hand_back" in starter:
-            out = self.desk.hand_back(conv, starter["hand_back"], s.messages())
-            s.submit(out["text"])
-            rec["sent"].append({"carry": "hand_back", "text": out["text"], "notices": out.get("notices", []), "at_event": len(s.events)})
+            hb = starter["hand_back"]
+            history = s.messages()
+            block = None
+            if self.arm == "on":
+                block = live_block(helper(self.iso.cards_eval, "fold", json.dumps(history, ensure_ascii=False)), hb["block"]["kind"], last=True)
+            if block is None:
+                step = {"step": "hand_back", "as": "message"}
+                if self.arm == "on":
+                    step["said_instead"] = f"no live {hb['block']['kind']} block"
+                rec["steps"].append(step)
+                self.send(s, conv, "submit", hb["message"], rec)
+            else:
+                out = self.desk.hand_back(conv, {"block": {"id": block}, "edit": hb["edit"], "say": hb["say"]}, history)
+                if "text" not in out:
+                    rec["steps"].append({"step": "hand_back", "skipped": f"the desk refused: {out.get('refused')}", "block": block})
+                    return []
+                rec["steps"].append({"step": "hand_back", "as": "block", "block": block})
+                s.submit(out["text"])
+                rec["sent"].append({"carry": "hand_back", "text": out["text"], "notices": out.get("notices", []), "at_event": len(s.events)})
         pending = list(fires)
         rounds, started = 0, False
         end = time.monotonic() + self.timeout
@@ -245,13 +261,12 @@ def _last_card(events):
     return last
 
 
-def live_block(board):
+def live_block(board, kind=None, last=False):
     """The block a dismissal clicks (module docs): the first of `board`'s
-    live blocks (a `cards-eval fold` report) not dismissed and not pending."""
-    for b in board.get("blocks") or []:
-        if not b.get("dismissed") and not b.get("pending"):
-            return b["id"]
-    return None
+    live blocks (a `cards-eval fold` report) not dismissed and not pending;
+    of `kind` if one is named; the latest if `last` (a hand-back's)."""
+    ok = [b for b in board.get("blocks") or [] if not b.get("dismissed") and not b.get("pending") and (kind is None or b.get("kind") == kind)]
+    return (ok[-1] if last else ok[0])["id"] if ok else None
 
 
 def _last_text(events):
