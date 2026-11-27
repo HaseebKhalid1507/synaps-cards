@@ -1,0 +1,17 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "FINE_PER_DAY = 25  # cents\n",
+    "new": "FINE_PER_DAY = 25  # cents\nGRACE_DAYS = 2\nFINE_CAP = 1000  # cents, per loan\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "def fine(loan, today):\n    late = (today - loan.due).days\n    return max(late, 0) * FINE_PER_DAY",
+    "new": "def fine(loan, today):\n    \"\"\"The fine in cents: nothing in the grace days, then per day, capped.\"\"\"\n    late = (today - loan.due).days - GRACE_DAYS\n    return min(max(late, 0) * FINE_PER_DAY, FINE_CAP)"
+  },
+  {
+    "path": "tests/test_loans.py",
+    "old": "self.assertEqual(lib.give_back(\"9780140449136\", d(\"2026-03-25\")), 75)",
+    "new": "self.assertEqual(lib.give_back(\"9780140449136\", d(\"2026-03-25\")), 25)"
+  }
+]

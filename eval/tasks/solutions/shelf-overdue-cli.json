@@ -1,0 +1,17 @@
+[
+  {
+    "path": "shelf/cli.py",
+    "old": "import argparse\nimport sys\n",
+    "new": "import argparse\nimport datetime\nimport sys\n"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)",
+    "new": "    l.add_argument(\"file\")\n    o = sub.add_parser(\"overdue\", help=\"overdue loans, the most overdue first\")\n    o.add_argument(\"file\")\n    o.add_argument(\"--today\", type=datetime.date.fromisoformat, default=datetime.date.today())\n    a = ap.parse_args(argv)"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    else:\n        for loan in loans.loans:",
+    "new": "    elif a.cmd == \"overdue\":\n        for loan in sorted(loans.overdue(a.today), key=lambda l: (l.due, l.isbn)):\n            print(f\"{loan.isbn}  {loan.member}  due {loan.due.isoformat()}  {(a.today - loan.due).days} days late\", file=out)\n    else:\n        for loan in loans.loans:"
+  }
+]

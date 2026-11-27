@@ -1,0 +1,7 @@
+[
+  {
+    "path": "shelf/store.py",
+    "old": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", []))))",
+    "new": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", [])), b.get(\"year\")))"
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "path": "ledger/report.py",
+    "old": "        rows.append((account.code, account.name, journal.balance(account.code)))",
+    "new": "        balance = journal.balance(account.code)\n        if balance:\n            rows.append((account.code, account.name, balance))"
+  },
+  {
+    "path": "tests/test_report.py",
+    "old": "        self.assertEqual(len(rows), 7)",
+    "new": "        self.assertEqual(len(rows), 4)"
+  }
+]

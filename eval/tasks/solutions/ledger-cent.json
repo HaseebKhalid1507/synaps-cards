@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/journal.py",
+    "old": "        if abs(entry.total()) > 1:",
+    "new": "        if entry.total() != 0:"
+  }
+]

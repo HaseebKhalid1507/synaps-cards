@@ -1,0 +1,12 @@
+[
+  {
+    "path": "shelf/store.py",
+    "old": "import datetime\nimport json\n",
+    "new": "import csv\nimport datetime\nimport json\n"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "def load(path):",
+    "new": "def export_csv(loans, path):\n    \"\"\"The catalog as CSV: isbn, title, authors, year, by folded title.\"\"\"\n    from .text import fold\n\n    books = sorted(loans.catalog.books.values(), key=lambda b: (fold(b.title), b.isbn))\n    with open(path, \"w\", encoding=\"utf-8\", newline=\"\") as f:\n        w = csv.writer(f)\n        w.writerow([\"isbn\", \"title\", \"authors\", \"year\"])\n        for b in books:\n            w.writerow([b.isbn, b.title, \"; \".join(b.authors), \"\" if b.year is None else b.year])\n\n\ndef load(path):"
+  }
+]

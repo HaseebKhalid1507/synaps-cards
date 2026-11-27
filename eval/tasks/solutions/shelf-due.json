@@ -1,0 +1,7 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "today + datetime.timedelta(days=LOAN_DAYS - 1))",
+    "new": "today + datetime.timedelta(days=LOAN_DAYS))"
+  }
+]

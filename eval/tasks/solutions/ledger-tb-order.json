@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/report.py",
+    "old": "    for account in sorted(journal.chart, key=lambda a: a.name):",
+    "new": "    for account in sorted(journal.chart, key=lambda a: a.code):"
+  }
+]

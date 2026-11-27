@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/money.py",
+    "old": "    \"\"\"`cents` as text: `12.50`, `-0.05`, `1,234.00`.\"\"\"\n    sign = \"-\" if cents < 0 else \"\"\n    whole, frac = divmod(abs(cents), 100)\n    return f\"{sign}{whole:,}.{frac:02d}\"",
+    "new": "    \"\"\"`cents` as text: `12.50`, `(0.05)`, `1,234.00`: negatives in\n    parentheses, as statements print them.\"\"\"\n    whole, frac = divmod(abs(cents), 100)\n    text = f\"{whole:,}.{frac:02d}\"\n    return f\"({text})\" if cents < 0 else text"
+  }
+]

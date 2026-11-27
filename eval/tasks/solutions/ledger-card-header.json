@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/importer.py",
+    "old": "    rows = csv.DictReader(io.StringIO(text))\n    missing = [c for c in COLUMNS if c not in (rows.fieldnames or [])]",
+    "new": "    rows = csv.DictReader(io.StringIO(text))\n    if rows.fieldnames and \"value\" in rows.fieldnames and \"amount\" not in rows.fieldnames:\n        rows.fieldnames = [\"amount\" if f == \"value\" else f for f in rows.fieldnames]\n    missing = [c for c in COLUMNS if c not in (rows.fieldnames or [])]"
+  }
+]

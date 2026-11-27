@@ -1,0 +1,7 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "        return [l for l in self.loans if l.member == member]",
+    "new": "        return [l for l in self.loans if l.member == member and l.returned is None]"
+  }
+]

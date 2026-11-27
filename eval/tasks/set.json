@@ -1,0 +1,966 @@
+{
+  "about": "B5's frozen task set (docs/blocks.md §2.8): committed before any run; tuning the description never changes it. eval/README.md says how it runs and is judged.",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "ledger-parens",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [
+        {
+          "path": "ledger/money.py",
+          "old": "        negative, s = True, s[1:-1].strip()",
+          "new": "        negative, s = False, s[1:-1].strip()"
+        }
+      ],
+      "turns": [
+        {
+          "say": "Amounts in parentheses, like `(12.50)` on our bank statements, are negative, but `money.parse` reads them as positive. Fix it, and add a test that covers it."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-parens.py"
+      },
+      "solution": "solutions/ledger-parens.json"
+    },
+    {
+      "id": "ledger-cent",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [
+        {
+          "path": "ledger/journal.py",
+          "old": "        if entry.total() != 0:",
+          "new": "        if abs(entry.total()) > 1:"
+        }
+      ],
+      "turns": [
+        {
+          "say": "The journal accepted an entry whose lines were off by one cent. `Journal.post` must refuse any entry that doesn't balance exactly. Fix it and add a test."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-cent.py"
+      },
+      "solution": "solutions/ledger-cent.json"
+    },
+    {
+      "id": "ledger-since",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add a `since` option to account statements. `report.statement(journal, code, since=None)`: given a date, show only the lines on or after it, and start with an opening row `(since, \"Opening balance\", 0, <balance before since>)` so the running balance stays right. Add `--since YYYY-MM-DD` to the CLI's `statement` command, and tests."
+        },
+        {
+          "dismiss": "first_block",
+          "after_round": 3
+        },
+        {
+          "steer": "Also: without --since, the statement must look exactly as it does today.",
+          "after_round": 5
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-since.py"
+      },
+      "solution": "solutions/ledger-since.json"
+    },
+    {
+      "id": "ledger-semicolon",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Some banks export CSV with `;` between fields and a decimal comma, like `1.200,50`. Make `importer.read_csv` accept that too: detect the delimiter from the header line, and when it is `;`, read amounts with a decimal comma and `.` as the thousands separator. Comma files must keep working. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-semicolon.py"
+      },
+      "solution": "solutions/ledger-semicolon.json"
+    },
+    {
+      "id": "ledger-tb-order",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [
+        {
+          "path": "ledger/report.py",
+          "old": "    for account in sorted(journal.chart, key=lambda a: a.code):",
+          "new": "    for account in sorted(journal.chart, key=lambda a: a.name):"
+        }
+      ],
+      "turns": [
+        {
+          "say": "The trial balance lists accounts alphabetically by name, but it should list them by account code, as the chart does. Fix it, and add a test that would have caught it."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-tb-order.py"
+      },
+      "solution": "solutions/ledger-tb-order.json"
+    },
+    {
+      "id": "ledger-allocate",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add `money.allocate(cents, weights)`: split `cents` in proportion to the integer `weights` so the parts sum exactly to `cents`. Give the leftover cents, one each, to the parts with the largest fractional remainders, earlier parts first on ties. Raise ValueError for no weights, a negative weight, or all-zero weights. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-allocate.py"
+      },
+      "solution": "solutions/ledger-allocate.json"
+    },
+    {
+      "id": "ledger-monthly",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add `report.monthly(journal, code)`: the account's net change per calendar month, as rows `(\"YYYY-MM\", cents)` in month order, signed by the account's kind like `statement`, leaving out months with no lines. Add a `monthly CODE FILE` command to the CLI that prints them with amounts formatted. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-monthly.py"
+      },
+      "solution": "solutions/ledger-monthly.json"
+    },
+    {
+      "id": "ledger-format-neg",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [
+        {
+          "path": "ledger/money.py",
+          "old": "    whole, frac = divmod(abs(cents), 100)",
+          "new": "    whole, frac = divmod(cents, 100)"
+        }
+      ],
+      "turns": [
+        {
+          "say": "`money.format(-5)` prints `--1.95` instead of `-0.05`. Fix how `money.format` prints negative amounts, and add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-format-neg.py"
+      },
+      "solution": "solutions/ledger-format-neg.json"
+    },
+    {
+      "id": "ledger-close",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add `Journal.close_year(year, equity=\"3000\")`: post one closing entry dated December 31 of `year`, memo `Close <year>`, that brings the balance of every income and expense account, counting lines up to that date, to zero against the equity account. Return the entry, or None when there is nothing to close. Add tests."
+        },
+        {
+          "dismiss": "first_block",
+          "after_round": 3
+        },
+        {
+          "steer": "Also refuse to close a year twice: raise ValueError if a `Close <year>` entry exists already.",
+          "after_round": 4
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-close.py"
+      },
+      "solution": "solutions/ledger-close.json"
+    },
+    {
+      "id": "ledger-dupes",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Importing the same CSV twice posts every entry twice. Make `importer.import_into(journal, text)` skip an entry that is already in the journal (same date, same memo and the same lines, accounts and amounts), and return `(imported, skipped)` instead of a count. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-dupes.py"
+      },
+      "solution": "solutions/ledger-dupes.json"
+    },
+    {
+      "id": "shelf-due",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [
+        {
+          "path": "shelf/loans.py",
+          "old": "today + datetime.timedelta(days=LOAN_DAYS))",
+          "new": "today + datetime.timedelta(days=LOAN_DAYS - 1))"
+        }
+      ],
+      "turns": [
+        {
+          "say": "Loans come back due a day early: a book lent on March 1 should be due March 22, three weeks later. Find the cause and fix it."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-due.py"
+      },
+      "solution": "solutions/shelf-due.json"
+    },
+    {
+      "id": "shelf-fines",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Change late fines: nothing for the first 2 days late (a grace period), then 25 cents for each late day after those 2, capped at 10.00 per loan. Keep `loans.fine(loan, today)` the one place it's computed, update the tests that assumed the old rule, and add tests for the new one."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-fines.py"
+      },
+      "solution": "solutions/shelf-fines.json"
+    },
+    {
+      "id": "shelf-accents",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [
+        {
+          "path": "shelf/text.py",
+          "old": "    decomposed = unicodedata.normalize(\"NFKD\", text)\n    return \"\".join(c for c in decomposed if not unicodedata.combining(c)).lower()",
+          "new": "    return text.lower()"
+        }
+      ],
+      "turns": [
+        {
+          "say": "Searching for `emile` no longer finds \"Émile and the Quiet Sea\". Make search ignore accents again, as well as case."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-accents.py"
+      },
+      "solution": "solutions/shelf-accents.json"
+    },
+    {
+      "id": "shelf-reserve",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add reservations. `Loans.reserve(isbn, member)` puts a member in a book's queue, and a member can't reserve the same book twice (ValueError). While a book has a queue, `lend` lends it only to the first member in the queue, and takes them off it; lending it to anyone else raises ValueError. Add tests."
+        },
+        {
+          "dismiss": "first_block",
+          "after_round": 3
+        },
+        {
+          "steer": "Also add `Loans.queue(isbn)`: the ids of the members waiting for a book, in order.",
+          "after_round": 5
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-reserve.py"
+      },
+      "solution": "solutions/shelf-reserve.json"
+    },
+    {
+      "id": "shelf-year",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [
+        {
+          "path": "shelf/store.py",
+          "old": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", [])), b.get(\"year\")))",
+          "new": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", []))))"
+        }
+      ],
+      "turns": [
+        {
+          "say": "After saving and loading the library, every book's year is gone. Fix the round trip, and add a test."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-year.py"
+      },
+      "solution": "solutions/shelf-year.json"
+    },
+    {
+      "id": "shelf-overdue-cli",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add an `overdue FILE --today YYYY-MM-DD` command to the CLI: one line per overdue loan, `ISBN  MEMBER  due YYYY-MM-DD  N days late`, the most overdue first. Add a test."
+        },
+        {
+          "dismiss": "first_block",
+          "after_round": 3
+        },
+        {
+          "steer": "Sort ties by ISBN, please.",
+          "after_round": 5
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-overdue-cli.py"
+      },
+      "solution": "solutions/shelf-overdue-cli.json"
+    },
+    {
+      "id": "shelf-isbn",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Validate ISBN-13s. `Book` should accept hyphens or spaces in an ISBN but store the 13 digits only, and raise ValueError for an ISBN that isn't 13 digits or whose check digit is wrong. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-isbn.py"
+      },
+      "solution": "solutions/shelf-isbn.json"
+    },
+    {
+      "id": "shelf-limit",
+      "category": "coding",
+      "kind": "bug",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [
+        {
+          "path": "shelf/loans.py",
+          "old": "        return [l for l in self.loans if l.member == member and l.returned is None]",
+          "new": "        return [l for l in self.loans if l.member == member]"
+        }
+      ],
+      "turns": [
+        {
+          "say": "A member who returned their only book still can't borrow another one: Grace's limit is 1, she gave her book back, and `lend` says she has 1 book already. Fix it and add a test."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-limit.py"
+      },
+      "solution": "solutions/shelf-limit.json"
+    },
+    {
+      "id": "shelf-phrase",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Support quoted phrases in search: the words inside double quotes must appear together, in that order, in the title (case and accents folded as now), and only titles that contain every phrase match. Words outside quotes rank as before. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-phrase.py"
+      },
+      "solution": "solutions/shelf-phrase.json"
+    },
+    {
+      "id": "shelf-export",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add `store.export_csv(loans, path)`: write the catalog as UTF-8 CSV with a header row `isbn,title,authors,year`, the authors joined with `; `, the year empty when unknown, and the rows sorted by title as `text.fold` orders them, then by ISBN. Add a test."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-export.py"
+      },
+      "solution": "solutions/shelf-export.json"
+    },
+    {
+      "id": "ledger-q-kinds",
+      "category": "short",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Which account kinds does this ledger support? List them, nothing else."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "asset",
+            "liabilit",
+            "equity",
+            "income",
+            "expense"
+          ]
+        },
+        "reference": "asset, liability, equity, income, expense"
+      }
+    },
+    {
+      "id": "ledger-q-split",
+      "category": "short",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "What does `money.split(100, 3)` return in this code? Answer with the value only."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "34,\\s*33,\\s*33"
+          ]
+        },
+        "reference": "[34, 33, 33]"
+      }
+    },
+    {
+      "id": "ledger-q-tests",
+      "category": "short",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Run the test suite and tell me how many tests ran. Just the number."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\b12\\b"
+          ]
+        },
+        "reference": "12"
+      }
+    },
+    {
+      "id": "ledger-q-columns",
+      "category": "short",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Which columns does the CSV importer require? List them in order, comma-separated."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "entry.*date.*memo.*account.*amount"
+          ]
+        },
+        "reference": "entry, date, memo, account, amount"
+      }
+    },
+    {
+      "id": "ledger-q-debit",
+      "category": "short",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Which account kinds have a debit-normal balance in this code? Names only."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "asset",
+            "expense"
+          ]
+        },
+        "reference": "asset, expense"
+      }
+    },
+    {
+      "id": "shelf-q-days",
+      "category": "short",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "How many days is a loan? Just the number."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\b21\\b"
+          ]
+        },
+        "reference": "21"
+      }
+    },
+    {
+      "id": "shelf-q-fine",
+      "category": "short",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "What is the fine per late day, in cents? Just the number."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\b25\\b"
+          ]
+        },
+        "reference": "25"
+      }
+    },
+    {
+      "id": "shelf-q-limit",
+      "category": "short",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "What is a member's default loan limit? Just the number."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\b3\\b"
+          ]
+        },
+        "reference": "3"
+      }
+    },
+    {
+      "id": "shelf-q-book",
+      "category": "short",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Which file defines the `Book` class? The path only."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "models\\.py"
+          ]
+        },
+        "reference": "shelf/models.py"
+      }
+    },
+    {
+      "id": "shelf-q-tests",
+      "category": "short",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Run the tests and tell me how many passed. Just the number."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\b9\\b"
+          ]
+        },
+        "reference": "9"
+      }
+    },
+    {
+      "id": "nt-half-even",
+      "category": "no_tool",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Without using any tools: explain banker's rounding (round half to even) in two sentences."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "even"
+          ]
+        },
+        "reference": "Halves round to the nearest even digit."
+      }
+    },
+    {
+      "id": "nt-double-entry",
+      "category": "no_tool",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Without using any tools: what is double-entry bookkeeping? Three sentences at most."
+        }
+      ],
+      "check": {
+        "expect": {
+          "any": [
+            "debit",
+            "credit"
+          ]
+        },
+        "reference": "Every entry debits one account and credits another."
+      }
+    },
+    {
+      "id": "nt-names",
+      "category": "no_tool",
+      "kind": "question",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Without using any tools: suggest three names for a function that splits an amount of money into parts."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\S"
+          ]
+        },
+        "reference": "allocate, apportion, divide_amount"
+      }
+    },
+    {
+      "id": "nt-isbn",
+      "category": "no_tool",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Without using any tools, from memory: how is an ISBN-13's check digit computed?"
+        }
+      ],
+      "check": {
+        "expect": {
+          "any": [
+            "weight",
+            "mod",
+            "1\\D+3",
+            "alternat"
+          ]
+        },
+        "reference": "Weights 1 and 3 alternate; the check digit makes the sum a multiple of 10 (mod 10)."
+      }
+    },
+    {
+      "id": "nt-haiku",
+      "category": "no_tool",
+      "kind": "question",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Without using any tools: write a haiku about an overdue library book."
+        }
+      ],
+      "check": {
+        "expect": {
+          "all": [
+            "\\S"
+          ]
+        },
+        "reference": "Pages wait in dust"
+      }
+    },
+    {
+      "id": "ledger-card-negative",
+      "category": "interactive",
+      "kind": "card",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "I'd like negative amounts printed differently. Before you change anything, ask me with a card whether `money.format` should print negatives as `-12.50` or `(12.50)`. Then make it print what I pick, and update or add the tests."
+        },
+        {
+          "answer": {
+            "prefer": [
+              "(12.50)",
+              "parenthes"
+            ]
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-card-negative.py"
+      },
+      "solution": "solutions/ledger-card-negative.json"
+    },
+    {
+      "id": "shelf-card-period",
+      "category": "interactive",
+      "kind": "card",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Ask me with a card how long a loan should be: 14, 21 or 28 days. Then change it to what I pick, and update the tests."
+        },
+        {
+          "answer": {
+            "prefer": [
+              "14"
+            ]
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-card-period.py"
+      },
+      "solution": "solutions/shelf-card-period.json"
+    },
+    {
+      "id": "ledger-card-header",
+      "category": "interactive",
+      "kind": "card",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Our bank names the amount column differently. Ask me with a card which header it uses (offer `amount`, `value` and `total`), then make the importer accept that header for the amount, while files with `amount` keep working. Add a test."
+        },
+        {
+          "answer": {
+            "prefer": [
+              "value"
+            ]
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-card-header.py"
+      },
+      "solution": "solutions/ledger-card-header.json"
+    },
+    {
+      "id": "shelf-card-prefix",
+      "category": "interactive",
+      "kind": "card",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Ask me with a card whether search should match whole words only, or word prefixes too (so `gard` finds \"The Quiet Garden\"). Then implement what I pick, and update the tests if their results change."
+        },
+        {
+          "answer": {
+            "prefer": [
+              "prefix"
+            ]
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-card-prefix.py"
+      },
+      "solution": "solutions/shelf-card-prefix.json"
+    },
+    {
+      "id": "ledger-card-zero",
+      "category": "interactive",
+      "kind": "card",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Ask me with a card whether the trial balance should leave out accounts whose balance is zero. Implement what I pick, and adjust the tests."
+        },
+        {
+          "answer": {
+            "prefer": [
+              "hide",
+              "omit",
+              "exclude",
+              "skip",
+              "leave out",
+              "yes"
+            ]
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-card-zero.py"
+      },
+      "solution": "solutions/ledger-card-zero.json"
+    },
+    {
+      "id": "shelf-handback-plan",
+      "category": "interactive",
+      "kind": "hand_back",
+      "workspace": "shelf",
+      "needs": [
+        "D8"
+      ],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Plan the reservations feature in a plan block, then stop and wait: I'll edit the plan before you implement anything. `Loans.reserve(isbn, member)` queues a member for a book (no one twice), and while a book has a queue only its first member may borrow it."
+        },
+        {
+          "hand_back": {
+            "block": {
+              "kind": "plan"
+            },
+            "edit": {
+              "skip": "last_step"
+            },
+            "say": "Go ahead with the plan as I left it."
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-handback-plan.py"
+      },
+      "solution": "solutions/shelf-reserve.json"
+    },
+    {
+      "id": "ledger-handback-diff",
+      "category": "interactive",
+      "kind": "hand_back",
+      "workspace": "ledger",
+      "needs": [
+        "D8"
+      ],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Propose, as a proposed diff block, the change that lets `importer.read_csv` read `;`-separated files with a decimal comma (`1.200,50`), detecting the delimiter from the header line. Then wait for my review before you apply anything."
+        },
+        {
+          "hand_back": {
+            "block": {
+              "kind": "diff"
+            },
+            "edit": {
+              "keep": "all"
+            },
+            "say": "Apply what I kept."
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-semicolon.py"
+      },
+      "solution": "solutions/ledger-semicolon.json"
+    },
+    {
+      "id": "ledger-handback-note",
+      "category": "interactive",
+      "kind": "hand_back",
+      "workspace": "ledger",
+      "needs": [
+        "D8"
+      ],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Write your plan for a year-end close, `Journal.close_year(year, equity=\"3000\")`, as a note block, then wait for my edits before writing code."
+        },
+        {
+          "hand_back": {
+            "block": {
+              "kind": "note"
+            },
+            "edit": {
+              "append_text": " Date the entry December 31, memo `Close <year>`, and return None when there is nothing to close."
+            },
+            "say": "Go."
+          }
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-handback-note.py"
+      },
+      "solution": "solutions/ledger-close.json"
+    }
+  ]
+}

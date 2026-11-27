@@ -1,0 +1,12 @@
+[
+  {
+    "path": "ledger/importer.py",
+    "old": "    rows = csv.DictReader(io.StringIO(text))\n",
+    "new": "    header = text.split(\"\\n\", 1)[0]\n    delimiter = \";\" if header.count(\";\") > header.count(\",\") else \",\"\n    rows = csv.DictReader(io.StringIO(text), delimiter=delimiter)\n"
+  },
+  {
+    "path": "ledger/importer.py",
+    "old": "        entries[key].lines.append(Line(row[\"account\"].strip(), money.parse(row[\"amount\"])))",
+    "new": "        amount = row[\"amount\"]\n        if delimiter == \";\":\n            amount = amount.replace(\".\", \"\").replace(\",\", \".\")\n        entries[key].lines.append(Line(row[\"account\"].strip(), money.parse(amount)))"
+  }
+]

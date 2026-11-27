@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/money.py",
+    "old": "def split(cents, parts):",
+    "new": "def allocate(cents, weights):\n    \"\"\"`cents` split in proportion to `weights`, summing exactly to it: the\n    leftover cents go one each to the largest fractional remainders,\n    earlier parts first on ties.\"\"\"\n    if not weights or any(w < 0 for w in weights) or sum(weights) == 0:\n        raise ValueError(\"allocate takes weights that are not negative and not all zero\")\n    total = sum(weights)\n    shares = [cents * w // total for w in weights]\n    remainders = [cents * w % total for w in weights]\n    left = cents - sum(shares)\n    for i in sorted(range(len(weights)), key=lambda i: (-remainders[i], i))[:left]:\n        shares[i] += 1\n    return shares\n\n\ndef split(cents, parts):"
+  }
+]

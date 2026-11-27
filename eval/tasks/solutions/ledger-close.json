@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/journal.py",
+    "old": "    def lines(self, account, until=None):",
+    "new": "    def close_year(self, year, equity=\"3000\"):\n        \"\"\"Post `year`'s closing entry: every income and expense account's\n        balance up to December 31, brought to zero against `equity`. The\n        entry, or None when there is nothing to close.\"\"\"\n        end = datetime.date(year, 12, 31)\n        memo = f\"Close {year}\"\n        if any(e.memo == memo for e in self.entries):\n            raise ValueError(f\"{year} is closed already\")\n        lines = []\n        for account in self.chart:\n            if account.kind in (\"income\", \"expense\"):\n                raw = sum(line.cents for _, line in self.lines(account.code, until=end))\n                if raw:\n                    lines.append(Line(account.code, -raw))\n        if not lines:\n            return None\n        lines.append(Line(equity, -sum(line.cents for line in lines)))\n        return self.post(Entry(end, memo, lines))\n\n    def lines(self, account, until=None):"
+  }
+]

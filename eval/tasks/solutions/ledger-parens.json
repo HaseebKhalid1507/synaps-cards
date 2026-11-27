@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/money.py",
+    "old": "        negative, s = False, s[1:-1].strip()",
+    "new": "        negative, s = True, s[1:-1].strip()"
+  }
+]
