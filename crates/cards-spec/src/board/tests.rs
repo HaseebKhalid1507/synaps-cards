@@ -930,6 +930,38 @@ fn the_floor_keeps_evicted_notices_stale_and_retained_records_win() {
     assert!(s.visibility().record(&BlockId::parse("d1").unwrap()).is_some());
 }
 
+/// `Visibility::records`: every record and no other, in id order, each as
+/// `record` has it, an absent id's included; at the cap, exactly the 64
+/// the fold kept, the evicted ones in the floor alone.
+#[test]
+fn visibility_records_are_every_record_bounded() {
+    let mut h = H::default();
+    h.ops(json!([note("tests", "x")]));
+    h.user(&format!("a\n{}", notice("tests", 1, "dismissed")));
+    h.user(&format!("b\n{}", notice("gone", 2, "shown")));
+    h.user(&format!("c\n{}", notice("tests", 1, "shown")));
+    let s = h.state();
+    let got: Vec<(&str, Vis)> = s.visibility().records().map(|(id, r)| (id.as_str(), r)).collect();
+    assert_eq!(
+        got,
+        [("gone", Vis { dismissed: false, version: 2 }), ("tests", Vis { dismissed: true, version: 1 })],
+        "the stale notice recorded nothing"
+    );
+    assert_eq!(s.visibility().records().len(), s.visibility().len());
+    for v in 3..=80u32 {
+        h.user(&format!("n\n{}", notice(&format!("s{v:02}"), v, "shown")));
+    }
+    let s = h.state();
+    let vis = s.visibility();
+    assert_eq!(vis.records().len(), VISIBILITY_MAX);
+    assert!(vis.records().all(|(id, r)| vis.record(id) == Some(r)), "each as record says");
+    let ids: Vec<&BlockId> = vis.records().map(|(id, _)| id).collect();
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "in id order");
+    assert!(vis.records().any(|(id, r)| id.as_str() == "tests" && r.dismissed), "a live block's dismissal is kept");
+    assert!(vis.records().all(|(id, r)| r.version > vis.floor() || id.as_str() == "tests"), "the evicted are in the floor alone");
+    assert_eq!(vis.records().filter(|(id, _)| id.as_str() == "gone").count(), 0, "the oldest shown went first");
+}
+
 fn msg(role: &str, content: Value) -> Value {
     json!({ "role": role, "content": content })
 }

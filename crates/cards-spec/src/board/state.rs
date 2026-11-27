@@ -236,6 +236,15 @@ impl Visibility {
         self.records.get(id).is_some_and(|r| r.dismissed)
     }
 
+    /// Every record, by id in byte order, with what [`Visibility::record`]
+    /// says of it: at most [`VISIBILITY_MAX`] (the fold evicts past it,
+    /// §1.8), so a walk of them is bounded whatever the history. Absent ids
+    /// are among them (§3.5: a notice records an id whether or not a block
+    /// is live under it); an evicted one is only in the floor.
+    pub fn records(&self) -> impl ExactSizeIterator<Item = (&BlockId, Vis)> {
+        self.records.iter().map(|(id, r)| (id, *r))
+    }
+
     /// The highest version of any evicted record.
     pub fn floor(&self) -> u32 {
         self.floor
