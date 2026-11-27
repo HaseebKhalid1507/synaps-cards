@@ -327,6 +327,8 @@ fn check(s: &State, what: &str) {
     assert!(s.tombstones().count() <= TOMBSTONES_MAX, "{what}");
     assert!(s.records().count() <= RECORDS_MAX, "{what}");
     assert!(s.visibility().len() <= VISIBILITY_MAX, "{what}");
+    let vis = s.visibility();
+    assert!(vis.records().len() == vis.len() && vis.records().all(|(id, r)| vis.record(id) == Some(r)), "{what}: records()");
     assert!(s.runs().count() <= RUNS_MAX, "{what}");
     assert!(s.outcomes().count() <= OUTCOMES_MAX, "{what}");
     assert!(s.log().count() <= LOG_MAX, "{what}");
