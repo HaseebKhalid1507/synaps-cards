@@ -11,7 +11,8 @@ converted to it (`from_chat`) and back (`to_chat`).
   (free; exact). Its counts are `endpoint`'s.
 - `openai_compatible`: no endpoint; a completion of one output token, and
   its reported input (`prompt_tokens`, which includes the cached part).
-  Its counts calibrate the proxy.
+  Its counts calibrate the proxy. Each is paid: its usage goes to
+  `on_usage` (spend.py's `Budget.paid`) before the count is returned.
 
 **The tap** (`Tap`) sits between the daemon and its provider: the daemon's
 base URL points at it (`SYNAPS_ANTHROPIC_BASE_URL`, or the local
@@ -148,14 +149,21 @@ class OpenAICompatible:
     name = "openai_compatible"
     has_endpoint = False
 
-    def __init__(self, model, base, api_key=None):
+    def __init__(self, model, base, api_key=None, on_usage=None):
         self.model, self.base, self.key = model.split("/", 1)[-1], base.rstrip("/"), api_key
+        self.on_usage = on_usage
 
     def count(self, body):
-        """A one-token completion's reported input for a neutral body."""
+        """A one-token completion's reported input for a neutral body. The
+        completion is paid: its usage goes to `on_usage` first, which may
+        stop the run."""
         req = to_chat(body, self.model) | {"max_tokens": 1, "stream": False}
         headers = {"authorization": f"Bearer {self.key}"} if self.key else {}
         u = post(f"{self.base}/chat/completions", req, headers)["usage"]
+        if self.on_usage is not None:
+            cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+            self.on_usage({"input_tokens": u["prompt_tokens"] - cached, "cache_read_input_tokens": cached,
+                           "output_tokens": u.get("completion_tokens", 0)})
         return u["prompt_tokens"]
 
 

@@ -3,7 +3,9 @@ make, the desk seam (the stand-in, and a real run's refusal of it), the
 providers' request shapes and the tap, spend and the budget guard, and the
 report's gate (pooled and 2 of 3 repeats)."""
 
+import argparse
 import json
+import tempfile
 import threading
 import unittest
 import urllib.request
@@ -163,6 +165,55 @@ class Spend(unittest.TestCase):
         self.assertFalse(b.room_for_another(), "0.60 spent, 0.50 the largest run: another could pass 1.00")
         self.assertFalse(b.charge({"output_tokens": 100_000}), "past the budget mid-turn")
 
+    def test_every_charge_is_written_down_and_a_probe_past_the_budget_stops_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "paid.jsonl"
+            b = spend.Budget(1.0, "claude-haiku-4-5", ledger=ledger)
+            probe = b.paid("probe")
+            probe({"input_tokens": 400_000})  # $0.40
+            probe({"input_tokens": 500_000})  # $0.90
+            with self.assertRaises(spend.OverBudget):
+                probe({"input_tokens": 200_000})  # $1.10: paid already, and the run stops
+            lines = [json.loads(x) for x in ledger.read_text().splitlines()]
+        self.assertEqual([x["what"] for x in lines], ["probe"] * 3)
+        self.assertEqual([x["spent"] for x in lines], [0.4, 0.9, 1.1])
+
+    def test_a_paid_probe_is_charged_before_its_count_comes_back(self):
+        # A provider with no endpoint: the calibration's one-token completions
+        # cost money, so a tiny budget stops it a few probes in.
+        sent = []
+
+        class Up(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                sent.append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+                body = json.dumps({"usage": {"prompt_tokens": 250_000, "completion_tokens": 1,
+                                             "prompt_tokens_details": {"cached_tokens": 50_000}}}).encode()
+                self.send_response(200)
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Up)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                b = spend.Budget(1.0, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+                prov = providers.OpenAICompatible("claude-haiku-4-5", f"http://127.0.0.1:{up.server_address[1]}", on_usage=b.paid("probe"))
+                calls = [{"ops": [{"op": "remove", "id": "x" * (1 + k)}]} for k in range(210)]
+                with self.assertRaises(spend.OverBudget):
+                    calibrate.calibrate(calls, [], prov.count, len, "chars")
+                paid = Path(tmp, "paid.jsonl").read_text().splitlines()
+        finally:
+            up.shutdown()
+            up.server_close()
+        # Each probe: 200k uncached + 50k cache read + 1 out = $0.205005; the 5th passes $1.
+        self.assertEqual((len(sent), len(paid)), (5, 5))
+        self.assertAlmostEqual(b.spent, 5 * (0.2 + 0.005 + 0.000005), places=9)
+        self.assertEqual(sent[0]["max_tokens"], 1)
+
     def test_the_estimate_counts_the_runnable_set(self):
         t = estimate.table(TASKS)
         e = t["rows"]["expected"]
@@ -264,6 +315,104 @@ class Ops(unittest.TestCase):
         a, b = count.ops(lines, {"t1"})
         self.assertEqual((a["outcome"], a["partly"], a["why"]), ("applied", True, None))
         self.assertEqual((b["outcome"], b["partly"], b["why"]), ("skipped", False, "CardOpen, NoBlock"))
+
+
+class _Session:
+    """A session of the eval's daemon, offline: each message it's sent plays
+    the next turn of `script` (session-wire events), one event a `next`."""
+
+    def __init__(self, script):
+        self.events, self.prompts, self.meta, self.id = [], [], {"journal_id": "j1"}, "s1"
+        self.script, self.queue = list(script), []
+
+    def submit(self, text):
+        self.queue += self.script.pop(0)
+
+    steer = submit
+
+    def cancel(self):
+        self.queue = [{"ev": "aborted", "context_saved": True}, {"ev": "idle"}]
+
+    def next(self, timeout):
+        if self.queue:
+            self.events.append((float(len(self.events)), self.queue.pop(0)))
+
+    def until(self, pred, timeout):
+        while self.queue:
+            self.next(0)
+            if pred(self.events[-1][1]):
+                return self.events[-1][1]
+
+    def messages(self):
+        return [{"role": "user", "content": "Q?"}, {"role": "assistant", "content": "A."}]
+
+    def close(self):
+        pass
+
+
+class _Iso:
+    cards_eval = "cards-eval"
+
+    def __init__(self, outputs):
+        self.outputs, self.sessions = list(outputs), []
+
+    def blocks(self, on):
+        return ["read"] + (["cards_block"] if on else [])
+
+    def session(self, cwd, model, name):
+        out = self.outputs.pop(0)
+        turn = [{"ev": "turn_started", "trigger": "user", "user_text": "Q?"},
+                {"ev": "stream", "event": {"kind": "llm", "llm": "response_start"}},
+                {"ev": "stream", "event": {"kind": "llm", "llm": "text", "text": "21"}},
+                {"ev": "stream", "event": {"kind": "session", "session": "usage", "input_tokens": 0, "output_tokens": out}},
+                {"ev": "stream", "event": {"kind": "session", "session": "done"}}, {"ev": "idle"}]
+        self.sessions.append(_Session([turn]))
+        return self.sessions[-1]
+
+
+class BudgetStop(unittest.TestCase):
+    """A run the budget stops (spend.py's soft stop) keeps every run that
+    spent, the stopped one marked, in the records and in records.jsonl."""
+
+    def setUp(self):
+        self.grace, self.helper = harness.QUEUED_GRACE, harness.helper
+        harness.QUEUED_GRACE, harness.helper = 0, lambda *a: {"lines": []}
+
+    def tearDown(self):
+        harness.QUEUED_GRACE, harness.helper = self.grace, self.helper
+
+    def test_a_stop_mid_run_keeps_the_runs_before_it_and_the_stopped_one(self):
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        with tempfile.TemporaryDirectory() as tmp:
+            b = spend.Budget(0.7, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+            records = []
+            with self.assertRaises(spend.OverBudget):
+                # Run 1: $0.20. Run 2's one response, $0.60, passes $0.70: cancelled, stopped.
+                run.run_all(argparse.Namespace(repeats=1, provider="anthropic"), [task], _Iso([40_000, 120_000]), "claude-haiku-4-5", desk.StandIn(),
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b)
+            written = [json.loads(x) for x in Path(tmp, "records.jsonl").read_text().splitlines()]
+            paid = Path(tmp, "paid.jsonl").read_text().splitlines()
+        self.assertEqual([r.get("stopped") for r in records], [None, "over budget"])
+        self.assertEqual([r["n"] for r in written], [0, 1], "the stopped run is written too")
+        self.assertEqual((records[0]["judge"]["pass"], records[1]["judge"]), (True, None))
+        self.assertEqual(len(paid), 2)
+        self.assertAlmostEqual(b.spent, 0.8, places=9)
+        rep = report.build(records, qualifying(), 900, [], frozen_meta(stopped="over budget"),
+                           plan=[(task["id"], a, r) for r in (1, 2, 3) for a in ("on", "off")])
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
+
+    def test_no_room_for_another_run_stops_the_run_too(self):
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        with tempfile.TemporaryDirectory() as tmp:
+            b = spend.Budget(0.7, "claude-haiku-4-5")
+            records = []
+            with self.assertRaises(spend.OverBudget) as e:
+                # Run 1 cost $0.40: another as large could pass $0.70.
+                run.run_all(argparse.Namespace(repeats=1, provider="anthropic"), [task], _Iso([80_000, 1]), "claude-haiku-4-5", desk.StandIn(),
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b)
+        self.assertEqual(len(records), 1)
+        self.assertIn("no room for run 1 of 2", str(e.exception))
 
 
 class Gate(unittest.TestCase):

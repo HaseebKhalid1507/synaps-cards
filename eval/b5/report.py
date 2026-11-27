@@ -57,7 +57,8 @@ task short of its shape is named.
   count.py); the frozen task set (its digest); exactly three repeats; the
   plan's runs, every runnable task × both arms × repeats 1–3, each there
   once, none stopped (an interrupted run is incomplete, not a smaller
-  experiment); every user-initiated turn of every run measured (turns.py:
+  experiment, and so is one the budget stopped); every user-initiated turn
+  of every run measured (turns.py:
   its `idle`, every response's usage); no task left out (B6 needs the D8
   hand-backs' both arms, which B5a doesn't run: §8.1's B5b); and the set's
   shape.
@@ -262,6 +263,8 @@ def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
             out.append(f"{sum(missing.values())} of the plan's {sum(want.values())} runs missing (an interrupted run is incomplete)")
         if extra:
             out.append(f"{sum(extra.values())} runs the plan doesn't have, or twice")
+    if meta.get("stopped"):
+        out.append(f"the run stopped ({meta['stopped']})")
     stopped = [r for r in records if r.get("stopped")]
     if stopped:
         out.append(f"{len(stopped)} runs stopped: " + ", ".join(sorted({r['stopped'] for r in stopped})))

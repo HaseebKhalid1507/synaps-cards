@@ -108,6 +108,18 @@ class Uncalibrated(Counter):
                                      "why_not": "a provider that can't be probed: §2.8's uncalibrated estimate"}
 
 
+class NoCounter(Counter):
+    """A run that stopped before it had a counter: nothing to attribute."""
+
+    kind = "none"
+
+    def __init__(self, why):
+        self.why = why
+
+    def describe(self):
+        return super().describe() | {"why_not": self.why}
+
+
 class Endpoint(Counter):
     """`count(body)` is the provider's token-count endpoint over a neutral
     request (calibrate.py); `tools` are the definitions every probe

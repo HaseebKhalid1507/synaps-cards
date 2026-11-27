@@ -24,13 +24,19 @@ are a stand-in's and say so; they are never data.
 - the provider's credential in the environment (`ANTHROPIC_API_KEY`), never
   on the command line.
 Its daemon's provider is reached through the tap (b5/providers.py), so the
-first requests and the latencies are recorded as sent.
+first requests and the latencies are recorded as sent. Every paid request
+is charged against the budget and written to `paid.jsonl` as it comes, the
+probes of a provider with no token-count endpoint included (spend.py). A
+run the budget stops (a soft stop: spend.py) still writes its report, of
+every run that spent, the stopped one marked: an incomplete experiment,
+never eligible (report.py).
 
 **The estimate** (`--estimate`) prints the spend of a full run per
 candidate model (b5/spend.py), from the set's own shape: no provider call.
 
 Everything a run makes is under `--work`: `records.jsonl`, `report.json`,
-`report.md`, `calibration.json`, the daemon's log and each run's workspace.
+`report.md`, `calibration.json`, `paid.jsonl` (a real run's), the daemon's
+log and each run's workspace.
 """
 
 import argparse
@@ -110,8 +116,9 @@ def dry(a, tasks, frozen):
         counter = count.Scripted(fit, proxy.bytes4)
         (work / "calibration.json").write_text(json.dumps({"fit": fit.summary(), **pairs}, indent=1))
         model.requests.clear()
-        definition, records = run_all(a, tasks, iso, "local/stub", d, work, model=model, dry=True,
-                                      count_request=lambda body: prov.count(body))
+        records = []
+        definition = run_all(a, tasks, iso, "local/stub", d, work, records, model=model, dry=True,
+                             count_request=lambda body: prov.count(body))
     finally:
         rec = iso.stop()
         model.close()
@@ -127,14 +134,14 @@ def real(a, tasks, frozen):
         raise SystemExit(f"--approved {a.approved!r} isn't this run's {a.model}@{a.budget_usd:g}")
     if a.tasks:
         raise SystemExit("a real run runs the whole frozen set")
-    budget = spend.Budget(a.budget_usd, a.model)
+    work = Path(a.work or tempfile.mkdtemp(prefix="b5-run-")).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+    budget = spend.Budget(a.budget_usd, a.model, ledger=work / "paid.jsonl")
     the_desk = desk.for_real_run(desk.Process(a.desk))
     has_d8 = "D8" in the_desk.impl
     for t in tasks:
         if has_d8 and t["needs"] == ["D8"]:
             t["needs"] = []
-    work = Path(a.work or tempfile.mkdtemp(prefix="b5-run-")).resolve()
-    work.mkdir(parents=True, exist_ok=True)
     if a.provider == "anthropic":
         key = os.environ.get("ANTHROPIC_API_KEY")
         if not key:
@@ -146,13 +153,14 @@ def real(a, tasks, frozen):
     else:
         if not a.base_url:
             raise SystemExit("openai_compatible takes --base-url")
-        prov = providers.OpenAICompatible(a.model, a.base_url, os.environ.get("OPENAI_API_KEY"))
+        prov = providers.OpenAICompatible(a.model, a.base_url, os.environ.get("OPENAI_API_KEY"), on_usage=budget.paid("probe"))
         tap = providers.Tap(a.base_url)
         env = {"LOCAL_ENDPOINT": tap.url}
         model_id = f"local/{a.model}"
     iso = daemon.Isolated(a.synaps, work, env=env)
     started = time.time()
-    records, definition = [], None
+    records, definition, stopped = [], None, None
+    counter = count.NoCounter("the run stopped before its calibration finished")
     try:
         iso.install()
         iso.start()
@@ -168,15 +176,16 @@ def real(a, tasks, frozen):
             counter = count.Calibrated(fit, px)
             (work / "calibration.json").write_text(json.dumps({"fit": fit.summary(), **pairs}, indent=1))
         tap.take()
-        definition, records = run_all(a, tasks, iso, model_id, the_desk, work, tap=tap, budget=budget,
-                                      count_request=prov.count)
-    except harness.OverBudget as e:
+        definition = run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget,
+                             count_request=prov.count)
+    except spend.OverBudget as e:
+        stopped = f"over budget: {e}"
         print(f"stopped: {e}", file=sys.stderr)
     finally:
         rec = iso.stop()
         tap.close()
         the_desk.close()
-    rec["spent_usd"] = round(budget.spent, 4)
+    rec["spent_usd"], rec["stopped"] = round(budget.spent, 4), stopped
     return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "real", a.model)
 
 
@@ -193,7 +202,10 @@ def _block_tools(iso):
              "input_schema": json.loads((plugin / "crates/cards-spec/schema-blocks.json").read_text())}]
 
 
-def run_all(a, tasks, iso, model_id, the_desk, work, model=None, tap=None, budget=None, dry=False, count_request=None):
+def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=None, budget=None, dry=False, count_request=None):
+    """Every run of the plan, each record appended to `records` and to
+    `records.jsonl` as it finishes, a run the budget stopped included (it
+    raises on, its record kept): the definition control's count."""
     order, _ = harness.plan(tasks, a.repeats)
     if tap is not None:
         def take():
@@ -207,21 +219,30 @@ def run_all(a, tasks, iso, model_id, the_desk, work, model=None, tap=None, budge
         to_neutral = providers.from_chat
     runner = harness.Runner(iso, model_id, the_desk, work, scripted=model, budget=budget, requests=take, dry=dry)
     out = open(work / "records.jsonl", "w")
-    records, firsts = [], {}
+    firsts = {}
+
+    def keep(rec):
+        out.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        out.flush()
+        records.append(rec)
+
     try:
         for n, (r, task, arm) in enumerate(order):
             if budget and not budget.room_for_another():
-                print(f"stopping before run {n}: the budget has no room for another run", file=sys.stderr)
-                break
-            rec = runner.run(n, r, task, arm)
+                raise spend.OverBudget(f"no room for run {n} of {len(order)}: spent {budget.spent:.2f} of {budget.usd:.2f} USD, "
+                                       f"the largest run {budget.largest:.2f}")
+            try:
+                rec = runner.run(n, r, task, arm)
+            except spend.OverBudget as e:
+                if getattr(e, "record", None) is not None:
+                    keep(e.record)
+                raise
             if budget:
                 budget.run_done()
             first = next((q["request"] for q in rec["requests"] if q.get("request") and (q["request"].get("messages"))), None)
             if first is not None:
                 firsts.setdefault(arm, to_neutral(first))
-            out.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            out.flush()
-            records.append(rec)
+            keep(rec)
             print(f"{n + 1}/{len(order)} {task['id']} {arm} r{r + 1}: {'pass' if rec['judge']['pass'] else 'FAIL'}", flush=True)
     finally:
         out.close()
@@ -231,14 +252,15 @@ def run_all(a, tasks, iso, model_id, the_desk, work, model=None, tap=None, budge
         if "off" in firsts:
             (work / "definition.json").write_text(json.dumps({"tokens": definition,
                                                               "else_differs": count.prefix_diff(firsts["on"], firsts["off"])}))
-    return definition, records
+    return definition
 
 
 def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, mode, model):
     # Eligibility checks the runs against the prescribed plan: three repeats, whatever --repeats was.
     order, not_run = harness.plan(tasks, len(report.REPEATS))
     meta = {"mode": mode, "model": model, "head": daemon_rec.get("head"), "taskset": frozen, "repeats": a.repeats,
-            "synaps": daemon_rec.get("synaps_version"), "daemon": daemon_rec, "secs": round(time.time() - started, 1)}
+            "synaps": daemon_rec.get("synaps_version"), "daemon": daemon_rec, "secs": round(time.time() - started, 1),
+            "stopped": daemon_rec.get("stopped")}
     rep = report.build(records, counter, definition, not_run, meta, plan=[(t["id"], arm, r + 1) for r, t, arm in order])
     (work / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
     (work / "report.md").write_text(report.markdown(rep))

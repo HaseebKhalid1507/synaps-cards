@@ -26,9 +26,13 @@ Then the run's record: the session's events, its history, the fold report
 (each denied: nothing in the eval asks), the requests the provider got,
 and the judged outcome (taskset.py).
 
-**The budget** (real runs, spend.py): every usage is priced as it comes; a
-turn is cancelled when the total passes the budget, and no run starts that
-could pass it.
+**The budget** (real runs, spend.py): every usage is priced and written to
+the ledger as it comes; a turn is cancelled when the total passes the
+budget, and no run starts that could pass it. **A run the budget stopped**
+still gives its record, marked `stopped`, with everything it had (events,
+what was sent, the history and its fold when the session could give them;
+no judge), so the report is of every run that spent: the stop is a soft one
+(spend.py), and the report says the experiment is incomplete.
 """
 
 import json
@@ -37,15 +41,12 @@ import time
 from pathlib import Path
 
 from . import taskset, turns
+from .spend import OverBudget
 from .turns import BLOCK_TOOL
 
 TURN_TIMEOUT = 900
 DRY_TURN_TIMEOUT = 120
 QUEUED_GRACE = 1.5  # seconds after an idle in which a queued steer starts its turn
-
-
-class OverBudget(Exception):
-    pass
 
 
 def plan(tasks, repeats=3):
@@ -104,6 +105,7 @@ class Runner:
         s = self.iso.session(ws, self.model, f"b5-{task['id']}-{arm}-r{repeat + 1}")
         conv = s.meta.get("journal_id") or s.id
         rec["session"] = {k: s.meta.get(k) for k in ("id", "journal_id", "host_pid", "model")}
+        stop = None
         try:
             for g in groups(task["turns"]):
                 left = self.turn(s, conv, g[0], g[1:], rec)
@@ -111,16 +113,25 @@ class Runner:
                     rec["steps"].append({"step": "steer", "said_instead": True})
                     self.turn(s, conv, {"say": steer["steer"]}, [], rec)
             rec["history"] = s.messages()
+        except OverBudget as e:
+            stop, rec["stopped"] = e, "over budget"
+            try:
+                rec["history"] = s.messages()
+            except Exception as why:  # the session may be gone: the record keeps what it had
+                rec["history"], rec["history_error"] = None, str(why)
         finally:
             rec["events"] = s.events
             rec["prompts"] = s.prompts
             s.close()
             self.iso.sessions.remove(s)
-        rec["fold"] = helper(self.iso.cards_eval, "fold", json.dumps(rec["history"], ensure_ascii=False))
+        rec["fold"] = (helper(self.iso.cards_eval, "fold", json.dumps(rec["history"], ensure_ascii=False))
+                       if rec.get("history") is not None else {"lines": []})
         rec["requests"] = self.requests() if self.requests else []
-        last = _last_text(rec["events"])
-        rec["judge"] = taskset.judge(task, ws, text=last)
+        rec["judge"] = None if stop else taskset.judge(task, ws, text=_last_text(rec["events"]))
         rec["t1"] = time.time()
+        if stop is not None:
+            stop.record = rec
+            raise stop
         return rec
 
     def send(self, s, conv, carry, body, rec, steer=False):
@@ -169,7 +180,7 @@ class Runner:
                 started |= kind == "turn_started"
                 if kind == "stream" and (ev.get("event") or {}).get("session") == "usage":
                     rounds += 1
-                    if self.budget and not self.budget.charge(ev["event"]):
+                    if self.budget and not self.budget.charge(ev["event"], "run"):
                         s.cancel()
                         raise OverBudget(f"spent {self.budget.spent:.2f} of {self.budget.usd:.2f} USD")
                     for f in [f for f in pending if f["after_round"] <= rounds]:
