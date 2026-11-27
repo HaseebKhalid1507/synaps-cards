@@ -458,6 +458,27 @@ class Gate(unittest.TestCase):
         rows[0] = dict(rows[0], closing=dict(rows[0]["closing"], rounds=2))
         self.assertFalse(report.rows_of(rows, self.judged(), 900)["closing_rounds"]["pass"])
 
+    def test_net_output_gives_each_repeat_the_same_weight(self):
+        # Shady's: the on-runs' outputs per turn are 1000, 1000 and 0, but the
+        # third run took four turns. Pooled by turn that's 2000 / 6 = 333.33;
+        # by §2.8's "difference of the repeats' means" it is 666.67.
+        rows = [row("a", "on", 1, out=1000), row("a", "on", 2, out=1000)] + [row("a", "on", 3, out=0)] * 4
+        rows += [row("a", "off", r, out=0) for r in (1, 2, 3)]
+        g = report.rows_of(rows, [], 900)["output_on_minus_off"]
+        self.assertAlmostEqual(g["per_task"]["a"], 2000 / 3, places=9)
+        self.assertEqual(g["unmatched_turns"], [["a", 3]], "the repeat whose arms took different turns is named")
+
+    def test_a_split_turn_is_no_saving(self):
+        # One off turn of 1000; on, the same work in two turns of 700 (a
+        # steer said instead). Per turn that read as -300: it's +400.
+        rows = [row("a", "off", 1, out=1000), row("a", "on", 1, out=700), row("a", "on", 1, out=700)]
+        g = report.rows_of(rows, [], 900)["output_on_minus_off"]
+        self.assertEqual(g["per_task"]["a"], 400)
+        self.assertEqual(g["run_totals"]["a"], {"on": {"run_output": [1400], "turns": [2]}, "off": {"run_output": [1000], "turns": [1]}})
+        # A task the user plans in two turns (a card answer) is per its two.
+        two = [dict(r, planned_turns=2) for r in rows]
+        self.assertEqual(report.rows_of(two, [], 900)["output_on_minus_off"]["per_task"]["a"], 200)
+
     def test_a_task_that_passes_off_and_fails_on_fails_the_outcome_row(self):
         r = report.rows_of(self.rows(), self.judged(worse=[("b", 1), ("b", 2)]), 900)
         self.assertEqual(r["task_outcome"]["worse_with_blocks"], ["b"])

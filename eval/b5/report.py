@@ -16,9 +16,17 @@ the reading here is the stricter one, and each is stated:
   down); how many made none is reported beside it;
 - *per round* is over the rounds that carry a block call;
 - *closing rounds* are over every complete on-turn;
-- *output on − off* is per task: the mean of its on-turns' reported output
-  less the mean of its off-turns', then the median over tasks; a repeat's
-  is the same over that repeat's runs;
+- *output on − off* (§2.8: "per task, the difference of the repeats'
+  means") is per run first. A run's output per turn is the reported output
+  of all its user-initiated turns, summed, over the task's **planned**
+  turns (its user's starters: `say`, `answer`, `hand_back`). So a turn
+  the engine split (a steer said instead, or one queued past the drain)
+  moves output between turns, not out of the task, and can't pass for a
+  saving. A task's arm is the mean of its runs, one per repeat, each
+  weighed the same; the row is the median over tasks of on − off; a
+  repeat's is the same over that repeat's runs. Each task's run totals and
+  turn counts are reported beside it, and every repeat whose two arms took
+  a different number of turns is listed (`unmatched_turns`);
 - *repairs and re-puts* are per on-turn; *skipped ops* over every agent op
   of the on-turns' calls, each op once however many lines the board logged
   for it (count.py's `ops`); a path that didn't apply is a diagnostic in
@@ -131,7 +139,7 @@ def per_turn(rec, counter):
         mine = count.ops(lines, {x.tool_id for x in t.block_calls()})
         rows.append({
             "task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "trigger": t.trigger, "outcome": t.outcome,
-            "measured": t.measured, "unmeasured_rounds": len(t.unmeasured),
+            "measured": t.measured, "unmeasured_rounds": len(t.unmeasured), "planned_turns": rec.get("planned_turns", 1),
             "rounds": len(t.rounds),
             "tool_calls": sum(len(r.calls) for r in t.rounds),
             "output": sum(r.output for r in t.rounds),
@@ -177,13 +185,22 @@ def rows_of(turn_rows, judged, definition):
     out["closing_rounds"] = {"max": max(closing, default=None), "share": share, "turns": len(closing),
                              "pass": bool(closing) and max(closing) <= 1 and share <= GATE["closing_rounds"]["share"]}
     out["definition"] = {"tokens": definition, "pass": definition is not None and definition <= GATE["definition"]["max"]}
-    diffs = {}
-    for task in sorted({r["task"] for r in turn_rows}):
-        o = [r["output"] for r in turn_rows if r["task"] == task and r["arm"] == "on"]
-        f = [r["output"] for r in turn_rows if r["task"] == task and r["arm"] == "off"]
-        if o and f:
-            diffs[task] = statistics.mean(o) - statistics.mean(f)
+    runs = {}  # (task, arm, repeat) → [its output, its user-initiated turns, the task's planned turns]
+    for r in turn_rows:
+        x = runs.setdefault((r["task"], r["arm"], r["repeat"]), [0, 0, r.get("planned_turns", 1)])
+        x[0] += r["output"]
+        x[1] += 1
+    diffs, totals = {}, {}
+    for task in sorted({k[0] for k in runs}):
+        per = {arm: {rp: v for (t, a, rp), v in runs.items() if t == task and a == arm} for arm in ("on", "off")}
+        totals[task] = {arm: {"run_output": [per[arm][rp][0] for rp in sorted(per[arm])],
+                              "turns": [per[arm][rp][1] for rp in sorted(per[arm])]} for arm in per}
+        if per["on"] and per["off"]:
+            diffs[task] = (statistics.mean(v[0] / v[2] for v in per["on"].values())
+                           - statistics.mean(v[0] / v[2] for v in per["off"].values()))
+    unmatched = sorted([t, rp] for (t, a, rp), v in runs.items() if a == "on" and (t, "off", rp) in runs and runs[(t, "off", rp)][1] != v[1])
     out["output_on_minus_off"] = {"median": median(list(diffs.values())), "tasks": len(diffs), "per_task": diffs,
+                                  "run_totals": totals, "unmatched_turns": unmatched,
                                   "pass": bool(diffs) and median(list(diffs.values())) <= GATE["output_on_minus_off"]["median"]}
     fixes = sum(r["repairs"] + r["reputs"] for r in on)
     out["repairs_and_reputs"] = {"repairs": sum(r["repairs"] for r in on), "reputs": sum(r["reputs"] for r in on),
@@ -352,7 +369,7 @@ def markdown(rep):
              ""]
     lines += ["| Row | Kind | Pooled | Repeats passing | Pass |", "|---|---|---|---|---|"]
     for k, g in rep["gate"].items():
-        p = {x: y for x, y in g["pooled"].items() if x not in ("pass", "per_task")}
+        p = {x: y for x, y in g["pooled"].items() if x not in ("pass", "per_task", "run_totals")}
         lines.append(f"| {k} | {g['kind']} | `{json.dumps(p, sort_keys=True)}` | {g['repeats_passing']} | {'yes' if g['pass'] else '**no**'} |")
     s = rep["set_shape"]
     cats = ", ".join(f"{c} {s[c]['held']} of {s[c]['tasks']} ({s[c]['plays']}; ≥ {s[c]['need']})"

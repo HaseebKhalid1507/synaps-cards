@@ -101,7 +101,7 @@ class Runner:
         if self.requests:
             self.requests()
         rec = {"n": n, "task": task["id"], "category": task["category"], "arm": arm, "repeat": repeat + 1,
-               "tools": self.tools, "workspace": str(ws), "sent": [], "steps": [], "t0": time.time()}
+               "planned_turns": len(groups(task["turns"])), "tools": self.tools, "workspace": str(ws), "sent": [], "steps": [], "t0": time.time()}
         s = self.iso.session(ws, self.model, f"b5-{task['id']}-{arm}-r{repeat + 1}")
         conv = s.meta.get("journal_id") or s.id
         rec["session"] = {k: s.meta.get(k) for k in ("id", "journal_id", "host_pid", "model")}
