@@ -76,6 +76,16 @@ struct Desk {
 
 type Event2 = crate::fold::Event;
 
+impl Seen {
+    /// The seen-prefix rule's common prefix of `f`, read as the memo reads
+    /// a history ([`Reading::placed`]).
+    fn agrees(&self, f: &[&str]) -> Option<usize> {
+        let mut r = Reading::new(self, "", None);
+        f.iter().for_each(|b| r.read(b));
+        r.placed()
+    }
+}
+
 impl Desk {
     /// A session with a plan of four steps and a note, put by the agent.
     fn new() -> Self {
@@ -145,6 +155,14 @@ impl Desk {
     fn hand_back(&mut self, parts: Value) -> Result<String, Refusal> {
         let e = self.edit(PLAN, parts);
         self.send(&e)
+    }
+
+    /// Whether a hand-back of `parts` on the plan is admitted now (what
+    /// enables Hand back).
+    fn may_hand_back(&self, parts: Value) -> Result<(), Refusal> {
+        let e = self.edit(PLAN, parts);
+        let s = self.board();
+        self.memo.may_hand_back(&e, &summary(), &History::new(&self.history, &s))
     }
 
     fn on(&mut self, e: Event<'_>) {
@@ -1197,9 +1215,7 @@ fn a_resends_rebuilt_trailer() {
 struct NoEdits;
 
 impl Edits for NoEdits {
-    fn of(&self, _: &Ref, _: &Tag) -> Vec<&str> {
-        Vec::new()
-    }
+    fn each(&self, _: &Ref, _: &Tag, _: &mut dyn FnMut(&str)) {}
 
     fn live(&self, _: &Ref, _: &Tag) -> bool {
         false
@@ -1228,6 +1244,13 @@ fn two_appends_of_different_items() {
     d.settles();
     let e = d.memo.get(&first_body).unwrap();
     assert_eq!((e.state, e.retired), (State::Unconfirmed, None), "theirs: not retired");
+    let s = d.board();
+    let h = History::new(&d.history, &s);
+    assert!(!d.memo.may_resend(&first_body, &h), "its Resend waits while our other append is sending (one flight)");
+    // Ours lands: the first keeps its Resend.
+    let second = d.whole();
+    d.lands(&second);
+    d.settles();
     let s = d.board();
     let h = History::new(&d.history, &s);
     assert!(d.memo.may_resend(&first_body, &h), "its Resend stays");
@@ -1272,7 +1295,7 @@ fn a_memo_full_of_recoverable_entries() {
     }
     assert_eq!(d.memo.entries().len(), CAP);
     assert!(d.memo.entries().iter().all(Entry::recoverable));
-    assert!(!d.memo.may_hand_back(), "Hand back is off");
+    assert_eq!(d.may_hand_back(set(&key(CAP), value(CAP))), Err(Refusal::Full), "Hand back is off");
     assert_eq!((CAP, FULL), (32, "32 edits not confirmed · resend or discard one"), "§1.8");
     let before = d.memo.entries().to_vec();
     assert_eq!(d.hand_back(set(&key(CAP), value(CAP))), Err(Refusal::Full));
@@ -1287,18 +1310,18 @@ fn a_memo_full_of_recoverable_entries() {
     d.settles();
     assert_eq!(d.memo.get(&bodies[3]).unwrap().state, State::InChat);
     assert_eq!(d.memo.get(&bodies[7]).unwrap().retired, Some(Retired::Elsewhere));
-    assert!(d.memo.may_hand_back());
+    assert_eq!(d.may_hand_back(set(&key(CAP), value(CAP))), Ok(()));
     d.hand_back(set(&key(CAP), value(CAP))).unwrap();
     assert!(d.memo.get(&bodies[7]).is_none() && d.memo.get(&bodies[3]).is_some(), "the retired one first");
     d.unconfirmed_now();
     d.hand_back(set(&key(CAP + 1), value(CAP + 1))).unwrap();
     assert!(d.memo.get(&bodies[3]).is_none(), "then the one in the chat");
     d.unconfirmed_now();
-    assert!(!d.memo.may_hand_back());
+    assert_eq!(d.may_hand_back(set(&key(CAP + 2), value(CAP + 2))), Err(Refusal::Full));
     assert_eq!(d.hand_back(set(&key(CAP + 2), value(CAP + 2))), Err(Refusal::Full), "full again: none goes");
     // A discard frees one.
     d.memo.forget(&bodies[0]).unwrap();
-    assert!(d.memo.may_hand_back());
+    assert_eq!(d.may_hand_back(set(&key(CAP + 2), value(CAP + 2))), Ok(()));
     assert!(d.hand_back(set(&key(CAP + 2), value(CAP + 2))).is_ok());
     assert_eq!(d.memo.entries().len(), CAP);
 
@@ -1338,8 +1361,8 @@ impl Desk {
 
 /// Past [`SEEN_MAX`] of the incarnation's edits: the prefix is exact while
 /// the history agrees up to the kept digests; a rollback within them is
-/// placed; one below them, or a compaction, can't be: ours is matched
-/// anywhere, and an edit it had seen never retires it.
+/// placed; one below them, or a compaction, can't be: that history is no
+/// evidence either way, so it neither confirms ours nor retires it.
 #[test]
 fn the_seen_prefix_past_seen_max() {
     let n = SEEN_MAX + 2;
@@ -1384,12 +1407,16 @@ fn the_seen_prefix_past_seen_max() {
     w.settles();
     assert_eq!(w.retired(), Some(Retired::Elsewhere));
 
-    // A compaction: the successor holds only ours.
+    // A compaction: the successor holds only ours, and can't be placed:
+    // not confirmed by it. Unconfirmed, with its Resend, once checked.
     let mut c = base();
     let t = c.queued(false);
     c.history = vec![Event2::User { text: t.clone() }];
     c.settles();
-    assert_eq!(c.state(), Some(State::InChat), "matched anywhere");
+    assert_eq!(c.state(), Some(State::Queued), "not confirmed by a history it can't place");
+    c.on(Event::Idle);
+    c.settles();
+    assert_eq!((c.state(), c.retired()), (Some(State::Unconfirmed), None));
 
     // A rollback below the kept digests, to an edit it had seen that covers
     // ours: never retired by it.
@@ -1426,8 +1453,8 @@ fn an_entry_keeps_at_most_seen_max_digests() {
 }
 
 /// The history differs from what was seen below the kept digests, yet is
-/// as long: the chain says so, and ours is matched anywhere, not taken for
-/// one of the edits it had seen.
+/// as long: the chain says so, and that history is no evidence, though it
+/// holds ours: not confirmed, and recoverable.
 #[test]
 fn the_seen_chain_catches_a_history_that_differs_below_the_kept_digests() {
     let n = SEEN_MAX + 2;
@@ -1449,7 +1476,11 @@ fn the_seen_chain_catches_a_history_that_differs_below_the_kept_digests() {
     let skip = n - SEEN_MAX;
     assert_eq!((d.history.iter().filter(|e| matches!(e, Event2::User { .. })).count(), skip), (3, 2));
     d.settles();
-    assert_eq!(d.state(), Some(State::InChat), "ours, wherever it is");
+    assert_eq!(d.state(), Some(State::Queued), "not confirmed by a history it can't place");
+    d.on(Event::Idle);
+    d.settles();
+    assert_eq!((d.state(), d.retired()), (Some(State::Unconfirmed), None));
+    assert!(d.may_resend(), "recoverable");
 }
 
 /// Within the kept digests, an edit in place of one it had seen is one it
@@ -1492,4 +1523,406 @@ fn a_cards_answer_is_still_matched_by_its_whole_text() {
     assert_eq!(m.get(&id).unwrap().state, State::Sending, "with a notice line, another message");
     m.on(Event::Echo { text: &t, driver: false }, now);
     assert_eq!(m.get(&id).unwrap().state, State::Queued);
+}
+
+// ── Shady's review of B4 (P2-1 to P2-4, P3-1) ─────────────────────────
+
+impl Desk {
+    /// Hand back `parts` on the plan, then make it not sent (`retry`) or
+    /// unconfirmed, moving no other entry. Its body.
+    fn recoverable(&mut self, parts: Value, retry: bool) -> String {
+        let t = self.hand_back(parts).unwrap();
+        if retry {
+            self.on(Event::Refused { reason: "daemon busy" });
+            assert_eq!(self.state(), Some(State::NotSent));
+        } else {
+            self.on(Event::Echo { text: &t, driver: false });
+            self.on(Event::Dequeued { text: &t });
+            self.settles();
+            assert_eq!(self.state(), Some(State::Unconfirmed));
+        }
+        self.sent.clone()
+    }
+
+    /// Drive the followed hand-back, just sent as `t`, to `state`: one of
+    /// those in flight.
+    fn drive(&mut self, t: &str, state: State) {
+        if state != State::Sending {
+            self.on(Event::Echo { text: t, driver: false });
+        }
+        if matches!(state, State::Held | State::Checking) {
+            self.on(Event::Idle);
+        }
+        if state == State::Held {
+            self.view(true, Some(t), false);
+        }
+        assert_eq!(self.state(), Some(state));
+    }
+
+    /// Resend and Retry on hand-back `body`: whether each shows.
+    fn may_of(&self, body: &str) -> (bool, bool) {
+        let s = self.board();
+        let h = History::new(&self.history, &s);
+        (self.memo.may_resend(body, &h), self.memo.may_retry(body, &h))
+    }
+
+    /// A Resend click on hand-back `body`.
+    fn resend_of(&mut self, body: &str, settled: bool) -> Resend {
+        let s = self.board();
+        let h = History::new(&self.history, &s);
+        let t = trailer(self.desires);
+        self.memo.resend(body, &t, &View { edits: &h, settled, queued: None, streaming: false }, self.now)
+    }
+
+    /// A Retry click on hand-back `body`.
+    fn retry_of(&mut self, body: &str) -> Option<String> {
+        let s = self.board();
+        let h = History::new(&self.history, &s);
+        let t = trailer(self.desires);
+        self.memo.retry(body, &t, &h, self.now)
+    }
+}
+
+/// P2-1: the incarnation's one flight holds at every send. With another
+/// edit of it sending, queued, held or checking, Retry and Resend are off,
+/// and a click sends nothing and checks nothing; once that edit lands,
+/// they are back.
+#[test]
+fn retry_and_resend_wait_while_another_edit_of_the_incarnation_is_in_flight() {
+    for sibling in [State::Sending, State::Queued, State::Held, State::Checking] {
+        for retry in [false, true] {
+            let label = format!("{sibling:?}, {}", if retry { "Retry" } else { "Resend" });
+            let mut d = Desk::new();
+            let a = d.recoverable(set("steps.fix.label", json!("A")), retry);
+            // Disjoint: A stays, recoverable, and B is accepted.
+            let b = d.hand_back(set("steps.test.label", json!("B"))).unwrap();
+            d.drive(&b, sibling);
+            let before = d.memo.entries().to_vec();
+            assert_eq!(d.may_of(&a), (false, false), "{label}: off");
+            if retry {
+                assert_eq!(d.retry_of(&a), None, "{label}: sends nothing");
+            } else {
+                assert_eq!(d.resend_of(&a, true), Resend::No, "{label}: sends nothing");
+                assert_eq!(d.resend_of(&a, false), Resend::No, "{label}: checks nothing");
+            }
+            assert_eq!(d.memo.entries(), before.as_slice(), "{label}: nothing moved");
+            d.lands(&b);
+            d.settles();
+            assert_eq!(d.state(), Some(State::InChat), "{label}");
+            assert_eq!(d.may_of(&a), (!retry, retry), "{label}: back");
+            if retry {
+                assert!(d.retry_of(&a).is_some(), "{label}");
+            } else {
+                assert!(matches!(d.resend_of(&a, true), Resend::Send(_)), "{label}");
+            }
+        }
+    }
+}
+
+/// P2-1: the flight is per incarnation. An edit in flight to another
+/// block, or to the incarnation a replace ended, leaves Retry and Resend
+/// on.
+#[test]
+fn another_incarnations_edit_in_flight_leaves_retry_and_resend_on() {
+    for retry in [false, true] {
+        // Another block: the note's edit, queued.
+        let mut d = Desk::new();
+        let note = d.edit("cause", set("text", json!("Not a race")));
+        let n = d.send(&note).unwrap();
+        d.on(Event::Echo { text: &n, driver: false });
+        let a = d.recoverable(set("steps.fix.label", json!("A")), retry);
+        assert_eq!(d.memo.in_flight(&r("cause"), &note.of).map(|e| e.state), Some(State::Queued));
+        assert_eq!(d.may_of(&a), (!retry, retry), "another block");
+        assert!(if retry { d.retry_of(&a).is_some() } else { matches!(d.resend_of(&a, true), Resend::Send(_)) });
+
+        // The same block, replaced: its predecessor's edit is queued.
+        let mut d = Desk::new();
+        let old = d.queued(false);
+        d.agent(json!([{"op":"replace","id":PLAN,"kind":"plan","title":"Again","body":plan(&["fix","test","deploy","bandaid"])}]));
+        let a = d.recoverable(set("steps.fix.label", json!("A")), retry);
+        assert_eq!(d.memo.get(&old).map(|e| e.state), Some(State::Queued));
+        assert_eq!(d.may_of(&a), (!retry, retry), "another incarnation");
+        assert!(if retry { d.retry_of(&a).is_some() } else { matches!(d.resend_of(&a, true), Resend::Send(_)) });
+    }
+}
+
+/// P2-1: evidence isn't gated. A view showing an unconfirmed edit still in
+/// the queued slot moves it to held, beside the edit of its incarnation in
+/// flight: two in flight, because that is where they are.
+#[test]
+fn a_view_showing_an_earlier_edit_queued_moves_it_beside_the_one_in_flight() {
+    let mut d = Desk::new();
+    let a = d.recoverable(set("steps.fix.label", json!("A")), false);
+    d.hand_back(set("steps.test.label", json!("B"))).unwrap();
+    let slot = format!("{a}{}", trailer(1).text());
+    d.view(true, Some(&slot), false);
+    assert_eq!(d.memo.get(&a).map(|e| e.state), Some(State::Held));
+    assert_eq!(d.state(), Some(State::Sending));
+    assert_eq!(d.memo.entries().iter().filter(|e| e.in_flight()).count(), 2);
+}
+
+/// P2-2, Shady's counterexample: an edit identical to ours (another
+/// desk's) and, with `cover`, an edit covering it, both seen when ours was
+/// sent among 12; then a rollback to those two, before ours is in the
+/// chat. That history can't be placed: it neither confirms ours nor
+/// retires it, and ours ends unconfirmed, with its Resend.
+#[test]
+fn a_deep_rollback_to_an_old_identical_edit_and_its_seen_cover_settles_nothing() {
+    for cover in [true, false] {
+        let mut d = Desk::new();
+        let wanted = d.edit(PLAN, set("steps.fix.label", json!("Wanted")));
+        let first = format!("{}{}", Desk::body(&wanted), trailer(900).text());
+        d.lands(&first);
+        let second = theirs(&d, set(if cover { "steps.fix.label" } else { "steps.deploy.label" }, json!("Other")));
+        d.lands(&second);
+        for i in 0..10 {
+            let t = theirs(&d, set("steps.test.label", json!(format!("Test {i}"))));
+            d.lands(&t);
+        }
+        // A fresh hand-back of the same edit, from its base: the same body.
+        let t = d.send(&wanted).unwrap();
+        assert_eq!(message::split(&first).0, d.sent);
+        assert_eq!(d.entry().unwrap().seen.n, 12);
+        d.on(Event::Echo { text: &t, driver: false });
+        let users: Vec<usize> = d.history.iter().enumerate().filter(|(_, e)| matches!(e, Event2::User { .. })).map(|(i, _)| i).collect();
+        d.history.truncate(users[1] + 1);
+        d.settles();
+        assert_eq!((d.state(), d.retired()), (Some(State::Queued), None), "cover {cover}: neither confirmed nor retired");
+        d.on(Event::Idle);
+        d.settles();
+        assert_eq!((d.state(), d.retired()), (Some(State::Unconfirmed), None), "cover {cover}");
+        assert!(d.may_resend(), "cover {cover}: recoverable");
+    }
+}
+
+/// An entry's owned bytes, on 64-bit targets (§1.8): inline, and what it
+/// owns on the heap by capacity. Its id was parsed and cloned, so its
+/// capacity is its length.
+fn owned(e: &Entry) -> usize {
+    let id = match &e.id {
+        Ref::Block(b) => b.as_str().len(),
+        Ref::Card(c) => c.as_str().len(),
+    };
+    let cause = match &e.cause {
+        Some(Cause::NotSent(s)) => s.capacity(),
+        _ => 0,
+    };
+    std::mem::size_of::<Entry>() + e.text.capacity() + id + e.seen.last.capacity() * 16 + cause
+}
+
+/// P2-3: §1.8's ceiling on an entry, derived from its inline size and the
+/// caps (a body of 200 four-byte characters and 8 KiB, the longest id,
+/// [`SEEN_MAX`] digests, a reason of [`REASON_MAX`]), then checked on a
+/// near-maximal entry refused with a reason of 1.2 MB, which is cut, `…`
+/// included. A card's answer keeps its reason whole, as before B4.
+#[test]
+fn an_entry_stays_under_its_ceiling_with_a_huge_refusal_reason() {
+    let body_max = message::EDIT_LINE_MAX * 4 + 1 + message::EDIT_PATCH_MAX_BYTES;
+    let inline = std::mem::size_of::<Entry>();
+    let derived = inline + body_max + crate::block::BLOCK_ID_MAX + SEEN_MAX * 16 + REASON_MAX;
+    assert!(derived <= ENTRY_MAX_BYTES, "{inline} inline + {body_max} body + id, digests and reason = {derived}");
+
+    let mut d = Desk::new();
+    for i in 0..3 * SEEN_MAX {
+        let e = d.edit("cause", set("text", json!(format!("Guess {i}"))));
+        let m = format!("{}{}", message::build(&e, &summary()).unwrap(), trailer(900).text());
+        d.lands(&m);
+    }
+    let big = d.edit("cause", set("text", json!("𝕏".repeat(crate::block::NOTE_TEXT_MAX))));
+    let title = "𝕏".repeat(message::EDIT_LINE_MAX);
+    let wide = Summary { title: Some(&title), back_to: None, pieces: vec!["an edit"] };
+    let s = d.board();
+    let h = History::new(&d.history, &s);
+    d.memo.hand_back(&big, &wide, &trailer(1), &h, d.now).unwrap();
+    let reason = "é".repeat(600_000);
+    d.on(Event::Refused { reason: &reason });
+    let e = &d.memo.entries()[0];
+    assert_eq!(e.state, State::NotSent);
+    let (line1, line2) = e.text.split_once('\n').unwrap();
+    assert_eq!(line1.chars().count(), message::EDIT_LINE_MAX);
+    assert!(line1.len() > 700 && line2.len() > 6000, "near-maximal: {} and {} bytes", line1.len(), line2.len());
+    let Some(Cause::NotSent(kept)) = &e.cause else { panic!("{:?}", e.cause) };
+    assert!(kept.len() <= REASON_MAX && kept.capacity() <= REASON_MAX, "{} bytes", kept.len());
+    assert!(kept.ends_with('…') && reason.starts_with(kept.trim_end_matches('…')), "cut, marked");
+    assert_eq!(e.seen.last.capacity(), SEEN_MAX);
+    assert!(owned(e) <= derived, "{} owned", owned(e));
+
+    // The card memo, unchanged: its reason whole.
+    use crate::fold::{self, Event as F};
+    use crate::{CardId, Envelope, Input, Reply, parse_answer, parse_input};
+    let ask = json!({"question": "Which approach?", "options": ["Refactor", "Rewrite"]});
+    let Input::Create { doc, wait } = parse_input(&ask).unwrap() else { unreachable!() };
+    let id = CardId::parse("c4f9x2a").unwrap();
+    let line = Envelope::showing(id.clone(), &doc, wait).to_string();
+    let f = fold::fold(&[
+        F::Call { tool_id: "t1".into(), name: "cards_ui".into(), input: ask },
+        F::Result { tool_id: "t1".into(), text: line },
+    ]);
+    let mut m = super::super::Memo::default();
+    let reply = Reply::Answer(parse_answer(&doc, &json!({"choice": "Rewrite"})).unwrap());
+    m.press(f.bound(&id).unwrap(), reply, d.now).unwrap();
+    let long = "é".repeat(5_000);
+    m.on(Event::Refused { reason: &long }, d.now);
+    assert_eq!(m.get(&id).unwrap().cause, Some(Cause::NotSent(long)));
+}
+
+/// The test binary's allocator: the system's, counting on each thread the
+/// bytes live since [`counting::measure`] began, and their peak.
+mod counting {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    struct Counting;
+
+    thread_local! {
+        static LIVE: Cell<isize> = const { Cell::new(0) };
+        static PEAK: Cell<isize> = const { Cell::new(0) };
+    }
+
+    fn moved(by: isize) {
+        let _ = LIVE.try_with(|l| {
+            l.set(l.get() + by);
+            let _ = PEAK.try_with(|p| p.set(p.get().max(l.get())));
+        });
+    }
+
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+            let p = unsafe { System.alloc(l) };
+            if !p.is_null() {
+                moved(l.size() as isize);
+            }
+            p
+        }
+
+        unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
+            let p = unsafe { System.alloc_zeroed(l) };
+            if !p.is_null() {
+                moved(l.size() as isize);
+            }
+            p
+        }
+
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+            unsafe { System.dealloc(p, l) };
+            moved(-(l.size() as isize));
+        }
+
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, size: usize) -> *mut u8 {
+            let q = unsafe { System.realloc(p, l, size) };
+            if !q.is_null() {
+                moved(size as isize - l.size() as isize);
+            }
+            q
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING: Counting = Counting;
+
+    /// Run `f` on this thread: what it returns, the bytes it left
+    /// allocated, and their peak.
+    pub fn measure<T>(f: impl FnOnce() -> T) -> (T, isize, isize) {
+        LIVE.with(|l| l.set(0));
+        PEAK.with(|p| p.set(0));
+        let out = f();
+        (out, LIVE.with(Cell::get), PEAK.with(Cell::get))
+    }
+}
+
+/// P2-4: a long history, its edits of one incarnation many and alike
+/// (no-change ones among them), and many edits of ended incarnations. The
+/// adapter allocates nothing; an observation's scratch doesn't grow with
+/// the history (one parsed edit at a time); a hand-back keeps only its
+/// entry.
+#[test]
+fn a_long_history_costs_the_memo_no_owned_index() {
+    let history = |edits: usize, ended: usize| {
+        let mut d = Desk::new();
+        d.queued(false);
+        let (tag, rev) = d.live(PLAN);
+        let line = Summary { title: None, back_to: None, pieces: vec!["their edit"] };
+        for i in 0..edits {
+            let label = if i % 2 == 0 { "Do test".to_string() } else { format!("Test {i}") };
+            let e = Edit::new(r(PLAN), rev, tag, &set("steps.test.label", json!(label))).unwrap();
+            d.lands(&format!("{}{}", message::build(&e, &line).unwrap(), trailer(900).text()));
+        }
+        for j in 0..ended {
+            let gone = Tag::parse(&format!("{:032x}", j + 1)).unwrap();
+            let e = Edit::new(r(PLAN), 1, gone, &skip("bandaid")).unwrap();
+            d.lands(&format!("{}{}", message::build(&e, &line).unwrap(), trailer(900).text()));
+        }
+        d
+    };
+    let observe = |d: &mut Desk| {
+        let s = d.board();
+        let (h, left, peak) = counting::measure(|| History::new(&d.history, &s));
+        assert_eq!((left, peak), (0, 0), "the adapter allocates nothing");
+        let view = View { edits: &h, settled: true, queued: None, streaming: false };
+        let ((), _, peak) = counting::measure(|| d.memo.observe(&view, d.now));
+        peak
+    };
+    let mut short = history(10, 0);
+    let mut long = history(2_000, 1_000);
+    let (a, b) = (observe(&mut short), observe(&mut long));
+    assert_eq!((short.state(), long.state()), (Some(State::Queued), Some(State::Queued)));
+    assert!(b <= a + 1024 && b <= 64 * 1024, "an observation's peak: {a} bytes over 10 edits, {b} over 3,000");
+
+    // A hand-back that sees the 3,000 (the queued one discarded, so none
+    // is in flight): its entry and a few hundred bytes.
+    let queued = long.sent.clone();
+    long.memo.forget(&queued).unwrap();
+    let s = long.board();
+    let h = History::new(&long.history, &s);
+    let e = long.edit(PLAN, skip("deploy"));
+    let t = trailer(2);
+    let (sent, left, peak) = counting::measure(|| long.memo.hand_back(&e, &summary(), &t, &h, long.now).map(drop));
+    sent.unwrap();
+    let entry = long.memo.entries().last().unwrap();
+    assert_eq!(entry.seen.n, 2_000);
+    assert!(left as usize <= owned(entry) && peak <= 64 * 1024, "kept {left} bytes (the entry owns {}), peak {peak}", owned(entry));
+}
+
+/// P3-1: the query and the hand-back agree. With [`CAP`] recoverable
+/// entries, a hand-back that makes its own room (covering one, or the same
+/// edit as one) is admitted, and one that doesn't is refused, by both;
+/// with an edit in flight, or the block gone, both refuse alike.
+#[test]
+fn the_hand_back_query_and_the_hand_back_agree() {
+    let steps: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+    let names: Vec<&str> = steps.iter().map(String::as_str).collect();
+    let key = |i: usize| format!("steps.s{}.{}", i % 20, if i < 20 { "label" } else { "stop" });
+    let value = |i: usize| if i < 20 { json!(format!("Step {i}")) } else { json!(true) };
+    let mut c = Desk::with(json!([put_plan(PLAN, &names)]));
+    for i in 0..CAP {
+        c.unconfirmed_with(set(&key(i), value(i)));
+    }
+    let candidates = [
+        (json!({"set": {key(0): "Again", key(1): "Again too"}}), Ok(())),
+        (set(&key(5), json!("Covers five")), Ok(())),
+        (set(&key(5), value(5)), Ok(())),
+        (set(&key(CAP), value(CAP)), Err(Refusal::Full)),
+    ];
+    for (parts, want) in &candidates {
+        let asked = c.may_hand_back(parts.clone());
+        let before = (c.memo.clone(), c.desires, c.sent.clone());
+        let got = c.hand_back(parts.clone()).map(drop);
+        assert_eq!((&asked, &got), (want, want), "{parts}");
+        (c.memo, c.desires, c.sent) = before;
+    }
+    // One in flight: both refuse every candidate alike.
+    c.hand_back(candidates[0].0.clone()).unwrap();
+    for (parts, _) in &candidates {
+        let asked = c.may_hand_back(parts.clone());
+        let got = c.hand_back(parts.clone()).map(drop);
+        assert_eq!((&asked, &got), (&Err(Refusal::InFlight), &Err(Refusal::InFlight)), "{parts}");
+    }
+    // The block gone: both say so.
+    c.agent(json!([{"op":"remove","id":PLAN}]));
+    let (tag, _) = Desk::with(json!([put_plan(PLAN, &names)])).live(PLAN);
+    let e = Edit::new(r(PLAN), 1, tag, &set(&key(CAP), value(CAP))).unwrap();
+    let s = c.board();
+    let h = History::new(&c.history, &s);
+    assert_eq!(c.memo.may_hand_back(&e, &summary(), &h), Err(Refusal::Gone));
+    assert_eq!(c.memo.hand_back(&e, &summary(), &trailer(9), &h, c.now).map(drop), Err(Refusal::Gone));
 }

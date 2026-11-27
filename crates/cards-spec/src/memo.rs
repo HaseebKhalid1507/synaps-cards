@@ -48,6 +48,7 @@ use std::time::{Duration, Instant};
 
 use crate::fold::{Card, Fold, State as Folded};
 use crate::message::{self, Reply};
+use crate::sanitize::cut_bytes;
 use crate::{CardId, Digest, digest};
 
 pub mod block;
@@ -171,6 +172,10 @@ trait Delivery {
     fn moves(&self) -> bool {
         true
     }
+    /// The most bytes of a refusal's reason it keeps, `…` included
+    /// ([`cut_bytes`]). A card's answer keeps it whole, as before B4; a
+    /// block edit's cause is bounded (§1.8).
+    const REASON_MAX: usize = usize::MAX;
 
     fn to(&mut self, state: State, now: Instant) {
         let (s, cause, f) = self.parts();
@@ -290,7 +295,9 @@ fn hear<E: Delivery>(entries: &mut [E], event: Event<'_>, now: Instant) {
         Event::Refused { reason } => {
             if let Some(e) = entries.iter_mut().filter(|e| e.moves() && e.state() == Sending).min_by_key(|e| e.flight().since) {
                 e.to(NotSent, now);
-                *e.parts().1 = Some(Cause::NotSent(reason.to_string()));
+                let mut kept = cut_bytes(reason, E::REASON_MAX);
+                kept.shrink_to_fit();
+                *e.parts().1 = Some(Cause::NotSent(kept));
             }
         }
         Event::Dequeued { text } => each(&[Queued, Held], Some(text), &mut |e| e.check(Trigger::Dequeued, now)),

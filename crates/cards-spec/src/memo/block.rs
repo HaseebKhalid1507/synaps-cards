@@ -26,7 +26,8 @@
 //!   incarnation, by their body, and whether the incarnation is live on
 //!   the board folded from the same history. Ours past what was seen is in
 //!   the chat (the seen-prefix rule, as for cards), and so are identical
-//!   texts past it.
+//!   texts past it. The memo reads them one at a time and owns none: no
+//!   index of the history, and one parsed edit at a time as scratch.
 //! - **Supersession is by coverage** (§3.7). An edit's coverage keys are
 //!   its intents ([`crate::board::keys`]): each appended item, each `set`
 //!   path, each ordered list. A later edit of the same incarnation covers
@@ -45,15 +46,25 @@
 //!   1): the message is still on its way or in the chat, and the delivery
 //!   entry carries on until it settles. Its Resend and Retry are off,
 //!   since a resend would apply nothing.
-//! - **One edit in flight per incarnation** (§3.7): a hand-back while one
-//!   is sending, queued, held or checking is refused ([`Refusal::InFlight`]).
-//!   Another incarnation is another block: a replaced block takes a
-//!   hand-back while the edit of its predecessor is still on its way.
-//! - **Bounds** (§1.8): [`CAP`] entries. A new hand-back past it evicts the
-//!   oldest retired entry, else the oldest in the chat. **Recoverable
-//!   entries never go** (sending, queued, held, checking, unconfirmed, not
-//!   sent): with [`CAP`] of them, Hand back is off ([`Memo::may_hand_back`],
-//!   [`FULL`]) until one is resent or discarded ([`Memo::forget`]).
+//! - **One edit in flight per incarnation** (§3.7): while one is sending,
+//!   queued, held or checking, this desk sends no other edit of it: a
+//!   hand-back is refused ([`Refusal::InFlight`]), and Retry and Resend
+//!   are off and send nothing. Every send passes the same gate. Evidence
+//!   isn't gated: a view that shows an earlier entry still in the queued
+//!   slot moves it to queued or held beside the one in flight, since that
+//!   is where it is. Another incarnation is another block: a replaced
+//!   block takes a hand-back while the edit of its predecessor is still on
+//!   its way.
+//! - **Bounds** (§1.8): [`CAP`] entries, each at most [`ENTRY_MAX_BYTES`]
+//!   owned (a refusal's reason is cut to [`REASON_MAX`] bytes). A new
+//!   hand-back past [`CAP`] evicts the oldest retired entry, else the
+//!   oldest in the chat. **Recoverable entries never go** (sending, queued,
+//!   held, checking, unconfirmed, not sent): with [`CAP`] of them, a
+//!   hand-back is refused ([`FULL`]) unless it makes its own room, by
+//!   covering one of them (retired here) or being the same edit as one
+//!   (which it replaces), until one is resent or discarded
+//!   ([`Memo::forget`]). [`Memo::may_hand_back`] answers for a proposed
+//!   edit exactly what [`Memo::hand_back`] admits.
 //!
 //! **The seen prefix, bounded.** A card's entry keeps the texts it had seen.
 //! An edit's keeps, of its incarnation's edits in the history when it was
@@ -62,13 +73,19 @@
 //! entry is its body (line 1 ≤ 200 characters, line 2 ≤ 8 KiB) and a few
 //! hundred bytes. The prefix is exact while the history agrees with what
 //! was seen up to the kept digests (a growing history, a rollback within
-//! them). Where it doesn't (a compaction, or a rollback deeper than
-//! [`SEEN_MAX`] of the incarnation's edits), the memo can't tell which of
-//! the history's edits it had seen: ours is matched anywhere in what the
-//! history holds, and only an edit after it can cover it, so an edit the
-//! memo had seen never retires it.
+//! them). Where it doesn't (the history holds fewer of the incarnation's
+//! edits than the chain covers, or other ones there: a compaction, or a
+//! rollback deeper than [`SEEN_MAX`] of them), the memo can't place what
+//! it had seen, so **that history is no evidence either way**: it neither
+//! shows ours nor covers it, as a history without ours. No such view
+//! confirms or retires an entry. A settled one moves it by rules 3 to 6,
+//! as any history without ours: ours in the queued slot is on its way;
+//! otherwise it ends unconfirmed, recoverable, with its Resend. Events
+//! and the queued slot still move it, and a Discard settles it. A Resend
+//! then may send an edit the history already holds: the memo can't know,
+//! and it prefers that to losing one it doesn't.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use super::{Cause, Delivery, Event, Flight, Look, Resend, Slot, State, hear, settle};
@@ -86,47 +103,67 @@ pub const CAP: usize = 32;
 pub const SEEN_MAX: usize = 8;
 /// Why Hand back is off, with [`CAP`] recoverable entries (§1.8).
 pub const FULL: &str = "32 edits not confirmed · resend or discard one";
+/// The most bytes of a refusal's reason an entry keeps, `…` included
+/// (§1.8): the rest of the line is cut.
+pub const REASON_MAX: usize = 512;
+/// §1.8's ceiling on an entry's owned bytes, on 64-bit targets: its inline
+/// size and what it owns on the heap, strings and vectors by capacity. A
+/// maximal body (line 1 of 200 four-byte characters, line 2 of 8 KiB) with
+/// a cut reason fits; the test derives it.
+pub const ENTRY_MAX_BYTES: usize = 10 * 1024;
 
 /// What the desk holds of the history, for the memo (§3.7): the history's
 /// edits of an incarnation, and whether the board folded from the same
 /// history holds it live. [`History`] reads a history the desk holds whole;
 /// a desk that keeps its history otherwise answers the same.
 pub trait Edits {
-    /// The bodies ([`message::read`]'s `body`) of the history's genuine
-    /// user messages whose body is an edit of incarnation `of` of block
-    /// `id`, as §3.3's grammar reads it, in history order.
-    fn of(&self, id: &Ref, of: &Tag) -> Vec<&str>;
+    /// Give `each`, in history order, the body ([`message::read`]'s
+    /// `body`) of each of the history's genuine user messages whose body is
+    /// an edit of incarnation `of` of block `id`, as §3.3's grammar reads
+    /// it. The memo reads them as they come and keeps none (§1.8).
+    fn each(&self, id: &Ref, of: &Tag, each: &mut dyn FnMut(&str));
     /// Whether that incarnation is live on the board: a hand-back to it can
     /// still apply.
     fn live(&self, id: &Ref, of: &Tag) -> bool;
 }
 
 /// The [`Edits`] of a history held whole: its events, as
-/// [`crate::fold::events`] reads them, and the board folded from them.
-/// Each edit's body is borrowed from its message, indexed once.
+/// [`crate::fold::events`] reads them, and the board folded from them. It
+/// borrows both and owns nothing (§1.8): each read walks the events again,
+/// and parses only the messages whose line 1 names the block, one at a
+/// time.
+#[derive(Clone, Copy)]
 pub struct History<'a> {
-    by: BTreeMap<(Ref, Tag), Vec<&'a str>>,
+    events: &'a [Folded],
     board: &'a board::State,
 }
 
 impl<'a> History<'a> {
     pub fn new(events: &'a [Folded], board: &'a board::State) -> Self {
-        let mut by: BTreeMap<(Ref, Tag), Vec<&'a str>> = BTreeMap::new();
-        for e in events {
-            if let Folded::User { text } = e {
-                let read = message::read(text);
-                if let Some(edit) = read.edit {
-                    by.entry((edit.id, edit.of)).or_default().push(read.body);
-                }
-            }
-        }
-        History { by, board }
+        History { events, board }
     }
 }
 
+/// Whether `body`'s line 1 starts as an edit of `id`'s does (§3.3): what
+/// [`message::parse`] needs of it, read without allocating.
+fn names(body: &str, id: &Ref) -> bool {
+    let Some(rest) = body.strip_prefix("[block ") else { return false };
+    let rest = match id {
+        Ref::Block(b) => rest.strip_prefix(b.as_str()),
+        Ref::Card(c) => rest.strip_prefix("card:").and_then(|r| r.strip_prefix(c.as_str())),
+    };
+    rest.is_some_and(|r| r.starts_with(" edited r"))
+}
+
 impl Edits for History<'_> {
-    fn of(&self, id: &Ref, of: &Tag) -> Vec<&str> {
-        self.by.get(&(id.clone(), *of)).cloned().unwrap_or_default()
+    fn each(&self, id: &Ref, of: &Tag, each: &mut dyn FnMut(&str)) {
+        for e in self.events {
+            let Folded::User { text } = e else { continue };
+            let body = message::split(text).0;
+            if names(body, id) && message::parse(body).is_some_and(|e| e.id == *id && e.of == *of) {
+                each(body);
+            }
+        }
     }
 
     fn live(&self, id: &Ref, of: &Tag) -> bool {
@@ -194,35 +231,99 @@ fn digest(body: &str) -> [u8; 16] {
     h[..16].try_into().expect("16 of 32 bytes")
 }
 
-/// The chain digest of `bodies`, in order.
-fn chain(bodies: &[&str]) -> [u8; 16] {
-    bodies.iter().fold([0; 16], |c, b| {
-        let mut pre = c.to_vec();
-        pre.extend_from_slice(&digest(b));
-        sha256(&pre)[..16].try_into().expect("16 of 32 bytes")
-    })
+/// The chain digest `c` extended by digest `d`: a chain over bodies starts
+/// at zero and links each body's digest, in order.
+fn link(c: [u8; 16], d: [u8; 16]) -> [u8; 16] {
+    let mut pre = [0; 32];
+    pre[..16].copy_from_slice(&c);
+    pre[16..].copy_from_slice(&d);
+    sha256(&pre)[..16].try_into().expect("16 of 32 bytes")
 }
 
 impl Seen {
-    fn of(f: &[&str]) -> Self {
-        let skip = f.len().saturating_sub(SEEN_MAX);
-        Seen { n: f.len(), older: chain(&f[..skip]), last: f[skip..].iter().map(|b| digest(b)).collect() }
+    /// What `edits` holds now of incarnation `of` of `id`, read as it
+    /// comes: [`SEEN_MAX`] digests, the older ones linked into the chain.
+    fn of(edits: &dyn Edits, id: &Ref, of: &Tag) -> Self {
+        let mut s = Seen { n: 0, older: [0; 16], last: Vec::with_capacity(SEEN_MAX) };
+        edits.each(id, of, &mut |b| {
+            if s.last.len() == SEEN_MAX {
+                s.older = link(s.older, s.last.remove(0));
+            }
+            s.last.push(digest(b));
+            s.n += 1;
+        });
+        s
     }
 
-    /// How far the history's edits `f` agree with what was seen: the
-    /// seen-prefix rule's common prefix. `None` where `f` differs before the
-    /// latest [`SEEN_MAX`] seen, which the memo can't place (module docs).
-    fn agrees(&self, f: &[&str]) -> Option<usize> {
-        let skip = self.n - self.last.len();
-        if f.len() < skip || chain(&f[..skip]) != self.older {
-            return None;
-        }
-        let mut k = skip;
-        while k < self.n && k < f.len() && digest(f[k]) == self.last[k - skip] {
-            k += 1;
-        }
-        Some(k)
+    /// How many of the edits it had seen the chain covers.
+    fn chained(&self) -> usize {
+        self.n - self.last.len()
     }
+}
+
+/// One read of the history's edits of an entry's incarnation, one at a
+/// time, against what it had seen (module docs): the seen-prefix rule,
+/// then ours and what covers it past that prefix (rules 2 and 4, by
+/// coverage). It keeps a few counters, never an edit.
+struct Reading<'e> {
+    seen: &'e Seen,
+    /// Ours: its body, and its intents.
+    text: &'e str,
+    intents: Option<Intents>,
+    /// Edits read so far.
+    i: usize,
+    /// The chain over the first [`Seen::chained`] of them.
+    chain: [u8; 16],
+    /// Where the history left what was seen, once it has.
+    left: Option<usize>,
+    /// Ours, past that.
+    ours: bool,
+    /// An edit past that covers ours, after the last of ours if any.
+    covered: bool,
+}
+
+impl<'e> Reading<'e> {
+    fn new(seen: &'e Seen, text: &'e str, intents: Option<Intents>) -> Self {
+        Reading { seen, text, intents, i: 0, chain: [0; 16], left: None, ours: false, covered: false }
+    }
+
+    fn read(&mut self, b: &str) {
+        let skip = self.seen.chained();
+        if self.i < skip {
+            self.chain = link(self.chain, digest(b));
+        } else if self.chain == self.seen.older {
+            let seen = self.left.is_none() && self.i < self.seen.n && digest(b) == self.seen.last[self.i - skip];
+            if !seen {
+                self.left.get_or_insert(self.i);
+                if b == self.text {
+                    (self.ours, self.covered) = (true, false);
+                } else if !self.covered && self.intents.as_ref().is_some_and(|o| covers(b, o)) {
+                    self.covered = true;
+                }
+            }
+        }
+        self.i += 1;
+    }
+
+    /// The seen-prefix rule's common prefix: how many of the history's
+    /// edits are the ones it had seen. `None` where the history doesn't
+    /// agree with the chain, which the memo can't place (module docs).
+    fn placed(&self) -> Option<usize> {
+        (self.i >= self.seen.chained() && self.chain == self.seen.older).then(|| self.left.unwrap_or(self.i))
+    }
+
+    /// What the history shows of ours: nothing, where it isn't placed.
+    fn look(&self) -> Look {
+        match self.placed() {
+            Some(_) => Look { ours: self.ours, superseded: self.covered },
+            None => Look { ours: false, superseded: false },
+        }
+    }
+}
+
+/// Whether edit `b` (a body) covers an edit with intents `ours`.
+fn covers(b: &str, ours: &Intents) -> bool {
+    message::parse(b).is_some_and(|e| Intents::of(&e).covers(ours))
 }
 
 /// An edit's intents (§3.7's coverage keys), and whether it has one no key
@@ -290,6 +391,8 @@ impl Delivery for Entry {
     fn moves(&self) -> bool {
         self.retired.is_none()
     }
+
+    const REASON_MAX: usize = REASON_MAX;
 }
 
 impl Entry {
@@ -314,29 +417,20 @@ impl Entry {
         message::parse(&self.text).map(|e| Intents::of(&e))
     }
 
-    /// Whether any of `later` (edits' bodies) covers this entry's edit.
-    fn covered(&self, later: &[&str]) -> bool {
-        if later.is_empty() {
-            return false;
-        }
-        let Some(ours) = self.intents() else { return false };
-        later.iter().filter_map(|b| message::parse(b)).any(|e| Intents::of(&e).covers(&ours))
+    /// Whether this desk's hand-back to incarnation `of` of `id`, with
+    /// intents `mine`, covers this entry: it is retired as that is
+    /// accepted.
+    fn covered_by(&self, id: &Ref, of: &Tag, mine: &Intents) -> bool {
+        self.retired.is_none() && self.edits_incarnation(id, of) && self.intents().is_some_and(|theirs| mine.covers(&theirs))
     }
 
-    /// What `f` (the history's edits of its incarnation) shows of it: ours
-    /// past the seen prefix, and whether a later edit covers it (rules 2
-    /// and 4, by coverage).
-    fn look(&self, f: &[&str]) -> Look {
-        let (from, placed) = match self.seen.agrees(f) {
-            Some(k) => (k, true),
-            None => (0, false),
-        };
-        match f[from..].iter().rposition(|t| *t == self.text) {
-            Some(i) => Look { ours: true, superseded: self.covered(&f[from + i + 1..]) },
-            // Only edits past what was seen can supersede it: where the
-            // memo can't place those, none does.
-            None => Look { ours: false, superseded: placed && self.covered(&f[from..]) },
-        }
+    /// What `edits` (the history's edits of its incarnation) shows of it,
+    /// read once ([`Reading`]): ours past the seen prefix, and whether a
+    /// later edit covers it (rules 2 and 4, by coverage).
+    fn look(&self, edits: &dyn Edits) -> Look {
+        let mut r = Reading::new(&self.seen, &self.text, self.intents());
+        edits.each(&self.id, &self.of, &mut |b| r.read(b));
+        r.look()
     }
 
     /// Follow a view: in the chat, covered, or the shared settle rule. An
@@ -345,8 +439,7 @@ impl Entry {
         if self.retired.is_some() {
             return;
         }
-        let f = view.edits.of(&self.id, &self.of);
-        let look = self.look(&f);
+        let look = self.look(view.edits);
         // Ours in the chat is in the chat, covered or not.
         if look.ours && self.state != State::InChat {
             self.to(State::InChat, now);
@@ -363,7 +456,7 @@ impl Entry {
         if self.retired.is_some() || self.state != State::Unconfirmed || !edits.live(&self.id, &self.of) {
             return false;
         }
-        let look = self.look(&edits.of(&self.id, &self.of));
+        let look = self.look(edits);
         !look.ours && !look.superseded
     }
 
@@ -397,20 +490,51 @@ impl Memo {
         self.entries.iter().find(|e| e.edits_incarnation(id, of) && e.in_flight())
     }
 
-    /// Hand back is on: fewer than [`CAP`] entries, or one that is settled
-    /// and can go (§1.8). Else it shows [`FULL`].
-    pub fn may_hand_back(&self) -> bool {
-        self.entries.len() < CAP || self.entries.iter().any(|e| !e.recoverable())
+    /// The incarnation's one flight (§3.7): it is live on `edits`, and no
+    /// edit of it is in flight. Every send passes it: a hand-back, a Retry
+    /// and a Resend.
+    fn serial(&self, id: &Ref, of: &Tag, edits: &dyn Edits) -> Result<(), Refusal> {
+        if !edits.live(id, of) {
+            return Err(Refusal::Gone);
+        }
+        if self.in_flight(id, of).is_some() {
+            return Err(Refusal::InFlight);
+        }
+        Ok(())
+    }
+
+    /// Whether a hand-back of `edit`, its line 1 from `summary`, is
+    /// admitted now, or why not: exactly what [`Memo::hand_back`] admits.
+    /// The desk asks it to enable Hand back, and shows [`FULL`] on
+    /// [`Refusal::Full`].
+    pub fn may_hand_back(&self, edit: &Edit, summary: &Summary<'_>, edits: &dyn Edits) -> Result<(), Refusal> {
+        self.admit(edit, summary, edits).map(drop)
+    }
+
+    /// The admission of a hand-back, and its body: the incarnation's one
+    /// flight ([`Memo::serial`]), a message that builds, and room. With
+    /// [`CAP`] entries, there is room if one is settled and can go, or the
+    /// hand-back makes its own: it covers one (retired here) or is the
+    /// same edit as one (replaced).
+    fn admit(&self, edit: &Edit, summary: &Summary<'_>, edits: &dyn Edits) -> Result<String, Refusal> {
+        let (id, of) = (&edit.id, &edit.of);
+        self.serial(id, of, edits)?;
+        let text = message::build(edit, summary).map_err(Refusal::Edit)?;
+        let mine = Intents::of(edit);
+        let kept = self.entries.iter().filter(|e| e.text != text);
+        if kept.clone().count() >= CAP && !kept.clone().any(|e| !e.recoverable() || e.covered_by(id, of, &mine)) {
+            return Err(Refusal::Full);
+        }
+        Ok(text)
     }
 
     /// A hand-back of `edit` (the desk's, [`Edit::new`]'s), its line 1 from
     /// `summary`: the message to send, its body and `trailer`, or why not
-    /// (nothing changes then). The incarnation must be live on `edits` and
-    /// have no edit in flight, and there must be room. A new entry sees the
-    /// incarnation's edits in the history; the same edit again replaces its
-    /// entry; this desk's earlier entries of the incarnation it covers are
-    /// retired here; past [`CAP`], the oldest retired entry goes, else the
-    /// oldest in the chat, never a recoverable one.
+    /// (nothing changes then): [`Memo::may_hand_back`]. A new entry sees
+    /// the incarnation's edits in the history; the same edit again replaces
+    /// its entry; this desk's earlier entries of the incarnation it covers
+    /// are retired here; past [`CAP`], the oldest retired entry goes, else
+    /// the oldest in the chat, never a recoverable one.
     pub fn hand_back(
         &mut self,
         edit: &Edit,
@@ -419,24 +543,12 @@ impl Memo {
         edits: &dyn Edits,
         now: Instant,
     ) -> Result<String, Refusal> {
+        let text = self.admit(edit, summary, edits)?;
         let (id, of) = (&edit.id, &edit.of);
-        if !edits.live(id, of) {
-            return Err(Refusal::Gone);
-        }
-        if self.in_flight(id, of).is_some() {
-            return Err(Refusal::InFlight);
-        }
-        let text = message::build(edit, summary).map_err(Refusal::Edit)?;
         let mine = Intents::of(edit);
-        let covers =
-            |e: &Entry| e.retired.is_none() && e.edits_incarnation(id, of) && e.intents().is_some_and(|theirs| mine.covers(&theirs));
-        let kept = self.entries.iter().filter(|e| e.text != text);
-        if kept.clone().count() >= CAP && !kept.clone().any(|e| !e.recoverable() || covers(e)) {
-            return Err(Refusal::Full);
-        }
         self.entries.retain(|e| e.text != text);
         for e in &mut self.entries {
-            if covers(e) {
+            if e.covered_by(id, of, &mine) {
                 e.retired = Some(Retired::Here);
             }
         }
@@ -450,7 +562,7 @@ impl Memo {
             of: *of,
             base: edit.base,
             text: text.clone(),
-            seen: Seen::of(&edits.of(id, of)),
+            seen: Seen::of(edits, id, of),
             state: State::Sending,
             cause: None,
             retired: None,
@@ -459,29 +571,46 @@ impl Memo {
         Ok(format!("{text}{}", trailer.text()))
     }
 
-    /// Retry a hand-back not sent, while its incarnation is live: its body,
-    /// with `trailer`.
+    /// The entry of hand-back `text` a Retry sends, if it may now: not
+    /// sent, and its incarnation's one flight ([`Memo::serial`]).
+    fn retriable(&self, text: &str, edits: &dyn Edits) -> Option<usize> {
+        let i = self.entries.iter().position(|e| e.carries(text) && e.retired.is_none() && e.state == State::NotSent)?;
+        let e = &self.entries[i];
+        self.serial(&e.id, &e.of, edits).ok().map(|()| i)
+    }
+
+    /// Whether to show Retry on hand-back `text` now.
+    pub fn may_retry(&self, text: &str, edits: &dyn Edits) -> bool {
+        self.retriable(text, edits).is_some()
+    }
+
+    /// Retry a hand-back not sent, while its incarnation is live and no
+    /// other edit of it is in flight: its body, with `trailer`.
     pub fn retry(&mut self, text: &str, trailer: &Trailer, edits: &dyn Edits, now: Instant) -> Option<String> {
-        let e = self.entries.iter_mut().find(|e| e.carries(text) && e.retired.is_none() && e.state == State::NotSent)?;
-        if !edits.live(&e.id, &e.of) {
-            return None;
-        }
-        Some(e.send(trailer, now))
+        let i = self.retriable(text, edits)?;
+        Some(self.entries[i].send(trailer, now))
     }
 
     /// Whether to show Resend on hand-back `text` now (with the desk's
-    /// `input_gate()`).
+    /// `input_gate()`): the incarnation's one flight (the gate every send
+    /// passes), then the entry's gate.
     pub fn may_resend(&self, text: &str, edits: &dyn Edits) -> bool {
-        self.get(text).is_some_and(|e| e.gate(edits))
+        self.get(text).is_some_and(|e| self.serial(&e.id, &e.of, edits).is_ok() && e.gate(edits))
     }
 
-    /// A Resend click, against a settled view: the settle rules on that view
-    /// first, then the gate again. Only the exact edit text goes, with
-    /// `trailer`, the desires' at this moment (§3.7).
+    /// A Resend click, against a settled view: the incarnation's one flight
+    /// first (the gate every send passes), where nothing is sent or checked;
+    /// then the
+    /// settle rules on that view, then the gate again. Only the exact edit
+    /// text goes, with `trailer`, the desires' at this moment (§3.7).
     pub fn resend(&mut self, text: &str, trailer: &Trailer, view: &View<'_>, now: Instant) -> Resend {
-        let Some(e) = self.entries.iter_mut().find(|e| e.carries(text) && e.retired.is_none() && e.state == State::Unconfirmed) else {
+        let Some(i) = self.entries.iter().position(|e| e.carries(text) && e.retired.is_none() && e.state == State::Unconfirmed) else {
             return Resend::No;
         };
+        if self.serial(&self.entries[i].id, &self.entries[i].of, view.edits).is_err() {
+            return Resend::No;
+        }
+        let e = &mut self.entries[i];
         if !view.settled {
             let trigger = e.flight.trigger;
             e.check(trigger, now);
