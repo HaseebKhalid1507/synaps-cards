@@ -211,21 +211,22 @@ class Tap:
                     resp = urllib.request.urlopen(req, timeout=600)
                 except urllib.error.HTTPError as e:
                     resp = e
-                rec["status"] = resp.status if hasattr(resp, "status") else resp.code
-                self.send_response(rec["status"])
-                for k, v in resp.headers.items():
-                    if k.lower() not in tap.HOP:
-                        self.send_header(k, v)
-                self.send_header("transfer-encoding", "chunked")
-                self.end_headers()
-                while True:
-                    chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
-                    if not chunk:
-                        break
-                    self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                with resp:  # the upstream connection, closed once relayed
+                    rec["status"] = resp.status if hasattr(resp, "status") else resp.code
+                    self.send_response(rec["status"])
+                    for k, v in resp.headers.items():
+                        if k.lower() not in tap.HOP:
+                            self.send_header(k, v)
+                    self.send_header("transfer-encoding", "chunked")
+                    self.end_headers()
+                    while True:
+                        chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
                     self.wfile.flush()
-                self.wfile.write(b"0\r\n\r\n")
-                self.wfile.flush()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -245,3 +246,4 @@ class Tap:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()

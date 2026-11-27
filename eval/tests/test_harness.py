@@ -134,6 +134,7 @@ class Tap(unittest.TestCase):
         finally:
             tap.close()
             up.shutdown()
+            up.server_close()
 
 
 class Spend(unittest.TestCase):
@@ -165,10 +166,11 @@ class Spend(unittest.TestCase):
             self.assertLess(e["usd"][m], t["rows"]["high"]["usd"][m])
 
 
-def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, ops=4, skipped=0, repairs=0, reputs=0):
+def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, ops=4, skipped=0, repairs=0, reputs=0, rounds=6,
+        tool_calls=3):
     a = {"block_calls": calls, "block_output": block, "block_output_per_round": list(per_round), "result_input": 0,
          "unseen_ops": 0, "unseen_tokens": 0} if arm == "on" else None
-    return {"task": task, "arm": arm, "repeat": repeat, "output": out, "attributed": a,
+    return {"task": task, "arm": arm, "repeat": repeat, "output": out, "attributed": a, "rounds": rounds, "tool_calls": tool_calls,
             "closing": {"k": closing + 1, "rounds": closing, "input": 0, "complete": True},
             "ops": ops if arm == "on" else 0, "skipped": skipped, "repairs": repairs, "reputs": reputs, "refusals": repairs,
             "skipped_by_reason": {}, "skipped_paths_by_reason": {}, "latency": [0.1], "usage": {"output_tokens": out}}
@@ -259,6 +261,106 @@ class Gate(unittest.TestCase):
 class _Counter:
     def describe(self):
         return {"kind": "test"}
+
+
+class SetShape(unittest.TestCase):
+    """§2.8's set as the run played it, blocks off (report.py's "The set's
+    shape"): 20 coding tasks of ≥ 6 rounds, 10 short of 1–2, 5 with no tool
+    call, 5 whose card was answered."""
+
+    PLAYS = {"coding": {"rounds": 6}, "short": {"rounds": 2, "tool_calls": 1}, "no_tool": {"rounds": 1, "tool_calls": 0},
+             "interactive": {"rounds": 4}}
+
+    def run_of(self, off=None, on=None, steps=None):
+        """Records and turn rows of a whole set, each run as its category
+        plays, but for `off[(task, repeat)]` / `on[...]` (row fields) and
+        `steps[(task, repeat)]` (an off-run's harness steps)."""
+        off, on, steps = off or {}, on or {}, steps or {}
+        recs, rows = [], []
+        for cat, n in taskset.CATEGORIES.items():
+            for i in range(n):
+                task = f"{cat}-{i}"
+                for rp in (1, 2, 3):
+                    for arm, over in (("off", off), ("on", on)):
+                        st = [{"step": "answer", "card": "c1"}] if cat == "interactive" else []
+                        if arm == "off":
+                            st = steps.get((task, rp), st)
+                        recs.append({"task": task, "category": cat, "arm": arm, "repeat": rp, "steps": st})
+                        rows.append({**row(task, arm, rp), **self.PLAYS[cat], **over.get((task, rp), {})})
+        return recs, rows
+
+    def test_a_set_that_plays_its_categories_holds(self):
+        s = report.set_shape(*self.run_of())
+        self.assertTrue(s["holds"])
+        self.assertEqual({c: (s[c]["held"], s[c]["tasks"], s[c]["short_of"]) for c in report.SHAPE},
+                         {"coding": (20, 20, []), "short": (10, 10, []), "no_tool": (5, 5, []), "interactive": (5, 5, [])})
+
+    def test_a_coding_task_of_5_rounds_in_2_of_3_off_runs_falls_short(self):
+        s = report.set_shape(*self.run_of(off={("coding-3", 1): {"rounds": 5}, ("coding-3", 3): {"rounds": 5}}))
+        self.assertEqual((s["coding"]["held"], s["coding"]["short_of"], s["holds"]), (19, ["coding-3"], False))
+
+    def test_one_short_off_run_of_3_still_holds(self):
+        s = report.set_shape(*self.run_of(off={("coding-3", 2): {"rounds": 5}}))
+        self.assertEqual((s["coding"]["held"], s["holds"]), (20, True))
+
+    def test_it_is_read_with_blocks_off(self):
+        # Blocks' own closing round would lift a 5-round task to 6: that isn't the task's size.
+        five = {(f"coding-{i}", rp): {"rounds": 5} for i in range(20) for rp in (1, 2, 3)}
+        six = {k: {"rounds": 6} for k in five}
+        self.assertFalse(report.set_shape(*self.run_of(off=five, on=six))["holds"])
+        self.assertTrue(report.set_shape(*self.run_of(off=six, on=five))["holds"])
+
+    def test_rounds_add_up_over_a_tasks_turns(self):
+        # A card task's two turns, or a coding task's said-instead steer: one run, 3 + 3 rounds.
+        recs, rows = self.run_of()
+        rows = [dict(r, rounds=3) for r in rows if r["task"] == "coding-0"] * 2 + [r for r in rows if r["task"] != "coding-0"]
+        self.assertEqual(report.set_shape(recs, rows)["coding"]["held"], 20)
+
+    def test_short_is_1_or_2_rounds(self):
+        s = report.set_shape(*self.run_of(off={("short-1", rp): {"rounds": 3} for rp in (1, 2)}))
+        self.assertEqual((s["short"]["short_of"], s["holds"]), (["short-1"], False))
+
+    def test_a_no_tool_task_that_calls_a_tool_falls_short(self):
+        s = report.set_shape(*self.run_of(off={("no_tool-2", rp): {"tool_calls": 1} for rp in (2, 3)}))
+        self.assertEqual((s["no_tool"]["short_of"], s["holds"]), (["no_tool-2"], False))
+
+    def test_a_no_tool_run_with_no_turn_falls_short(self):
+        recs, rows = self.run_of()
+        rows = [r for r in rows if not (r["task"] == "no_tool-0" and r["arm"] == "off")]
+        self.assertEqual(report.set_shape(recs, rows)["no_tool"]["short_of"], ["no_tool-0"])
+
+    def test_a_card_task_whose_answer_was_skipped_falls_short(self):
+        skip = {("interactive-4", rp): [{"step": "answer", "skipped": "no card showing"}] for rp in (1, 3)}
+        s = report.set_shape(*self.run_of(steps=skip))
+        self.assertEqual((s["interactive"]["short_of"], s["holds"]), (["interactive-4"], False))
+        handed = {("interactive-4", rp): [{"step": "hand_back", "block": "plan"}] for rp in (1, 2, 3)}
+        self.assertTrue(report.set_shape(*self.run_of(steps=handed))["holds"])
+
+    def build(self, recs, rows):
+        """report.build over these runs, every gate row passing (rows_of is
+        Gate's to test): only the shape can fail it."""
+        by = {}
+        for r in rows:
+            by.setdefault((r["task"], r["arm"], r["repeat"]), []).append(r)
+        orig = (report.per_turn, report.rows_of)
+        report.per_turn = lambda rec, counter: (by[(rec["task"], rec["arm"], rec["repeat"])], [])
+        report.rows_of = lambda *a: {k: {"pass": True} for k in report.GATE}
+        try:
+            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], _Counter(), 900, [], {"mode": "test"})
+        finally:
+            report.per_turn, report.rows_of = orig
+
+    def test_the_gate_passes_only_if_the_shape_holds_and_says_why(self):
+        rep = self.build(*self.run_of())
+        self.assertTrue(rep["set_shape"]["holds"])
+        self.assertTrue(rep["gate_pass"])
+        self.assertIn("The set's shape, blocks off: holds: coding 20 of 20 (≥ 6 rounds; ≥ 20), short 10 of 10", report.markdown(rep))
+        rep = self.build(*self.run_of(off={("coding-7", rp): {"rounds": 5} for rp in (1, 2, 3)}))
+        self.assertTrue(all(g["pass"] for g in rep["gate"].values()))
+        self.assertFalse(rep["gate_pass"], "a run that didn't play §2.8's set didn't measure it")
+        md = report.markdown(rep)
+        self.assertIn("The set's shape, blocks off: **does not hold**: coding 19 of 20 (≥ 6 rounds; ≥ 20), short: `coding-7`, short 10", md)
+        self.assertIn("Gate: **fails**", md)
 
 
 if __name__ == "__main__":

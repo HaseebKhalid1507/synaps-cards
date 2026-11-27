@@ -8,8 +8,10 @@ its workspace, the arm). Each turn of the task (its opening `say`, then the
 turn a card answer starts) is a fixed list of rounds, each a list of tool
 calls, then a final text; a request gets the first round whose calls aren't
 in the history yet, so steers and notices change nothing. A coding turn
-reads, runs the tests, applies the task's reference solution with the
-engine's own `edit` and `write` tools, runs the tests again, and answers.
+reads the workspace's README, then the file it fixes, runs the tests,
+applies the task's reference solution with the engine's own `edit` and
+`write` tools, runs the tests again, and answers: 6 rounds or more with
+blocks off, as the set's coding tasks are (§2.8; report.py's shape).
 With blocks on it also keeps a plan: a `put` riding the first read, ticks
 riding real calls, and one closing tick alone in its own round. A few
 tasks add what the report must catch: a refused call and its repair
@@ -66,7 +68,7 @@ def coding_rounds(task, ws, on, first):
     edits = json.loads((taskset.TASKS / task["solution"]).read_text())
     files = list(dict.fromkeys(e["path"] for e in edits))
     test = ("bash", {"command": "python3 -m unittest -q 2>&1 | tail -3"})
-    rounds = [[("read", {"path": str(Path(ws) / files[0])})], [test]]
+    rounds = [[("read", {"path": str(Path(ws) / "README.md")})], [("read", {"path": str(Path(ws) / files[0])})], [test]]
     for e in edits:
         p = str(Path(ws) / e["path"])
         rounds.append([("write", {"path": p, "content": e["content"]}) if "content" in e else
@@ -219,3 +221,4 @@ class Scripted:
 
     def close(self):
         self.server.shutdown()
+        self.server.server_close()

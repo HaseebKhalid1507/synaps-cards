@@ -26,12 +26,30 @@ the reading here is the stricter one, and each is stated:
 **Refusals and repairs:** a `cards_block` result that isn't a receipt
 (`ok …`) is a refusal; a repair is a refusal whose next block call in the
 same turn was accepted.
+
+**The set's shape** (§2.8: "≥ 20 coding tasks of ≥ 6 rounds", "≥ 10
+short tasks of 1–2 rounds", "≥ 5 turns with no tool call", "≥ 5 tasks in
+which the user answers a card or hands back an edit") is how the model
+played the set, so it is read from the run, with blocks off (blocks add
+rounds of their own). One off-run plays its task's category if:
+- *coding*: its user-initiated turns took ≥ 6 rounds in all;
+- *short*: 1 or 2;
+- *no tool*: it had a turn, and no turn of it made a tool call;
+- *interactive*: the user's answer or hand-back was sent, not skipped
+  (no card showing, or none to answer).
+
+A task holds its shape if more than half its off-runs played it (2 of 3).
+The shape holds if every category has at least §2.8's minimum of tasks
+holding theirs (`taskset.CATEGORIES`), and **the gate passes only if the
+shape holds**: a run that didn't play §2.8's set didn't measure it. Every
+task short of its shape is named; a change of the set, if one is needed,
+is made before B5b's first run (eval/README.md).
 """
 
 import json
 import statistics
 
-from . import classify, count, turns
+from . import classify, count, taskset, turns
 
 GATE = {
     "block_output_per_turn": {"kind": "attributed", "median": 500, "p90": 900, "target": 400},
@@ -42,6 +60,13 @@ GATE = {
     "repairs_and_reputs": {"kind": "counted", "per_turn": 0.1},
     "skipped_ops": {"kind": "counted", "share": 0.05, "target": 0.02},
     "task_outcome": {"kind": "judged"},
+}
+# What one off-run of each category plays (module docs, "The set's shape").
+SHAPE = {
+    "coding": "≥ 6 rounds",
+    "short": "1–2 rounds",
+    "no_tool": "no tool call",
+    "interactive": "the user's answer or hand-back sent",
 }
 
 
@@ -85,6 +110,7 @@ def per_turn(rec, counter):
         rows.append({
             "task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "trigger": t.trigger, "outcome": t.outcome,
             "rounds": len(t.rounds),
+            "tool_calls": sum(len(r.calls) for r in t.rounds),
             "output": sum(r.output for r in t.rounds),
             "input_side": sum(r.input_side for r in t.rounds),
             "usage": {k: sum((r.usage or {}).get(k, 0) for r in t.rounds)
@@ -153,6 +179,43 @@ def rows_of(turn_rows, judged, definition):
     return out
 
 
+def played(category, rows, steps):
+    """Whether one off-run, its turn rows and its harness steps, played its
+    category's shape (module docs)."""
+    rounds = sum(r["rounds"] for r in rows)
+    if category == "coding":
+        return rounds >= 6
+    if category == "short":
+        return 1 <= rounds <= 2
+    if category == "no_tool":
+        return bool(rows) and all(r["tool_calls"] == 0 for r in rows)
+    if category == "interactive":
+        return any(s.get("step") in ("answer", "hand_back") and not s.get("skipped") for s in steps)
+    return False
+
+
+def set_shape(records, turn_rows):
+    """The set's shape as the run played it (module docs)."""
+    rows_of_run = {}
+    for r in turn_rows:
+        if r["arm"] == "off":
+            rows_of_run.setdefault((r["task"], r["repeat"]), []).append(r)
+    out, holds = {}, True
+    for cat, says in SHAPE.items():
+        runs = {}
+        for rec in records:
+            if rec.get("category") == cat and rec["arm"] == "off":
+                ok = played(cat, rows_of_run.get((rec["task"], rec["repeat"]), []), rec.get("steps", []))
+                runs.setdefault(rec["task"], []).append(ok)
+        held = sorted(t for t, oks in runs.items() if 2 * sum(oks) > len(oks))
+        need = taskset.CATEGORIES[cat]
+        out[cat] = {"plays": says, "tasks": len(runs), "held": len(held), "need": need,
+                    "short_of": sorted(set(runs) - set(held))}
+        holds = holds and len(held) >= need
+    out["holds"] = holds
+    return out
+
+
 def build(records, counter, definition, not_run, meta):
     """The whole report (module docs)."""
     turn_rows, event_started, judged = [], [], []
@@ -187,11 +250,12 @@ def build(records, counter, definition, not_run, meta):
                               for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
     }
+    shape = set_shape(records, turn_rows)
     return {
         "meta": meta | {"counter": counter.describe()},
         "turns": len(turn_rows), "event_started": event_started,
         "not_run": [{"task": t["id"], "needs": t["needs"], "why": f"needs {', '.join(t['needs'])}, not run"} for t in not_run],
-        "gate": gate, "gate_pass": all(g["pass"] for g in gate.values()),
+        "gate": gate, "set_shape": shape, "gate_pass": all(g["pass"] for g in gate.values()) and shape["holds"],
         "also": also,
         "outcomes": judged,
         "turn_rows": turn_rows,
@@ -218,6 +282,12 @@ def markdown(rep):
     for k, g in rep["gate"].items():
         p = {x: y for x, y in g["pooled"].items() if x not in ("pass", "per_task")}
         lines.append(f"| {k} | {g['kind']} | `{json.dumps(p, sort_keys=True)}` | {g['repeats_passing']} | {'yes' if g['pass'] else '**no**'} |")
+    s = rep["set_shape"]
+    cats = ", ".join(f"{c} {s[c]['held']} of {s[c]['tasks']} ({s[c]['plays']}; ≥ {s[c]['need']})"
+                     + (f", short: {', '.join(f'`{t}`' for t in s[c]['short_of'])}" if s[c]["short_of"] else "")
+                     for c in SHAPE)
+    lines += ["", f"The set's shape, blocks off: {'holds' if s['holds'] else '**does not hold**'}: {cats}.",
+              f"Gate: {'passes' if rep['gate_pass'] else '**fails**'} (every row, pooled and in 2 of 3 repeats, and the set's shape)."]
     lines += ["", f"Also reported: `{json.dumps({k: v for k, v in rep['also'].items() if k != 'reported_per_arm'}, sort_keys=True)}`", ""]
     if rep["not_run"]:
         lines.append("Not run: " + ", ".join(f"`{t['task']}` ({t['why']})" for t in rep["not_run"]) + ".")
