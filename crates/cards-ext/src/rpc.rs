@@ -15,12 +15,13 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use crate::tool::{self, Cards, Refusal};
+use crate::tool::{Cards, Refusal};
 
 /// One header line, as the host bounds its own.
 pub const HEADER_LINE_MAX: usize = 1024;
 /// The largest body read whole. A bigger one is skipped, so the stream stays
-/// in step, and goes unanswered: a card's input is at most 8 KiB.
+/// in step, and goes unanswered: a card's input, and a block call's, is at
+/// most 8 KiB.
 pub const BODY_MAX: usize = 16 * 1024 * 1024;
 
 pub const PARSE_ERROR: i64 = -32700;
@@ -135,7 +136,7 @@ pub fn handle(body: &[u8], cards: &mut Cards, now: Instant) -> (Option<Value>, b
     let Some(id) = message.get("id").cloned() else { return (None, stop) };
     let params = message.get("params").unwrap_or(&Value::Null);
     let outcome: Result<Value, Refusal> = match method {
-        "initialize" => Ok(tool::initialize()),
+        "initialize" => Ok(cards.initialize(params)),
         "tool.call" => cards.call(params, now).map(|text| json!({ "content": text })),
         "shutdown" => Ok(Value::Null),
         other => Err(Refusal { code: METHOD_NOT_FOUND, message: format!("cards: no method {other:?}") }),

@@ -82,7 +82,8 @@ bound in a 4-byte script.
 ## `fold/smoke.json`
 
 A real host's history, as the daemon sends it: `get_messages` after the answer's turn in `scripts/smoke.py` (SynapsCLI `dev`
-`0a71ea0d`, a scripted model; `source` names the run). It holds three bound cards, an invalid call, a close of an id no card has,
+`0a71ea0d`, a scripted model; `source` names the run, which drove its turns over `synaps rpc`; the smoke now drives them in a
+scratch session of its daemon, and reads the same history with `SessionQuery::Messages`). It holds three bound cards, an invalid call, a close of an id no card has,
 a rate refusal, a worker's call, and the answer message to the first card. `crates/cards-spec/src/fold/tests.rs` folds it. Its
 ids are that run's, so it is copied, not regenerated.
 

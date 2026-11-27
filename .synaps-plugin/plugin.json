@@ -1,7 +1,7 @@
 {
   "name": "cards",
   "version": "0.1.0",
-  "description": "Agent cards: the agent asks one question as an inline card in the desktop app (the cards_ui tool). Answers come back as ordinary user messages.",
+  "description": "Agent cards: the agent asks one question as an inline card in the desktop app (the cards_ui tool). Answers come back as ordinary user messages. With the blocks setting on, it also keeps living blocks in the transcript and the right rail (the cards_block tool).",
   "author": "Haseeb Khalid",
   "license": "MIT",
   "extension": {
@@ -10,6 +10,14 @@
     "command": "target/release/cards-ext",
     "setup": "scripts/setup.sh",
     "permissions": ["tools.register"],
-    "hooks": []
+    "hooks": [],
+    "config": [
+      {
+        "key": "blocks",
+        "type": "bool",
+        "description": "Offer the agent cards_block: living blocks (a plan, a status, a diff, a note, a metric, a file) that synaps-desk draws in the transcript and the right rail. Off by default; keep it off where only the TUI runs, which shows each call as JSON. Takes effect at synaps daemon reload-extension cards.",
+        "default": false
+      }
+    ]
   }
 }

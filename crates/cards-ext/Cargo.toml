@@ -1,6 +1,6 @@
 [package]
 name = "cards-ext"
-description = "The `cards` Synaps extension: one tool, `ui` (the model's `cards_ui`), over the extension protocol on stdio."
+description = "The `cards` Synaps extension: the `ui` tool (the model's `cards_ui`), and `block` (`cards_block`) when its setting is on, over the extension protocol on stdio."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

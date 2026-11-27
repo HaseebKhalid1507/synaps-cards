@@ -2,16 +2,19 @@
 //!
 //! The host spawns it from the plugin root (`.synaps-plugin/plugin.json`,
 //! `extension.command`) and speaks the extension protocol on stdio
-//! ([`rpc`]). It registers one tool in `initialize`, `ui`, which the model
-//! sees as `cards_ui`, and answers each `tool.call` at once ([`tool`]): a
-//! card that is showing, or a refusal. It needs only `tools.register`: no
-//! hooks, no conversation access. One process serves every session of a
-//! daemon, so the only state, the rate counter, is kept per chat, in a
-//! table bounded across chats ([`chats`]).
+//! ([`rpc`]). It registers `ui` in `initialize`, which the model sees as
+//! `cards_ui`, and answers each `tool.call` at once ([`tool`]): a card that
+//! is showing, or a refusal. With the manifest's `blocks` config on, it
+//! registers `block` too, the model's `cards_block` ([`block`],
+//! `docs/blocks.md`): a batch of block ops validated, or refused. It needs
+//! only `tools.register`: no hooks, no conversation access. One process
+//! serves every session of a daemon, so the only state, the rate counters,
+//! is kept per chat, in tables bounded across chats ([`chats`]).
 //!
 //! The exit code is 0 at the end of input or after `shutdown`, and 1 when
 //! the input broke off mid-frame (the host then starts it again).
 
+mod block;
 mod chats;
 mod rpc;
 mod tool;
