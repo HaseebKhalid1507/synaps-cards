@@ -1976,3 +1976,34 @@ fn the_line_1_filter_passes_every_edit_of_its_id_and_no_other() {
         assert!(!names(&body(of), id), "{} isn't {id}", body(of));
     }
 }
+
+/// P3-1, the defensive path: an edit with no key (an appended hunk line,
+/// which only a raw [`Edit`] carries: the user grammar appends steps) is
+/// never covered, not even by itself. So with [`CAP`] recoverable entries,
+/// the same keyless edit again makes its room by being the same edit, and
+/// the query and the hand-back both admit it.
+#[test]
+fn the_same_keyless_edit_again_makes_its_own_room() {
+    let steps: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+    let names: Vec<&str> = steps.iter().map(String::as_str).collect();
+    let mut d = Desk::with(json!([put_plan(PLAN, &names)]));
+    let (tag, rev) = d.live(PLAN);
+    let mut parts = Parts::default();
+    parts.append.insert(crate::block::Path::parse("lines").unwrap(), crate::block::Appended::Lines(vec!["+ x".into()]));
+    let lines = Edit { id: r(PLAN), base: rev, of: tag, parts };
+    d.send(&lines).unwrap();
+    d.unconfirmed_now();
+    for i in 1..CAP {
+        d.unconfirmed_with(set(
+            &format!("steps.s{}.{}", i % 20, if i < 20 { "label" } else { "stop" }),
+            json!(if i < 20 { json!(format!("Step {i}")) } else { json!(true) }),
+        ));
+    }
+    assert!(d.memo.entries().iter().all(Entry::recoverable) && d.memo.entries().len() == CAP);
+    let s = d.board();
+    let h = History::new(&d.history, &s);
+    assert_eq!(d.memo.may_hand_back(&lines, &summary(), &h), Ok(()));
+    assert!(d.send(&lines).is_ok(), "it replaces its entry");
+    assert_eq!(d.memo.entries().len(), CAP);
+    assert_eq!(d.state(), Some(State::Sending));
+}
