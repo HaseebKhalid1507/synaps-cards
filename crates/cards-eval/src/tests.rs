@@ -152,6 +152,17 @@ fn skips_name_their_reason_and_a_skipped_path_its_path() {
     assert!(p.contains(&("skipped", Some("Paths"), None)), "{p:?}");
 }
 
+/// The eval's own op fixture (`eval/tests/fixtures/`, its `Ops` tests) is
+/// this fold's report of its history, exactly: ten ops whose board logged
+/// twenty lines (partial patches, one skipped whole, four after a
+/// dismissal), so the Python report is tested on what the board says.
+#[test]
+fn the_eval_op_fixture_is_this_folds_report() {
+    let history: Value = serde_json::from_str(include_str!("../../../eval/tests/fixtures/ops-history.json")).unwrap();
+    let want: Value = serde_json::from_str(include_str!("../../../eval/tests/fixtures/ops-fold.json")).unwrap();
+    assert_eq!(report(messages(&history).unwrap()), want);
+}
+
 /// The board's log keeps 256 lines; the report keeps them all.
 #[test]
 fn every_line_of_a_long_history_is_reported() {

@@ -22,6 +22,20 @@ Per turn (`attribute`):
 - **Ops on dismissed blocks** (from the fold report, `cards-eval fold`): the
   agent's ops whose block was dismissed when they landed, by count and by
   each op's own compact JSON, counted (no framing: that is the call's).
+  Each op is charged once.
+
+**An op** (`ops`) is one entry of a call's `ops`: `(tool_id, event, op)`
+in the fold report, never one of its log lines. The board logs one line
+for an op's outcome, plus one `skipped_path` line for each path of it that
+didn't apply (`cards-spec` `board/apply.rs` `patch`), and one line per id
+of a `remove` of several. So an op's lines are grouped, and it counts once:
+- its **outcome** is `skipped` if every one of its outcome lines is (a
+  patch none of whose paths applied, a remove none of whose ids could go),
+  else its first that isn't;
+- it is **partly skipped** if it applied but some of its paths or ids
+  didn't;
+- its `skipped_path` lines are path diagnostics: their own table, by
+  reason, never ops.
 """
 
 import json
@@ -123,6 +137,36 @@ class Endpoint(Counter):
         return statistics.median(self.call(c) - self.text(compact(c)) for c in calls)
 
 
+def ops(fold_lines, tool_ids):
+    """The agent's ops among `fold_lines` (the fold report's), of the calls
+    `tool_ids`, one per op (module docs): dicts of `tool_id`, `event`, `op`,
+    `did`, `outcome`, `partly`, `why` (a skipped op's reasons), `paths` (its
+    path diagnostics' reasons) and `dismissed_before`, in log order."""
+    by = {}
+    for ln in fold_lines:
+        if ln.get("tool_id") not in tool_ids or ln.get("author") != "agent" or ln.get("did") not in OP_DIDS:
+            continue
+        o = by.setdefault((ln["tool_id"], ln.get("event"), ln.get("op")), {
+            "tool_id": ln["tool_id"], "event": ln.get("event"), "op": ln.get("op"), "did": ln["did"],
+            "outcomes": [], "skips": [], "paths": [], "dismissed_before": False})
+        if ln.get("outcome") == "skipped_path":
+            o["paths"].append(ln.get("why") or "?")
+            continue
+        o["outcomes"].append(ln.get("outcome"))
+        if ln.get("outcome") == "skipped":
+            o["skips"].append(ln.get("why") or "?")
+        o["dismissed_before"] |= bool(ln.get("dismissed_before"))
+    out = []
+    for o in by.values():
+        outs, skips = o.pop("outcomes"), o.pop("skips")
+        whole = bool(outs) and all(x == "skipped" for x in outs)
+        o["outcome"] = "skipped" if whole else next((x for x in outs if x != "skipped"), "?")
+        o["partly"] = not whole and bool(skips or o["paths"])
+        o["why"] = ", ".join(sorted(set(skips))) if whole else None
+        out.append(o)
+    return out
+
+
 def attribute(turn, counter, fold_lines=(), block_tool=BLOCK_TOOL):
     """The attributed numbers of one turn (module docs)."""
     per_call = {c.tool_id: counter.call(c.input) for c in turn.block_calls()}
@@ -134,13 +178,12 @@ def attribute(turn, counter, fold_lines=(), block_tool=BLOCK_TOOL):
         elif item[0] == "result" and item[1].name == block_tool:
             result_input += counter.text(item[1].text) * rounds_after
     inputs = {c.tool_id: c.input for c in turn.block_calls()}
-    unseen = [ln for ln in fold_lines if ln.get("tool_id") in inputs and ln.get("author") == "agent"
-              and ln.get("did") in OP_DIDS and ln.get("dismissed_before")]
+    unseen = [o for o in ops(fold_lines, set(inputs)) if o["dismissed_before"]]
     unseen_tokens = 0.0
-    for ln in unseen:
-        ops = (inputs[ln["tool_id"]] or {}).get("ops") or []
-        if isinstance(ln.get("op"), int) and ln["op"] < len(ops):
-            unseen_tokens += counter.text(compact(ops[ln["op"]]))
+    for o in unseen:
+        sent = (inputs[o["tool_id"]] or {}).get("ops") if isinstance(inputs[o["tool_id"]], dict) else None
+        if isinstance(o["op"], int) and isinstance(sent, list) and o["op"] < len(sent):
+            unseen_tokens += counter.text(compact(sent[o["op"]]))
     return {
         "block_calls": len(per_call),
         "block_output": sum(per_call.values()),

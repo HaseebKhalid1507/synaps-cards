@@ -4,9 +4,12 @@
 //! a second reading of it.
 //!
 //! The harness (`eval/`) reads three of §2.8's numbers from it:
-//! - **skipped ops by reason** (the gate's "Skipped ops" row): a line whose
-//!   outcome is `skipped` is a skipped op; `skipped_path` is one path of an
-//!   op that still applied, reported by reason and not counted as a skip;
+//! - **skipped ops by reason** (the gate's "Skipped ops" row): an op is
+//!   its `(event, op)`, not a line. Its outcome line says what it did (a
+//!   `skipped` patch is one none of whose paths applied), and each
+//!   `skipped_path` line after it is a diagnostic of one of its paths,
+//!   whether the op applied or not; a `remove` of several ids logs a line
+//!   per id. The harness counts each op once (`eval/b5/count.py`'s `ops`);
 //! - **`put` on a live id** (the "Repairs and re-puts" row): `exists`;
 //! - **ops on dismissed blocks** (the unseen patches, §3.5): an agent op
 //!   whose `dismissed_before` is true, and **notices delivered**: the

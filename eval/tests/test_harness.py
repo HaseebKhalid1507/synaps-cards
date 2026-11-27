@@ -8,9 +8,13 @@ import threading
 import unittest
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-from b5 import desk, estimate, harness, providers, report, spend, taskset
+from b5 import count, desk, estimate, harness, providers, report, spend, taskset
+from b5.calibrate import compact
 from wire import BLOCK, PUT, Wire
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 TASKS = taskset.load()
 
@@ -174,6 +178,91 @@ def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, o
             "closing": {"k": closing + 1, "rounds": closing, "input": 0, "complete": True},
             "ops": ops if arm == "on" else 0, "skipped": skipped, "repairs": repairs, "reputs": reputs, "refusals": repairs,
             "skipped_by_reason": {}, "skipped_paths_by_reason": {}, "latency": [0.1], "usage": {"output_tokens": out}}
+
+
+class Chars:
+    """A counter for the tests: a token per character, no framing."""
+    kind = "chars"
+
+    def call(self, x):
+        return len(compact(x))
+
+    def text(self, s):
+        return len(s)
+
+    def describe(self):
+        return {"kind": self.kind}
+
+
+def events_of(history):
+    """The session wire of one turn that made `history` (a stored history):
+    each assistant message a round with its calls under their own ids,
+    each later user text a steer the engine delivered."""
+    w = Wire()
+    msgs = iter(history)
+    w.start(next(msgs)["content"])
+    for m in msgs:
+        parts = m["content"] if isinstance(m["content"], list) else [{"type": "text", "text": m["content"]}]
+        if m["role"] == "assistant":
+            w.stream("llm", "response_start")
+            for p in parts:
+                if p["type"] == "text":
+                    w.stream("llm", "text", text=p["text"])
+                elif p["type"] == "tool_use":
+                    w.call(p["name"], p["id"], p["input"])
+            w.usage()
+        elif any(p["type"] == "tool_result" for p in parts):
+            w.results([p["tool_use_id"] for p in parts], {p["tool_use_id"]: p["content"] for p in parts})
+        else:
+            w.steer(parts[0]["text"])
+    return w.done().events
+
+
+class Ops(unittest.TestCase):
+    """An op is one entry of a call's `ops`, never a log line (count.py's
+    `ops`). The fixture is cards-eval's fold of its history, exactly (the
+    Rust test `the_eval_op_fixture_is_this_folds_report`): ten ops, twenty
+    lines. Eight patches applied with a bad path each (one with two), one
+    skipped whole (its only path bad), the last four after the block's
+    dismissal."""
+
+    def run_of(self):
+        history = json.loads((FIXTURES / "ops-history.json").read_text())
+        fold = json.loads((FIXTURES / "ops-fold.json").read_text())
+        rec = {"task": "t", "arm": "on", "repeat": 1, "events": events_of(history), "fold": fold}
+        (row_,), _ = report.per_turn(rec, Chars())
+        return row_, history, fold
+
+    def test_an_op_counts_once_however_many_lines_the_board_logged(self):
+        r, _, fold = self.run_of()
+        self.assertEqual(len([ln for ln in fold["lines"] if ln["author"] == "agent"]), 20)
+        self.assertEqual((r["ops"], r["skipped"]), (10, 1))
+        self.assertEqual(r["partly_skipped"], 8)
+        self.assertEqual(r["skipped_by_reason"], {"Paths": 1})
+        self.assertEqual(r["skipped_paths_by_reason"], {"NotThere": 10}, "path diagnostics: their own table")
+
+    def test_path_diagnostics_dont_dilute_the_skip_gate(self):
+        # 1 op of 10 skipped is 10%, over the 5% gate. Read as lines it was
+        # 1 of 20, 5%, a pass: more bad paths made the gate look better.
+        r, _, _ = self.run_of()
+        g = report.rows_of([r], [], 900)["skipped_ops"]
+        self.assertEqual((g["skipped"], g["ops"], g["share"], g["pass"]), (1, 10, 0.1, False))
+
+    def test_an_unseen_op_is_charged_once(self):
+        r, history, _ = self.run_of()
+        late = [p["input"]["ops"][0] for m in history[-9:] if m["role"] == "assistant" for p in m["content"] if p["type"] == "tool_use"]
+        self.assertEqual(len(late), 4)
+        self.assertEqual(r["attributed"]["unseen_ops"], 4)
+        self.assertEqual(r["attributed"]["unseen_tokens"], sum(len(compact(o)) for o in late))
+
+    def test_a_remove_of_several_ids_is_one_op(self):
+        lines = [{"tool_id": "t1", "event": 3, "op": 0, "author": "agent", "did": "remove", "outcome": o, "why": w, "dismissed_before": False}
+                 for o, w in (("applied", None), ("skipped", "CardOpen"), ("no_change", None))]
+        lines += [{"tool_id": "t1", "event": 3, "op": 1, "author": "agent", "did": "remove", "outcome": "skipped", "why": w,
+                   "dismissed_before": False} for w in ("CardOpen", "NoBlock")]
+        a, b = count.ops(lines, {"t1"})
+        self.assertEqual((a["outcome"], a["partly"], a["why"]), ("applied", True, None))
+        self.assertEqual((b["outcome"], b["partly"], b["why"]), ("skipped", False, "CardOpen, NoBlock"))
 
 
 class Gate(unittest.TestCase):

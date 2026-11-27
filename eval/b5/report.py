@@ -19,7 +19,9 @@ the reading here is the stricter one, and each is stated:
   less the mean of its off-turns', then the median over tasks; a repeat's
   is the same over that repeat's runs;
 - *repairs and re-puts* are per on-turn; *skipped ops* over every agent op
-  the board logged with blocks on;
+  of the on-turns' calls, each op once however many lines the board logged
+  for it (count.py's `ops`); a path that didn't apply is a diagnostic in
+  its own table, never an op;
 - *task outcome*: pooled, a task fails the row if it passed more of its
   off-runs than its on-runs; in a repeat, if it passed off and failed on.
 
@@ -105,8 +107,7 @@ def per_turn(rec, counter):
         c = classify.closing(t)
         a = count.attribute(t, counter, lines) if rec["arm"] == "on" else None
         ref, rep = refusals(t)
-        ids = {x.tool_id for x in t.block_calls()}
-        mine = [ln for ln in lines if ln.get("tool_id") in ids and ln.get("author") == "agent" and ln.get("did") in count.OP_DIDS]
+        mine = count.ops(lines, {x.tool_id for x in t.block_calls()})
         rows.append({
             "task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "trigger": t.trigger, "outcome": t.outcome,
             "measured": t.measured, "unmeasured_rounds": len(t.unmeasured),
@@ -120,20 +121,20 @@ def per_turn(rec, counter):
             "attributed": a,
             "refusals": ref, "repairs": rep,
             "ops": len(mine),
-            "skipped": sum(ln["outcome"] == "skipped" for ln in mine),
-            "skipped_by_reason": _by(mine, lambda ln: ln["outcome"] == "skipped"),
-            "skipped_paths_by_reason": _by(mine, lambda ln: ln["outcome"] == "skipped_path"),
-            "reputs": sum(ln["outcome"] == "exists" for ln in mine),
+            "skipped": sum(o["outcome"] == "skipped" for o in mine),
+            "partly_skipped": sum(o["partly"] for o in mine),
+            "skipped_by_reason": _by([o["why"] for o in mine if o["outcome"] == "skipped"]),
+            "skipped_paths_by_reason": _by([w for o in mine for w in o["paths"]]),
+            "reputs": sum(o["outcome"] == "exists" for o in mine),
             "latency": [round(r.t_end - r.t_start, 3) for r in t.rounds if r.t_end is not None and r.t_start is not None],
         })
     return rows, event_started
 
 
-def _by(lines, keep):
+def _by(whys):
     out = {}
-    for ln in lines:
-        if keep(ln):
-            out[ln.get("why") or "?"] = out.get(ln.get("why") or "?", 0) + 1
+    for w in whys:
+        out[w or "?"] = out.get(w or "?", 0) + 1
     return out
 
 
@@ -244,6 +245,7 @@ def build(records, counter, definition, not_run, meta):
         "refusals": sum(r["refusals"] for r in on),
         "repairs": sum(r["repairs"] for r in on),
         "reputs": sum(r["reputs"] for r in on),
+        "partly_skipped_ops": sum(r.get("partly_skipped", 0) for r in on),
         "skipped_by_reason": _merge(r["skipped_by_reason"] for r in on),
         "skipped_paths_by_reason": _merge(r["skipped_paths_by_reason"] for r in on),
         "notices_delivered": sum(1 for rec in records for ln in rec["fold"]["lines"] if ln.get("did") == "notice"),

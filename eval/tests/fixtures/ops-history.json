@@ -1,0 +1,349 @@
+[
+ {
+  "role": "user",
+  "content": "Fix the refresh race."
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_001",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "put",
+       "id": "plan",
+       "kind": "plan",
+       "title": "Close the refresh race",
+       "body": {
+        "steps": [
+         {
+          "id": "fix",
+          "label": "Fix"
+         },
+         {
+          "id": "test",
+          "label": "Test"
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_001",
+    "content": "ok 1 ops (blocks/1 #f981277a47170aba)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_002",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 1",
+        "steps.gone0.label": "x",
+        "steps.gone1.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_002",
+    "content": "ok 1 ops (blocks/1 #c6c7325f50d212c8)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_003",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 2",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_003",
+    "content": "ok 1 ops (blocks/1 #2c21bd695bd4be88)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_004",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 3",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_004",
+    "content": "ok 1 ops (blocks/1 #1565e2476ea6fc7f)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_005",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 4",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_005",
+    "content": "ok 1 ops (blocks/1 #b0c60338befbd638)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_006",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 5",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_006",
+    "content": "ok 1 ops (blocks/1 #23768efb947d80ed)"
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": "Keep going.\n[block plan v1 dismissed]"
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_007",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 6",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_007",
+    "content": "ok 1 ops (blocks/1 #d131525c08f01b4c)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_008",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 7",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_008",
+    "content": "ok 1 ops (blocks/1 #7ae64d4c9a11026b)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_009",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.fix.label": "Fix 8",
+        "steps.gone0.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_009",
+    "content": "ok 1 ops (blocks/1 #458b43f06bc88507)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "tool_use",
+    "id": "toolu_010",
+    "name": "cards_block",
+    "input": {
+     "ops": [
+      {
+       "op": "patch",
+       "id": "plan",
+       "set": {
+        "steps.gone.label": "x"
+       }
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "role": "user",
+  "content": [
+   {
+    "type": "tool_result",
+    "tool_use_id": "toolu_010",
+    "content": "ok 1 ops (blocks/1 #e4d5f5e75d324365)"
+   }
+  ]
+ },
+ {
+  "role": "assistant",
+  "content": [
+   {
+    "type": "text",
+    "text": "Done."
+   }
+  ]
+ }
+]
