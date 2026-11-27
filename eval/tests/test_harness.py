@@ -51,13 +51,88 @@ class Calls(unittest.TestCase):
             w.results(ids, {ids[0]: "ok 1 ops (blocks/1 #0)", ids[1]: "Card cabc123 is showing (cards/1 #1): Q?"})
             w.round([("cards_block", BLOCK)])
             w.done()
-            self.assertEqual(harness._first_block(w.events), "plan", form)
             self.assertEqual(harness._last_card(w.events), ({"question": "Q?"}, "Card cabc123 is showing (cards/1 #1): Q?"), form)
 
     def test_a_refused_card_is_not_one_to_answer(self):
         w = Wire().start()
         w.results(w.round([("cards_ui", {"question": ""})]), "Tool execution failed: cards_ui: question: required")
         self.assertIsNone(harness._last_card(w.done().events))
+
+    def test_a_card_closed_since_is_not_one_to_answer(self):
+        w = Wire().start()
+        w.results(w.round([("cards_ui", {"question": "Q?"})]), "Card cabc123 is showing (cards/1 #1): Q?")
+        w.results(w.round([("cards_ui", {"close": "cabc123"})]), "Card cabc123 closed (cards/1 #2)")
+        self.assertIsNone(harness._last_card(w.done().events))
+        w = Wire().start()
+        w.results(w.round([("cards_ui", {"question": "Q?"})]), "Card cabc123 is showing (cards/1 #1): Q?")
+        w.results(w.round([("cards_ui", {"close": "cother99"})]), "Card cother99 closed (cards/1 #2)")
+        self.assertIsNotNone(harness._last_card(w.done().events), "another card's close leaves it showing")
+
+
+class _Desk(desk.StandIn):
+    def __init__(self, refuse=None):
+        super().__init__()
+        self.clicked, self.refuse = [], refuse
+
+    def dismiss(self, conversation, block, history):
+        self.clicked.append(block)
+        return {"ok": False, "refused": self.refuse} if self.refuse else super().dismiss(conversation, block, history)
+
+
+class Dismissal(unittest.TestCase):
+    """A dismissal clicks the board's first live block (harness.py's "A
+    dismissal"): `cards-eval fold` of the history then, never the first
+    put the agent tried."""
+
+    def setUp(self):
+        self.helper, self.boards = harness.helper, []
+        harness.helper = lambda cards_eval, cmd, payload: self.boards.pop(0)
+
+    def tearDown(self):
+        harness.helper = self.helper
+
+    def fire(self, board, d=None):
+        # The agent's first put was refused; a later one, of `notes`, applied.
+        w = Wire().start()
+        w.results(w.round([("cards_block", PUT)]), "Tool execution failed: cards_block: ops[0]: …")
+        note = {"ops": [{"op": "put", "id": "notes", "kind": "note", "body": {"text": "x"}}]}
+        w.results(w.round([("cards_block", note)]), "ok 1 ops (blocks/1 #1)")
+        s = _Session([])
+        s.events = w.events
+        d = d or _Desk()
+        self.boards.append(board)
+        rec = {"steps": []}
+        harness.Runner(_Iso([]), "m", d, Path("/nonexistent")).fire(s, "j1", {"dismiss": "first_block", "after_round": 2}, rec, 2)
+        return d, rec["steps"]
+
+    def test_it_clicks_the_first_live_block_not_a_refused_put(self):
+        d, steps = self.fire({"blocks": [{"id": "notes", "kind": "note", "dismissed": False, "pending": False}]})
+        self.assertEqual(d.clicked, ["notes"])
+        self.assertEqual((steps[0]["id"], steps[0]["outcome"]), ("notes", "accepted"))
+
+    def test_a_removed_or_dismissed_block_isnt_clicked(self):
+        d, steps = self.fire({"blocks": []})
+        self.assertEqual(d.clicked, [], "the only block was removed: nothing to click")
+        self.assertEqual((steps[0]["outcome"], steps[0]["skipped"]), ("skipped", "no live block"))
+        d, steps = self.fire({"blocks": [{"id": "plan", "dismissed": True, "pending": False},
+                                         {"id": "draft", "dismissed": False, "pending": True},
+                                         {"id": "notes", "dismissed": False, "pending": False}]})
+        self.assertEqual(d.clicked, ["notes"])
+
+    def test_a_refused_click_is_recorded_as_refused(self):
+        d, steps = self.fire({"blocks": [{"id": "notes", "dismissed": False, "pending": False}]}, _Desk(refuse="no such block"))
+        self.assertEqual((d.clicked, steps[0]["outcome"]), (["notes"], "refused"))
+
+    def test_a_probe_counts_once_its_notice_rode_a_message(self):
+        def rec(task, arm, steps, sent=()):
+            return {"task": task, "arm": arm, "steps": steps, "sent": [{"notices": n} for n in sent]}
+        ok = [{"step": "dismiss", "id": "notes", "outcome": "accepted"}]
+        recs = [rec("t", "on", ok, [[["notes", "dismissed", 3]]]),
+                rec("t", "on", ok, [[]]),  # clicked, but nothing carried it yet
+                rec("t", "on", [{"step": "dismiss", "id": "notes", "outcome": "refused"}]),
+                rec("t", "off", [{"step": "dismiss", "outcome": "skipped", "skipped": "no live block"}])]
+        self.assertEqual(report.notice_probes(recs), {"t": {"runs": 3, "delivered": 1, "refused": 1, "skipped": 0}})
+
 
 
 class Seam(unittest.TestCase):
@@ -573,7 +648,7 @@ class Eligibility(unittest.TestCase):
                 w.round(text="Done.")
         return w.done().events, ids
 
-    def records(self, repeats=(1, 2, 3), drop=0, cut=None):
+    def records(self, repeats=(1, 2, 3), drop=0, cut=None, probe=lambda task, repeat: True):
         recs = []
         for r, t, arm in harness.plan(TASKS, 3)[0]:
             if r + 1 not in repeats:
@@ -581,9 +656,15 @@ class Eligibility(unittest.TestCase):
             events, ids = self.run_events(t, arm, cut=(t["id"], arm, r + 1) == cut)
             lines = [{"tool_id": i, "event": n, "op": 0, "author": "agent", "did": "patch", "outcome": "applied",
                       "dismissed_before": False} for n, i in enumerate(ids)]
+            steps, sent = [{"step": "answer", "card": "cabc123"}] if t["category"] == "interactive" else [], []
+            if any("dismiss" in s for s in t["turns"]):
+                if arm == "on" and probe(t["id"], r + 1):
+                    steps.append({"step": "dismiss", "id": "plan", "outcome": "accepted"})
+                    sent.append({"carry": "steer", "notices": [["plan", "dismissed", 1]]})
+                else:
+                    steps.append({"step": "dismiss", "outcome": "skipped", "skipped": "no live block"})
             recs.append({"task": t["id"], "category": t["category"], "arm": arm, "repeat": r + 1, "events": events,
-                         "fold": {"lines": lines}, "judge": {"pass": True},
-                         "steps": [{"step": "answer", "card": "cabc123"}] if t["category"] == "interactive" else []})
+                         "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent})
         return recs[:len(recs) - drop]
 
     def build(self, recs, counter=None, not_run=(), **meta):
@@ -632,6 +713,14 @@ class Eligibility(unittest.TestCase):
         rep = self.build(self.records(cut=(coding, "on", 2)))
         self.assertFalse(rep["gate_pass"])
         self.assertIn("1 runs with a turn not measured", " / ".join(rep["not_eligible_because"]))
+
+    def test_a_notice_probe_must_reach_the_agent_in_2_of_3_on_runs(self):
+        dismissing = sorted(t["id"] for t in TASKS if any("dismiss" in s for s in t["turns"]))
+        self.assertEqual(len(dismissing), 4)
+        rep = self.build(self.records(probe=lambda task, r: not (task == dismissing[0] and r > 1)))
+        self.assertFalse(rep["gate_pass"])
+        self.assertEqual(rep["not_eligible_because"], [f"the notice probe didn't reach the agent in 2 of 3 on-runs: {dismissing[0]}"])
+        self.assertTrue(self.build(self.records(probe=lambda task, r: not (task == dismissing[0] and r == 3)))["gate_pass"])
 
     def test_a_dry_run_and_another_task_set_are_never_eligible(self):
         recs = self.records()

@@ -1,4 +1,12 @@
 {
+ "blocks": [
+  {
+   "dismissed": true,
+   "id": "plan",
+   "kind": "plan",
+   "pending": false
+  }
+ ],
  "events": 32,
  "lines": [
   {

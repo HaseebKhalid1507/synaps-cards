@@ -163,6 +163,28 @@ fn the_eval_op_fixture_is_this_folds_report() {
     assert_eq!(report(messages(&history).unwrap()), want);
 }
 
+/// The live blocks, as the desk draws them, in creation order: a removed
+/// one is gone, a dismissed one says so, and the open batch's is pending.
+#[test]
+fn the_live_blocks_are_reported_in_creation_order() {
+    let mut h = H::new();
+    h.call(put_plan("plan"));
+    h.call(json!([{"op": "put", "id": "notes", "kind": "note", "title": "Notes", "body": {"text": "x"}}]));
+    h.call(json!([{"op": "put", "id": "gone", "kind": "note", "title": "Gone", "body": {"text": "x"}}]));
+    h.call(json!([{"op": "remove", "id": "gone"}]));
+    h.user("Next.\n[block plan v1 dismissed]");
+    h.message(&[json!([{"op": "put", "id": "later", "kind": "note", "title": "Later", "body": {"text": "x"}}])], false);
+    let r = h.report();
+    assert_eq!(
+        r["blocks"],
+        json!([
+            {"id": "plan", "kind": "plan", "dismissed": true, "pending": false},
+            {"id": "notes", "kind": "note", "dismissed": false, "pending": false},
+            {"id": "later", "kind": "note", "dismissed": false, "pending": true},
+        ])
+    );
+}
+
 /// The board's log keeps 256 lines; the report keeps them all.
 #[test]
 fn every_line_of_a_long_history_is_reported() {

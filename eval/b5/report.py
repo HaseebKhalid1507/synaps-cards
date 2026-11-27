@@ -58,6 +58,11 @@ task short of its shape is named.
 
 **The verdict** keeps what the rows say apart from what they license:
 - `rows_pass`: every gate row passes (pooled and 2 of 3). Descriptive.
+- *Notice probes*: each task with a dismissal is its probe of the unseen
+  patches (§3.5). An on-run delivered it if the desk accepted the click and
+  a message the agent then got carried the notice. The desk refusing one is
+  a seam failure; a probe delivered in fewer than 2 of its task's 3 on-runs
+  wasn't exercised.
 - `eligible_for_b6`: the run is the experiment §2.8 prescribes, so its rows
   can flip the default. Every condition is checked and each one missing is
   named (`not_eligible_because`): a real run (a dry run is never data); a
@@ -68,8 +73,8 @@ task short of its shape is named.
   experiment, and so is one the budget stopped); every user-initiated turn
   of every run measured (turns.py:
   its `idle`, every response's usage); no task left out (B6 needs the D8
-  hand-backs' both arms, which B5a doesn't run: §8.1's B5b); and the set's
-  shape.
+  hand-backs' both arms, which B5a doesn't run: §8.1's B5b); the set's
+  shape; no dismissal refused, and every notice probe delivered in 2 of 3.
 - `verdict`: `not eligible` unless it is eligible, whatever the rows say;
   then `passes` or `fails`. `gate_pass` is the verdict `passes`.
 """
@@ -296,6 +301,32 @@ def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
         out.append(f"{len(not_run)} tasks not run ({', '.join(t['id'] for t in not_run)}): B6 needs them, both arms (B5b)")
     if not shape["holds"]:
         out.append("the set's shape doesn't hold")
+    probes = notice_probes(records)
+    refused = sum(p["refused"] for p in probes.values())
+    if refused:
+        out.append(f"the desk refused {refused} dismissals")
+    dismissing = {t["id"] for t in taskset.load() if any("dismiss" in s for s in t["turns"])}
+    short = sorted(t for t in {task for task, _, _ in plan or []} & dismissing if probes.get(t, {}).get("delivered", 0) < 2)
+    if short:
+        out.append(f"the notice probe didn't reach the agent in 2 of 3 on-runs: {', '.join(short)}")
+    return out
+
+
+def notice_probes(records):
+    """Per task with a dismissal, its on-runs' probes (module docs): how many
+    on-runs, how many delivered the notice, refused or skipped it."""
+    out = {}
+    for rec in records:
+        steps = [s for s in rec.get("steps", []) if s.get("step") == "dismiss"]
+        if rec["arm"] != "on" or not steps:
+            continue
+        p = out.setdefault(rec["task"], {"runs": 0, "delivered": 0, "refused": 0, "skipped": 0})
+        p["runs"] += 1
+        p["refused"] += sum(s.get("outcome") == "refused" for s in steps)
+        p["skipped"] += sum(s.get("outcome") == "skipped" or "skipped" in s for s in steps)
+        ids = {s["id"] for s in steps if s.get("outcome") == "accepted"}
+        rode = {n[0] for m in rec.get("sent", []) for n in m.get("notices", []) if len(n) >= 2 and n[1] == "dismissed"}
+        p["delivered"] += bool(ids & rode)
     return out
 
 
@@ -331,6 +362,7 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "skipped_by_reason": _merge(r["skipped_by_reason"] for r in on),
         "skipped_paths_by_reason": _merge(r["skipped_paths_by_reason"] for r in on),
         "notices_delivered": sum(1 for rec in records for ln in rec["fold"]["lines"] if ln.get("did") == "notice"),
+        "notice_probes": notice_probes(records),
         "latency_per_round": {arm: {"median": median(lat), "p90": p90(lat), "rounds": len(lat)}
                               for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},

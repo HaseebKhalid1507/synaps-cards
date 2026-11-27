@@ -15,9 +15,10 @@ workspace, then the task's seed edits (a bug put in on purpose). Its
 - `steer`: a message sent while the turn runs, once the turn has had
   `after_round` rounds (if the turn ends first, it is said instead, as the
   next turn's message);
-- `dismiss`: the user dismisses a block (`first_block`: the first block the
-  agent put, if one is live) once the turn has had `after_round` rounds; the
-  notice rides the user's next message, as the desk sends it (desk.py);
+- `dismiss`: the user dismisses a block (`first_block`: the first live block
+  on the board, harness.py's "A dismissal") once the turn has had
+  `after_round` rounds; the notice rides the user's next message, as the
+  desk sends it (desk.py);
 - `answer`: once the session is idle, the user answers the card the agent
   last showed, by the fixed policy (`cards-eval answer`), preferring
   options that contain one of `prefer`;

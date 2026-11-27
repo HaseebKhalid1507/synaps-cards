@@ -25,6 +25,11 @@
 //!   op before the dismissal landed is a seen op, one after it an unseen
 //!   patch.
 //!
+//! The board as the desk draws it at the history's end is reported too:
+//! its visibility records, and its live blocks in creation order (`blocks`:
+//! id, kind, dismissed, pending), the ones a user can click. The harness's
+//! dismissal takes the first live, undismissed, settled one.
+//!
 //! A line's `tool_id` is the call its op came from, so the harness puts it
 //! in its turn and round. The batch still open at the history's end (a call
 //! with no result yet) is reported as the desk draws it, its lines marked
@@ -80,10 +85,19 @@ pub fn report(messages: &[Value]) -> Value {
     }
     let records: Vec<Value> =
         view.visibility().records().map(|(id, v)| json!({"id": id.as_str(), "dismissed": v.dismissed, "version": v.version})).collect();
+    let mut live: Vec<_> = view.blocks().filter_map(|b| b.id.block().map(|id| (b.creation, id, b))).collect();
+    live.sort_by_key(|(creation, ..)| *creation);
+    let blocks: Vec<Value> = live
+        .iter()
+        .map(|(_, id, b)| {
+            json!({"id": id.as_str(), "kind": b.kind.as_str(), "dismissed": view.visibility().dismissed(id), "pending": b.pending})
+        })
+        .collect();
     json!({
         "events": events.len(),
         "lines": lines,
         "visibility": records,
+        "blocks": blocks,
         "live": view.live(),
         "log_overflow": overflow,
     })

@@ -21,6 +21,16 @@ the run's model. Then the task's user side, step by step (taskset.py):
   turn's end starts its own turn, and the harness follows it;
 - after each turn the desk settles on the session's history.
 
+**A dismissal** clicks the first block on the board as the desk draws it
+then: the session's history folded by cards-spec (`cards-eval fold`), its
+first live block, not dismissed already and not pending. Never a block the
+agent only tried to put: a refused put has no block, and a removed one is
+gone. Each is recorded as it went: `accepted` or `refused` by the desk, or
+`skipped` with why (no live block). The report counts the notices that
+then rode a message to the agent (report.py's notice probes). **A card
+answer** answers the last card the agent showed that's still showing: not
+one it closed since.
+
 Then the run's record: the session's events, its history, the fold report
 (`cards-eval fold`), what the user sent, every prompt the daemon raised
 (each denied: nothing in the eval asks), the requests the provider got,
@@ -138,7 +148,8 @@ class Runner:
         out = self.desk.send(conv, carry, body, s.messages())
         text = out["text"]
         (s.steer if steer else s.submit)(text)
-        rec["sent"].append({"carry": carry, "text": text, "notices": out.get("notices", []), "at_event": len(s.events)})
+        rec["sent"].append({"carry": carry, "text": text, "notices": out.get("notices", []), "ticket": out.get("ticket"),
+                            "at_event": len(s.events)})
 
     def turn(self, s, conv, starter, fires, rec):
         """One turn (module docs): its unfired steers, when it ended first.
@@ -205,33 +216,40 @@ class Runner:
 
     def fire(self, s, conv, f, rec, rounds):
         if "dismiss" in f:
-            block = _first_block(s.events)
+            history = s.messages()
+            block = live_block(helper(self.iso.cards_eval, "fold", json.dumps(history, ensure_ascii=False)))
             if block is None:
-                rec["steps"].append({"step": "dismiss", "round": rounds, "skipped": "no block put"})
+                rec["steps"].append({"step": "dismiss", "round": rounds, "outcome": "skipped", "skipped": "no live block"})
                 return
-            r = self.desk.dismiss(conv, block, s.messages())
-            rec["steps"].append({"step": "dismiss", "round": rounds, "id": block, "desk": r})
+            r = self.desk.dismiss(conv, block, history)
+            rec["steps"].append({"step": "dismiss", "round": rounds, "id": block, "desk": r,
+                                 "outcome": "accepted" if r.get("ok") else "refused"})
         else:
             rec["steps"].append({"step": "steer", "round": rounds})
             self.send(s, conv, "steer", f["steer"], rec, steer=True)
 
 
 def _last_card(events):
-    """The last card the agent showed: (its cards_ui input, its result)."""
+    """The last card the agent showed that it hasn't closed since: (its
+    cards_ui input, its result)."""
     last = None
     for c, result in turns.calls(events):
-        if c.name == "cards_ui" and result and result.startswith("Card c") and " is showing" in result:
+        if c.name != "cards_ui" or not result:
+            continue
+        if result.startswith("Card c") and " is showing" in result:
             last = (c.input, result)
+        elif last and isinstance(c.input, dict) and c.input.get("close") and last[1].startswith(f"Card {c.input['close']} ") \
+                and not result.startswith("Tool execution failed"):
+            last = None
     return last
 
 
-def _first_block(events):
-    """The first block id the agent put (the `first_block` a dismissal names)."""
-    for c, _ in turns.calls(events):
-        if c.name == BLOCK_TOOL and isinstance(c.input, dict):
-            for op in c.input.get("ops") or []:
-                if isinstance(op, dict) and op.get("op") == "put" and isinstance(op.get("id"), str):
-                    return op["id"]
+def live_block(board):
+    """The block a dismissal clicks (module docs): the first of `board`'s
+    live blocks (a `cards-eval fold` report) not dismissed and not pending."""
+    for b in board.get("blocks") or []:
+        if not b.get("dismissed") and not b.get("pending"):
+            return b["id"]
     return None
 
 
