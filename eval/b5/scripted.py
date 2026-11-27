@@ -38,7 +38,7 @@ CARDS = {
     "shelf-card-period": {"question": "How long should a loan be?", "options": ["14 days", "21 days", "28 days"]},
     "ledger-card-header": {"question": "Which header holds the amount?", "options": ["amount", "value", "total"]},
     "shelf-card-prefix": {"question": "How should search match?", "options": ["Whole words only", "Word prefixes too"]},
-    "ledger-card-zero": {"question": "Leave zero-balance accounts out of the trial balance?", "options": ["Yes, hide them", "No, keep them"]},
+    "ledger-card-zero": {"question": "Leave zero-balance accounts out of the trial balance?", "options": ["Show them", "Hide them"]},
 }
 SHORT_READ = {"ledger": "ledger/accounts.py", "shelf": "shelf/loans.py"}
 

@@ -24,6 +24,21 @@ class Shape(unittest.TestCase):
         runnable = [t for t in TASKS if not t["needs"]]
         self.assertGreaterEqual(sum(t["category"] == "interactive" for t in runnable), 5, "B5a runs ≥ 5 card tasks")
 
+    def test_every_card_answer_names_its_label_and_the_prompt_asks_for_it(self):
+        # The answer means one thing (cards-eval's policy): the label the
+        # check judges, which the prompt asks the agent to offer exactly.
+        cards = [t for t in TASKS if any("answer" in s for s in t["turns"])]
+        self.assertEqual(len(cards), 5)
+        for t in cards:
+            with self.subTest(task=t["id"]):
+                (pick,) = [s["answer"] for s in t["turns"] if "answer" in s]
+                self.assertEqual(set(pick), {"pick"})
+                for label in pick["pick"]:
+                    self.assertIn(f"`{label}`", t["turns"][0]["say"])
+                self.assertIn("exactly", t["turns"][0]["say"])
+        bad = [dict(cards[0], turns=[cards[0]["turns"][0], {"answer": {"prefer": ["hide"]}}])]
+        self.assertIn(f"{cards[0]['id']}: an answer names the labels it picks", taskset.problems(bad + TASKS[1:]))
+
     def test_the_set_is_frozen(self):
         self.assertEqual(taskset.digest(), taskset.FROZEN.read_text().split()[0],
                          "the task set changed: it is frozen (§2.8); a deliberate change updates tasks/set.sha256")

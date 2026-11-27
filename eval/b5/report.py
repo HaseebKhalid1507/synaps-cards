@@ -363,6 +363,8 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "skipped_paths_by_reason": _merge(r["skipped_paths_by_reason"] for r in on),
         "notices_delivered": sum(1 for rec in records for ln in rec["fold"]["lines"] if ln.get("did") == "notice"),
         "notice_probes": notice_probes(records),
+        "interaction_failures": [{"task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "why": s["skipped"]}
+                                 for rec in records for s in rec.get("steps", []) if s.get("interaction")],
         "latency_per_round": {arm: {"median": median(lat), "p90": p90(lat), "rounds": len(lat)}
                               for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},

@@ -69,6 +69,32 @@ class Calls(unittest.TestCase):
         self.assertIsNotNone(harness._last_card(w.done().events), "another card's close leaves it showing")
 
 
+class CardAnswer(unittest.TestCase):
+    """An answer the policy can't give (cards-eval: no option is the pick,
+    or two are) is an interaction failure: nothing is sent, and the step
+    and the report say so."""
+
+    def test_an_interaction_failure_sends_nothing_and_is_reported(self):
+        asked, orig = [], harness.helper
+        harness.helper = lambda cards_eval, cmd, payload: asked.append(payload) or {"error": "no option is ['Hide them']", "interaction": True}
+        try:
+            w = Wire().start()
+            w.results(w.round([("cards_ui", {"question": "Zeros?", "options": ["Omit them", "Keep them"]})]),
+                      "Card cabc123 is showing (cards/1 #1): Zeros?")
+            s = _Session([])
+            s.events = w.done().events
+            rec = {"steps": [], "sent": []}
+            left = harness.Runner(_Iso([]), "m", _Desk(), Path("/nonexistent")).turn(s, "j1", {"answer": {"pick": ["Hide them"]}}, [], rec)
+        finally:
+            harness.helper = orig
+        self.assertEqual((left, rec["sent"]), ([], []))
+        self.assertEqual(asked[0]["pick"], ["Hide them"])
+        self.assertEqual(rec["steps"], [{"step": "answer", "skipped": "no option is ['Hide them']", "interaction": True}])
+        r = dict(task="t", category="interactive", arm="on", repeat=1, events=[], fold={"lines": []}, judge={"pass": False}, **rec)
+        self.assertEqual(report.build([r], Chars(), 900, [], {"mode": "test"})["also"]["interaction_failures"],
+                         [{"task": "t", "arm": "on", "repeat": 1, "why": "no option is ['Hide them']"}])
+
+
 class _Desk(desk.StandIn):
     def __init__(self, refuse=None):
         super().__init__()

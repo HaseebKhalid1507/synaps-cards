@@ -163,9 +163,10 @@ class Runner:
             if card is None:
                 rec["steps"].append({"step": "answer", "skipped": "no card showing"})
                 return []
-            a = helper(self.iso.cards_eval, "answer", {"input": card[0], "result": card[1], "prefer": starter["answer"].get("prefer", [])})
+            want = starter["answer"]
+            a = helper(self.iso.cards_eval, "answer", {"input": card[0], "result": card[1], "pick": want["pick"], **({"fill": want["fill"]} if "fill" in want else {})})
             if "error" in a:
-                rec["steps"].append({"step": "answer", "skipped": a["error"]})
+                rec["steps"].append({"step": "answer", "skipped": a["error"], "interaction": bool(a.get("interaction"))})
                 return []
             rec["steps"].append({"step": "answer", "card": a.get("card"), "values": a.get("values")})
             self.send(s, conv, "answer", a["text"], rec)

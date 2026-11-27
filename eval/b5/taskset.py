@@ -20,8 +20,11 @@ workspace, then the task's seed edits (a bug put in on purpose). Its
   `after_round` rounds; the notice rides the user's next message, as the
   desk sends it (desk.py);
 - `answer`: once the session is idle, the user answers the card the agent
-  last showed, by the fixed policy (`cards-eval answer`), preferring
-  options that contain one of `prefer`;
+  last showed, by the fixed policy (`cards-eval answer`): the option whose
+  label is one of `pick`. The prompt asks the agent for exactly the labels
+  it may pick, so the answer means what the check judges. A card with no
+  such option, or two, is an interaction failure: nothing is sent, the step
+  says why, and the run is judged as it stands;
 - `hand_back`: the user edits a block and hands it back (D8), then the
   edit message starts a turn.
 
@@ -100,6 +103,9 @@ def problems(tasks, root=TASKS):
                 out.append(f"{where}: a step is one of {STEPS}: {s}")
             elif keys[0] in ("steer", "dismiss") and not isinstance(s.get("after_round"), int):
                 out.append(f"{where}: a {keys[0]} says after which round")
+            elif keys[0] == "answer" and not (isinstance(s["answer"].get("pick"), list) and s["answer"]["pick"]
+                                              and all(isinstance(p, str) and p.strip() for p in s["answer"]["pick"])):
+                out.append(f"{where}: an answer names the labels it picks")
             elif keys[0] == "hand_back" and "D8" not in t["needs"]:
                 out.append(f"{where}: a hand-back needs D8")
         c = t["check"]

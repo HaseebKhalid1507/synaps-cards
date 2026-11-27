@@ -42,7 +42,7 @@
 use cards_spec::block::{Author, Ref};
 use cards_spec::board::{Board, Did, Event, LOG_MAX, Logged, Outcome, Visibility};
 use cards_spec::message::{self, Reply};
-use cards_spec::{CardDoc, CardId, DefaultChoice, FieldKind, FieldValue, Input, parse_answer, parse_input};
+use cards_spec::{CardDoc, CardId, CardOption, FieldKind, FieldValue, Input, parse_answer, parse_input};
 use serde_json::{Map, Value, json};
 
 /// The messages of `history`: the daemon's `SessionQuery::Messages` value
@@ -186,26 +186,32 @@ pub fn receipt(input: &Value) -> Value {
 }
 
 /// The text without a note: an option's note prompt or a text field, when
-/// the task prefers nothing that fills it.
+/// the task gives no `fill`.
 pub const AS_YOU_SEE_FIT: &str = "As you see fit.";
 
 /// The user's answer to a card, by the eval's fixed policy (module docs of
 /// `eval/b5/harness.py`): `request` is `{"input": the cards_ui input,
-/// "result": its result, "prefer": [texts]}`. The card is the one the
-/// result names; the answer:
-/// - picks the first option whose label contains one of `prefer`
-///   (case-folded, `prefer` in order), else the card's default, else its
-///   first option; a multi-choice card picks that one alone;
-/// - fills a text field with the first of `prefer`, or its prefill if
-///   nothing is preferred, and ticks a check;
-/// - gives a picked option's note, when it asks one, the first of `prefer`.
+/// "result": its result, "pick": [labels], "fill": text}`. The task names
+/// the option it wants by its label (its prompt asks for exactly those
+/// labels), so the answer means one thing whatever the card's order or
+/// wording. The card is the one the result names; the answer:
+/// - picks the one option whose label is one of `pick` ([`label_is`]: case,
+///   outer quotes and backticks, trailing punctuation and spacing folded; a
+///   label that goes on past the pick after a space or a bracket counts, so
+///   `14 days (two weeks)` is `14 days`, but `Don't hide them` isn't
+///   `Hide them`). None, or more than one, is an **interaction failure**:
+///   `{"error": …, "interaction": true}`, never the card's default or its
+///   first option. A multi-choice card picks that one alone;
+/// - fills a text field with `fill`, else its prefill, else "As you see
+///   fit.", and ticks a check; a picked option's note gets `fill` too.
 ///
 /// cards-spec checks it against the card (`parse_answer`) and writes the
 /// message the desk sends (`message::build`). `{"text": …, "values": …}`,
 /// or `{"error": …}`.
 pub fn answer(request: &Value) -> Value {
-    let prefer: Vec<String> =
-        request["prefer"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let pick: Vec<String> =
+        request["pick"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let fill = request["fill"].as_str();
     let Some(card) = request["result"].as_str().and_then(card_of) else {
         return json!({"error": "the result names no card showing"});
     };
@@ -214,7 +220,10 @@ pub fn answer(request: &Value) -> Value {
         Ok(Input::Close(_)) => return json!({"error": "a close has no answer"}),
         Err(e) => return json!({"error": e.to_string()}),
     };
-    let values = values(&doc, &prefer);
+    let values = match values(&doc, &pick, fill) {
+        Ok(v) => v,
+        Err(e) => return json!({"error": e, "interaction": true}),
+    };
     match parse_answer(&doc, &values) {
         Ok(a) => json!({"text": message::build(&card, &doc, &Reply::Answer(a)), "values": values, "card": card.as_str()}),
         Err(e) => json!({"error": e.to_string(), "values": values}),
@@ -228,27 +237,40 @@ fn card_of(result: &str) -> Option<CardId> {
     tail.starts_with("is showing").then(|| CardId::parse(id)).flatten()
 }
 
-fn values(doc: &CardDoc, prefer: &[String]) -> Value {
+/// A label as the policy compares it: case-folded, spacing collapsed, outer
+/// quotes and backticks and trailing punctuation off.
+fn folded(s: &str) -> String {
+    let quote = |c: char| matches!(c, '`' | '"' | '\'' | '\u{201c}' | '\u{201d}' | '\u{2018}' | '\u{2019}');
+    let t = s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    t.trim_start_matches(quote).trim_end_matches(|c: char| quote(c) || matches!(c, '.' | ':' | ';' | '!')).trim().to_string()
+}
+
+/// Whether an option labelled `label` is the pick `pick` ([`answer`]): the
+/// same folded, or the pick and then more after a non-alphanumeric
+/// character.
+pub fn label_is(label: &str, pick: &str) -> bool {
+    let (l, p) = (folded(label), folded(pick));
+    !p.is_empty() && (l == p || l.strip_prefix(&p).is_some_and(|rest| rest.starts_with(|c: char| !c.is_alphanumeric())))
+}
+
+fn values(doc: &CardDoc, pick: &[String], fill: Option<&str>) -> Result<Value, String> {
     let mut out = Map::new();
-    let first = prefer.first().map(String::as_str);
+    let text = fill.unwrap_or(AS_YOU_SEE_FIT);
     if !doc.options.is_empty() {
-        let found = prefer.iter().find_map(|p| {
-            let p = p.to_lowercase();
-            doc.options.iter().find(|o| o.label.to_lowercase().contains(&p))
-        });
-        let picked = found
-            .or_else(|| {
-                let d = match doc.default.as_ref()? {
-                    DefaultChoice::One(l) => l,
-                    DefaultChoice::Many(ls) => ls.first()?,
-                };
-                doc.option(d)
-            })
-            .unwrap_or(&doc.options[0]);
+        let hits: Vec<_> = doc.options.iter().filter(|o| pick.iter().any(|p| label_is(&o.label, p))).collect();
+        let labels = |os: &[&CardOption]| os.iter().map(|o| o.label.clone()).collect::<Vec<_>>();
+        let picked = match hits.as_slice() {
+            [one] => *one,
+            [] => {
+                let all: Vec<_> = doc.options.iter().collect();
+                return Err(format!("no option is {pick:?}: the card offers {:?}", labels(&all)));
+            }
+            more => return Err(format!("{} options are {pick:?}: {:?}", more.len(), labels(more))),
+        };
         let label = Value::String(picked.label.clone());
         out.insert("choice".into(), if doc.multi { json!([label]) } else { label });
         if picked.note.is_some() {
-            out.insert("note".into(), json!(first.unwrap_or(AS_YOU_SEE_FIT)));
+            out.insert("note".into(), json!(text));
         }
     }
     if !doc.fields.is_empty() {
@@ -256,14 +278,14 @@ fn values(doc: &CardDoc, prefer: &[String]) -> Value {
         for f in &doc.fields {
             let v = match (&f.kind, &f.value) {
                 (FieldKind::Check, _) => json!(true),
-                (_, FieldValue::Text(t)) if first.is_none() && !t.is_empty() => json!(t),
-                _ => json!(first.unwrap_or(AS_YOU_SEE_FIT)),
+                (_, FieldValue::Text(t)) if fill.is_none() && !t.is_empty() => json!(t),
+                _ => json!(text),
             };
             fields.insert(f.id.clone(), v);
         }
         out.insert("fields".into(), Value::Object(fields));
     }
-    Value::Object(out)
+    Ok(Value::Object(out))
 }
 
 #[cfg(test)]

@@ -246,46 +246,83 @@ fn messages_reads_an_array_or_an_object() {
     assert_eq!(messages(&json!("no")), None);
 }
 
-fn ask(input: Value) -> Value {
+fn ask_for(input: Value, pick: &[&str]) -> Value {
     // The card's id as the extension shows it; any well-formed one will do.
-    answer(
-        &json!({"input": input, "result": "Card c4f9x2a is showing (cards/1 #0123456789abcdef). Options: …", "prefer": ["(12.50)", "after"]}),
-    )
+    answer(&json!({"input": input, "result": "Card c4f9x2a is showing (cards/1 #0123456789abcdef). Options: …", "pick": pick}))
 }
 
-/// The answer policy: the first preferred option, as cards-spec writes the
+fn ask(input: Value) -> Value {
+    ask_for(input, &["(12.50)"])
+}
+
+/// The answer policy: the option the task names, as cards-spec writes the
 /// message (its own `message::build`, after `parse_answer`).
 #[test]
-fn an_answer_picks_the_preferred_option() {
+fn an_answer_picks_the_option_the_task_names() {
     let a = ask(json!({"question": "Negatives as?", "options": ["-12.50", "(12.50)"]}));
     assert_eq!(a["values"], json!({"choice": "(12.50)"}));
     let text = a["text"].as_str().unwrap();
     assert!(text.starts_with("[card c4f9x2a] Negatives as? → (12.50)\n"), "{text}");
     assert_eq!(text.lines().nth(1), Some(r#"{"choice":"(12.50)"}"#));
-}
-
-#[test]
-fn with_nothing_preferred_the_default_then_the_first() {
-    let d = ask(json!({"question": "Q", "options": ["a", "b"], "default": "b"}));
-    assert_eq!(d["values"], json!({"choice": "b"}));
-    let f = ask(json!({"question": "Q", "options": ["a", "b"]}));
-    assert_eq!(f["values"], json!({"choice": "a"}));
-    let m = ask(json!({"question": "Q", "options": ["before", "after"], "multi": true}));
+    let m = ask_for(json!({"question": "Q", "options": ["before", "after"], "multi": true}), &["after"]);
     assert_eq!(m["values"], json!({"choice": ["after"]}));
 }
 
+/// Shady's case: the old policy took the first label containing "hide",
+/// "Don't hide zero-balance accounts". Negation and order change nothing.
 #[test]
-fn fields_take_the_first_preference_and_checks_are_ticked() {
-    let a = ask(json!({"question": "Q", "fields": [{"id": "where", "label": "Where"}, {"id": "ok", "label": "OK?", "type": "check"}]}));
-    assert_eq!(a["values"], json!({"fields": {"where": "(12.50)", "ok": true}}));
-    assert!(a["text"].as_str().unwrap().contains("Where: (12.50) · OK?: yes"));
+fn a_negation_or_another_order_never_picks_the_opposite() {
+    for options in [["Don't hide zero-balance accounts", "Hide zero-balance accounts"], ["Hide zero-balance accounts", "Don't hide zero-balance accounts"]] {
+        let a = ask_for(json!({"question": "Zeros?", "options": options}), &["Hide zero-balance accounts"]);
+        assert_eq!(a["values"], json!({"choice": "Hide zero-balance accounts"}), "{options:?}");
+    }
+}
+
+#[test]
+fn a_label_is_compared_folded_and_may_go_on_after_the_pick() {
+    for (label, pick, is) in [
+        ("`Hide them.`", "Hide them", true),
+        ("HIDE  them", "hide them", true),
+        ("Hide them (recommended)", "Hide them", true),
+        ("14 days — two weeks", "14 days", true),
+        ("Hide", "Hide them", false),
+        ("140 days", "14", false),
+        ("Hide themes", "Hide them", false),
+        ("Don't hide them", "Hide them", false),
+        ("anything", "", false),
+    ] {
+        assert_eq!(label_is(label, pick), is, "{label:?} is {pick:?}");
+    }
+}
+
+/// None or two options that are the pick: an interaction failure, never
+/// the card's default or its first option.
+#[test]
+fn no_match_or_two_matches_is_an_interaction_failure() {
+    let none = ask_for(json!({"question": "Zeros?", "options": ["Omit them", "Keep them"], "default": "Keep them"}), &["Hide them"]);
+    assert_eq!(none["interaction"], true, "{none}");
+    assert!(none["error"].as_str().unwrap().contains(r#"the card offers ["Omit them", "Keep them"]"#), "{none}");
+    assert!(none.get("text").is_none());
+    let two = ask_for(json!({"question": "Zeros?", "options": ["Hide them", "Hide them all"]}), &["Hide them"]);
+    assert_eq!(two["interaction"], true, "{two}");
+    assert!(two["error"].as_str().unwrap().starts_with("2 options are"), "{two}");
+}
+
+#[test]
+fn fields_take_the_fill_and_checks_are_ticked() {
+    let card = json!({"question": "Q", "fields": [{"id": "where", "label": "Where"}, {"id": "ok", "label": "OK?", "type": "check"}]});
+    let a = answer(&json!({"input": card, "result": "Card c4f9x2a is showing (cards/1 #0123456789abcdef).", "fill": "Here"}));
+    assert_eq!(a["values"], json!({"fields": {"where": "Here", "ok": true}}));
+    assert!(a["text"].as_str().unwrap().contains("Where: Here · OK?: yes"));
+    let b = answer(&json!({"input": card, "result": "Card c4f9x2a is showing (cards/1 #0123456789abcdef)."}));
+    assert_eq!(b["values"]["fields"]["where"], AS_YOU_SEE_FIT);
 }
 
 #[test]
 fn a_result_that_shows_no_card_has_no_answer() {
-    let a = answer(&json!({"input": {"question": "Q", "options": ["a"]}, "result": "cards_ui: refused", "prefer": []}));
+    let a = answer(&json!({"input": {"question": "Q", "options": ["a"]}, "result": "cards_ui: refused", "pick": ["a"]}));
     assert!(a["error"].is_string());
-    let c = answer(&json!({"input": {"close": "c4f9x2a"}, "result": "Card c4f9x2a is showing", "prefer": []}));
+    let c = answer(&json!({"input": {"close": "c4f9x2a"}, "result": "Card c4f9x2a is showing", "pick": []}));
     assert!(c["error"].is_string());
 }
 

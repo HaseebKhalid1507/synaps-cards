@@ -755,13 +755,12 @@
       "seed": [],
       "turns": [
         {
-          "say": "I'd like negative amounts printed differently. Before you change anything, ask me with a card whether `money.format` should print negatives as `-12.50` or `(12.50)`. Then make it print what I pick, and update or add the tests."
+          "say": "I'd like negative amounts printed differently. Before you change anything, ask me with a card whether `money.format` should print negatives as `-12.50` or `(12.50)`, with exactly those two options, labelled `-12.50` and `(12.50)`. Then make it print what I pick, and update or add the tests."
         },
         {
           "answer": {
-            "prefer": [
-              "(12.50)",
-              "parenthes"
+            "pick": [
+              "(12.50)"
             ]
           }
         }
@@ -780,12 +779,12 @@
       "seed": [],
       "turns": [
         {
-          "say": "Ask me with a card how long a loan should be: 14, 21 or 28 days. Then change it to what I pick, and update the tests."
+          "say": "Ask me with a card how long a loan should be, with exactly the options `14 days`, `21 days` and `28 days`. Then change it to what I pick, and update the tests."
         },
         {
           "answer": {
-            "prefer": [
-              "14"
+            "pick": [
+              "14 days"
             ]
           }
         }
@@ -804,11 +803,11 @@
       "seed": [],
       "turns": [
         {
-          "say": "Our bank names the amount column differently. Ask me with a card which header it uses (offer `amount`, `value` and `total`), then make the importer accept that header for the amount, while files with `amount` keep working. Add a test."
+          "say": "Our bank names the amount column differently. Ask me with a card which header it uses, with exactly the options `amount`, `value` and `total`, then make the importer accept that header for the amount, while files with `amount` keep working. Add a test."
         },
         {
           "answer": {
-            "prefer": [
+            "pick": [
               "value"
             ]
           }
@@ -828,12 +827,12 @@
       "seed": [],
       "turns": [
         {
-          "say": "Ask me with a card whether search should match whole words only, or word prefixes too (so `gard` finds \"The Quiet Garden\"). Then implement what I pick, and update the tests if their results change."
+          "say": "Ask me with a card whether search should match whole words only, or word prefixes too (so `gard` finds \"The Quiet Garden\"), with exactly the options `Whole words only` and `Word prefixes too`. Then implement what I pick, and update the tests if their results change."
         },
         {
           "answer": {
-            "prefer": [
-              "prefix"
+            "pick": [
+              "Word prefixes too"
             ]
           }
         }
@@ -852,17 +851,12 @@
       "seed": [],
       "turns": [
         {
-          "say": "Ask me with a card whether the trial balance should leave out accounts whose balance is zero. Implement what I pick, and adjust the tests."
+          "say": "Ask me with a card whether the trial balance should leave out accounts whose balance is zero, with exactly the options `Hide them` and `Show them`. Implement what I pick, and adjust the tests."
         },
         {
           "answer": {
-            "prefer": [
-              "hide",
-              "omit",
-              "exclude",
-              "skip",
-              "leave out",
-              "yes"
+            "pick": [
+              "Hide them"
             ]
           }
         }
