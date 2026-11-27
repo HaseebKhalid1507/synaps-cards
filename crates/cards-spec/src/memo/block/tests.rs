@@ -703,7 +703,7 @@ fn a_resend_click_on_a_view_with_ours_queued_sends_nothing() {
     d.lands(&t);
     let covering = theirs(&d, set("steps.bandaid.state", json!("todo")));
     d.lands(&covering);
-    assert_eq!((d.resend_on(Some(&t), false), d.retired()), (Resend::No, Some(Retired::Elsewhere)), "rule 2");
+    assert_eq!((d.resend_on(Some(&t), false), d.state(), d.retired()), (Resend::No, Some(State::InChat), Some(Retired::Elsewhere)), "rule 2");
 
     let mut d = Desk::new();
     d.unconfirmed();
@@ -785,6 +785,16 @@ fn a_block_replaced_keeps_the_entry_with_no_resend() {
     let s = q.board();
     let outcome = s.outcomes().last().unwrap();
     assert_eq!(outcome.result, board::EditResult::Rewritten, "the board: not applied");
+    // The new incarnation's entry: an edit of the old one, landing late,
+    // covers every key of it, and isn't of its incarnation.
+    let (old_tag, _) = Desk::new().live(PLAN);
+    let late = Edit::new(r(PLAN), 1, old_tag, &json!({"set": {"steps.bandaid.state": "skipped", "steps.fix.label": "Old"}})).unwrap();
+    let late = message::build(&late, &Summary { title: None, back_to: None, pieces: vec!["late"] }).unwrap();
+    q.lands(&late);
+    q.on(Event::Idle);
+    q.settles();
+    let now = q.memo.entries().last().unwrap();
+    assert_eq!((now.retired, now.of), (None, q.live(PLAN).0), "another incarnation's edit covers nothing of this one");
 
     let mut u = Desk::new();
     u.unconfirmed();
@@ -1246,7 +1256,7 @@ fn a_memo_full_of_recoverable_entries() {
     assert_eq!(d.memo.entries().len(), CAP);
     assert!(d.memo.entries().iter().all(Entry::recoverable));
     assert!(!d.memo.may_hand_back(), "Hand back is off");
-    assert_eq!(FULL, "32 edits not confirmed · resend or discard one");
+    assert_eq!((CAP, FULL), (32, "32 edits not confirmed · resend or discard one"), "§1.8");
     let before = d.memo.entries().to_vec();
     assert_eq!(d.hand_back(set(&key(CAP), value(CAP))), Err(Refusal::Full));
     assert_eq!(d.memo.entries(), before.as_slice(), "nothing evicted");
@@ -1395,5 +1405,50 @@ fn an_entry_keeps_at_most_seen_max_digests() {
     }
     d.hand_back(skip("bandaid")).unwrap();
     let seen = &d.entry().unwrap().seen;
-    assert_eq!((seen.n, seen.last.len()), (3 * SEEN_MAX, SEEN_MAX));
+    assert_eq!((SEEN_MAX, seen.n, seen.last.len()), (8, 3 * SEEN_MAX, SEEN_MAX));
+}
+
+/// The history differs from what was seen below the kept digests, yet is
+/// as long: the chain says so, and ours is matched anywhere, not taken for
+/// one of the edits it had seen.
+#[test]
+fn the_seen_chain_catches_a_history_that_differs_below_the_kept_digests() {
+    let n = SEEN_MAX + 2;
+    let mut d = Desk::new();
+    for i in 0..n {
+        let t = theirs(&d, set("steps.test.label", json!(format!("Test {i}"))));
+        d.lands(&t);
+    }
+    let t = d.queued(false);
+    // A rollback to before them all; then another edit, ours, and another:
+    // three, past the two the chain covers, ours below the kept digests.
+    let first = d.history.iter().position(|e| matches!(e, Event2::User { .. })).unwrap();
+    d.history.truncate(first);
+    let o = theirs(&d, set("steps.fix.label", json!("Fix 0")));
+    d.lands(&o);
+    d.lands(&t);
+    let o = theirs(&d, set("steps.fix.label", json!("Fix 1")));
+    d.lands(&o);
+    let skip = n - SEEN_MAX;
+    assert_eq!((d.history.iter().filter(|e| matches!(e, Event2::User { .. })).count(), skip), (3, 2));
+    d.settles();
+    assert_eq!(d.state(), Some(State::InChat), "ours, wherever it is");
+}
+
+/// Within the kept digests, an edit in place of one it had seen is one it
+/// never saw: covering ours, it retires it.
+#[test]
+fn an_edit_in_place_of_one_seen_is_unknown() {
+    let mut d = Desk::new();
+    for i in 0..3 {
+        let t = theirs(&d, set("steps.test.label", json!(format!("Test {i}"))));
+        d.lands(&t);
+    }
+    d.queued(false);
+    d.history.pop();
+    let covering = theirs(&d, skip("bandaid"));
+    d.lands(&covering);
+    d.on(Event::Idle);
+    d.settles();
+    assert_eq!(d.retired(), Some(Retired::Elsewhere), "as long as what was seen, and not it");
 }
