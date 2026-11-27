@@ -64,12 +64,34 @@ class Checks(unittest.TestCase):
                 after = taskset.judge(t, d)
                 self.assertTrue(after["pass"], f"{t['id']}: the reference solution fails: {after['detail']}")
 
-    def test_every_expect_matches_its_reference_and_not_nothing(self):
-        for t in TASKS:
-            if "expect" in t["check"]:
-                with self.subTest(task=t["id"]):
-                    self.assertTrue(taskset.judge(t, text=t["check"]["reference"])["pass"])
-                    self.assertFalse(taskset.judge(t, text="")["pass"])
+    def test_every_expect_passes_its_reference_and_refuses_its_wrong_answers(self):
+        # Shady's: `nt-names` and `nt-haiku` took "I refuse.", `nt-half-even`
+        # a wrong explanation, `ledger-q-debit` every account kind.
+        refusals = ["", "I refuse.", "I can't answer that without running the code.", "Sorry, I don't know."]
+        expects = [t for t in TASKS if "expect" in t["check"]]
+        self.assertEqual(len(expects), 15)
+        for t in expects:
+            with self.subTest(task=t["id"]):
+                c = t["check"]
+                self.assertTrue(taskset.judge(t, text=c["reference"])["pass"], c["reference"])
+                self.assertGreaterEqual(len(c["wrong"]), 3)
+                for w in c["wrong"] + refusals:
+                    self.assertFalse(taskset.judge(t, text=w)["pass"], f"{w!r} passed")
+
+    def test_a_right_answer_in_its_usual_dress_passes(self):
+        by = {t["id"]: t for t in TASKS}
+        for tid, text in (("ledger-q-split", "`[34, 33, 33]`"), ("ledger-q-kinds", "- asset\n- liability\n- equity\n- income\n- expense"),
+                          ("ledger-q-kinds", "Assets, liabilities, equity, income and expenses."), ("shelf-q-book", "`shelf/models.py`"),
+                          ("ledger-q-tests", "12."), ("nt-half-even", "0, 2, 2, 4"), ("nt-sort", "apple, apricot, banana, pear."),
+                          ("nt-double-entry", "debit: Office supplies (expense), credit: Cash"), ("ledger-q-debit", "1. Asset\n2. Expense")):
+            with self.subTest(task=tid, text=text):
+                self.assertTrue(taskset.judge(by[tid], text=text)["pass"], taskset.judge(by[tid], text=text))
+
+    def test_numbers_and_items_are_read_as_the_docs_say(self):
+        self.assertEqual(taskset.numbers("978-0-306-40615-7"), [978, 0, 306, 40615, 7])
+        self.assertEqual(taskset.numbers("-2, 0.5 and 12."), [-2, 0.5, 12])
+        self.assertEqual(taskset.items("1. `asset`\n2) expense."), ["asset", "expense"])
+        self.assertEqual(taskset.items("standard and expense; 'x'"), ["standard", "expense", "x"])
 
     def test_the_counted_answers_are_the_workspaces(self):
         # The short tasks that ask for a count: the count their workspace's suite gives.

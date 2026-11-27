@@ -33,8 +33,23 @@ workspace, then the task's seed edits (a bug put in on purpose). Its
   (`checks/<id>.py`, copied in as `tests/test_b5_check.py` after the run)
   all pass: `python3 -m unittest` exits 0, compiled from source (no
   bytecode the run left is read);
-- `expect`: the text of the task's last turn matches every pattern in
-  `all` and one in `any` (case-folded).
+- `expect`: the text of the task's last turn, `answer` (the final text,
+  case-folded), is checked by every rule the task gives, all of which must
+  hold. Each task's answer is deterministic: a number, a list or a fixed
+  form, so a refusal, a wrong value or an over-inclusive list fails:
+  - `numbers`: the numbers in the answer (`NUMBER`: an integer or a
+    decimal, a minus sign only where no word or digit is glued before it)
+    are exactly these, in order;
+  - `items`: the answer is a list (split at commas, semicolons, new lines
+    and a lone "and"; each item without its bullet, numbering, quotes,
+    backticks and outer punctuation) whose items match these patterns one
+    to one: none missing, none extra, none matched twice; in this order
+    if `ordered`;
+  - `all`, `none`: every pattern of `all` is found in the answer, and none
+    of `none`.
+  Every task also freezes `reference`, a right answer, and `wrong`, wrong
+  answers its judge must refuse; tests/test_taskset.py holds both, and a
+  few refusals, to the judge.
 
 **`needs`** names what a task waits for: `D8` (take, edit, hand back). B5a
 marks such a task "needs D8, not run"; B5b runs it unchanged.
@@ -56,6 +71,10 @@ CATEGORIES = {"coding": 20, "short": 10, "no_tool": 5, "interactive": 5}  # §2.
 STEPS = ("say", "steer", "dismiss", "answer", "hand_back")
 NEEDS = ("D8",)
 CHECK_NAME = "test_b5_check.py"
+EXPECT = {"numbers", "items", "ordered", "all", "none"}
+NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
+ITEM_SPLIT = re.compile(r"[,;\n]|\band\b")
+ITEM_EDGE = re.compile(r"^(?:\s|[-*•]|\d+[.)]\s)*[\s`'\"“”‘’(\[]*|[\s`'\"“”‘’)\].:!]*$")
 
 
 def load(path=SET):
@@ -111,8 +130,8 @@ def problems(tasks, root=TASKS):
         c = t["check"]
         if "tests" in c and not (root / c["tests"]).is_file():
             out.append(f"{where}: no check {c['tests']}")
-        if "expect" in c and not set(c["expect"]) <= {"all", "any"}:
-            out.append(f"{where}: an expect has all and any")
+        if "expect" in c and (not c["expect"] or not set(c["expect"]) <= EXPECT or not c.get("reference") or not c.get("wrong")):
+            out.append(f"{where}: an expect has {', '.join(sorted(EXPECT))}, a reference and wrong answers")
         if t["category"] == "coding" and "tests" not in c:
             out.append(f"{where}: a coding task is judged by tests")
     return out
@@ -170,7 +189,32 @@ def judge(task, workspace=None, text="", root=TASKS, timeout=120):
             finally:
                 (ws / "tests" / CHECK_NAME).unlink(missing_ok=True)
         return {"pass": ok, "how": "tests", "detail": detail}
-    e = c["expect"]
-    found = lambda p: re.search(p, text, re.IGNORECASE | re.DOTALL) is not None  # noqa: E731
-    ok = all(found(p) for p in e.get("all", [])) and (not e.get("any") or any(found(p) for p in e["any"]))
-    return {"pass": ok, "how": "expect", "detail": text[-400:]}
+    why = expect(c["expect"], text)
+    return {"pass": not why, "how": "expect", "detail": text[-400:], **({"why": why} if why else {})}
+
+
+def numbers(text):
+    return [float(x) for x in NUMBER.findall(text)]
+
+
+def items(text):
+    return [s for s in (ITEM_EDGE.sub("", x).strip().casefold() for x in ITEM_SPLIT.split(text)) if s]
+
+
+def expect(e, text):
+    """Why `text` fails the rules `e` (module docs): empty when it passes."""
+    out, low = [], text.casefold()
+    if "numbers" in e and numbers(text) != [float(x) for x in e["numbers"]]:
+        out.append(f"numbers {numbers(text)}, not {e['numbers']}")
+    if "items" in e:
+        got, pats = items(text), [re.compile(p, re.IGNORECASE) for p in e["items"]]
+        if e.get("ordered"):
+            ok = len(got) == len(pats) and all(p.fullmatch(g) for p, g in zip(pats, got))
+        else:
+            ok = len(got) == len(pats) and all(sum(bool(p.fullmatch(g)) for g in got) == 1 for p in pats) \
+                and all(sum(bool(p.fullmatch(g)) for p in pats) == 1 for g in got)
+        if not ok:
+            out.append(f"items {got}")
+    out += [f"no {p!r}" for p in e.get("all", []) if not re.search(p, low, re.IGNORECASE | re.DOTALL)]
+    out += [f"has {p!r}" for p in e.get("none", []) if re.search(p, low, re.IGNORECASE | re.DOTALL)]
+    return out

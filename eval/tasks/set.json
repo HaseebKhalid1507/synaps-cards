@@ -436,15 +436,22 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "asset",
-            "liabilit",
+          "items": [
+            "assets?",
+            "liabilit(y|ies)",
             "equity",
             "income",
-            "expense"
+            "expenses?"
           ]
         },
-        "reference": "asset, liability, equity, income, expense"
+        "reference": "asset, liability, equity, income, expense",
+        "wrong": [
+          "asset, liability, equity, income",
+          "asset, liability, equity, income, expense, revenue",
+          "assets and liabilities",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -461,11 +468,20 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "34,\\s*33,\\s*33"
+          "numbers": [
+            34,
+            33,
+            33
           ]
         },
-        "reference": "[34, 33, 33]"
+        "reference": "[34, 33, 33]",
+        "wrong": [
+          "[33, 33, 34]",
+          "[33, 33, 33]",
+          "[34, 33, 33, 0]",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -482,11 +498,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\b12\\b"
+          "numbers": [
+            12
           ]
         },
-        "reference": "12"
+        "reference": "12",
+        "wrong": [
+          "13",
+          "12 of 13",
+          "Ran 12 tests in 0.004s",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -503,11 +526,23 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "entry.*date.*memo.*account.*amount"
-          ]
+          "items": [
+            "entry",
+            "date",
+            "memo",
+            "account",
+            "amount"
+          ],
+          "ordered": true
         },
-        "reference": "entry, date, memo, account, amount"
+        "reference": "entry, date, memo, account, amount",
+        "wrong": [
+          "date, entry, memo, account, amount",
+          "entry, date, memo, account",
+          "entry, date, memo, account, amount, currency",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -524,12 +559,19 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "asset",
-            "expense"
+          "items": [
+            "assets?",
+            "expenses?"
           ]
         },
-        "reference": "asset, expense"
+        "reference": "asset, expense",
+        "wrong": [
+          "asset, liability, equity, income, expense",
+          "asset",
+          "liability, equity",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -546,11 +588,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\b21\\b"
+          "numbers": [
+            21
           ]
         },
-        "reference": "21"
+        "reference": "21",
+        "wrong": [
+          "20",
+          "21 or 28",
+          "3 weeks",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -567,11 +616,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\b25\\b"
+          "numbers": [
+            25
           ]
         },
-        "reference": "25"
+        "reference": "25",
+        "wrong": [
+          "0.25",
+          "25 or 50",
+          "10",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -588,11 +644,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\b3\\b"
+          "numbers": [
+            3
           ]
         },
-        "reference": "3"
+        "reference": "3",
+        "wrong": [
+          "5",
+          "3 to 5",
+          "unlimited",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -609,11 +672,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "models\\.py"
+          "items": [
+            "shelf/models\\.py"
           ]
         },
-        "reference": "shelf/models.py"
+        "reference": "shelf/models.py",
+        "wrong": [
+          "shelf/loans.py",
+          "shelf/models.py, shelf/loans.py",
+          "models",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -630,11 +700,18 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\b9\\b"
+          "numbers": [
+            9
           ]
         },
-        "reference": "9"
+        "reference": "9",
+        "wrong": [
+          "10",
+          "9 of 10",
+          "all of them",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -646,16 +723,26 @@
       "seed": [],
       "turns": [
         {
-          "say": "Without using any tools: explain banker's rounding (round half to even) in two sentences."
+          "say": "Without using any tools: round 0.5, 1.5, 2.5 and 3.5 to whole numbers by round half to even (banker's rounding). Answer with the four results only, comma-separated."
         }
       ],
       "check": {
         "expect": {
-          "all": [
-            "even"
+          "numbers": [
+            0,
+            2,
+            2,
+            4
           ]
         },
-        "reference": "Halves round to the nearest even digit."
+        "reference": "0, 2, 2, 4",
+        "wrong": [
+          "1, 2, 3, 4",
+          "0, 2, 2",
+          "0, 1, 2, 3",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -667,21 +754,32 @@
       "seed": [],
       "turns": [
         {
-          "say": "Without using any tools: what is double-entry bookkeeping? Three sentences at most."
+          "say": "Without using any tools: in double-entry bookkeeping, a 50.00 cash purchase of office supplies (an expense) is one entry of two lines. Which account is debited and which is credited? Answer exactly as `debit: ACCOUNT, credit: ACCOUNT`."
         }
       ],
       "check": {
         "expect": {
-          "any": [
-            "debit",
-            "credit"
+          "all": [
+            "debit\\W+[^,\\n]*(suppl|expense)",
+            "credit\\W+[^,\\n]*cash"
+          ],
+          "none": [
+            "debit\\W+[^,\\n]*cash",
+            "credit\\W+[^,\\n]*(suppl|expense)"
           ]
         },
-        "reference": "Every entry debits one account and credits another."
+        "reference": "debit: Office supplies, credit: Cash",
+        "wrong": [
+          "debit: Cash, credit: Office supplies",
+          "debit: Office supplies",
+          "debit: Cash, credit: Cash",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
-      "id": "nt-names",
+      "id": "nt-sort",
       "category": "no_tool",
       "kind": "question",
       "workspace": "ledger",
@@ -689,16 +787,27 @@
       "seed": [],
       "turns": [
         {
-          "say": "Without using any tools: suggest three names for a function that splits an amount of money into parts."
+          "say": "Without using any tools: sort these words as a case-insensitive dictionary would: pear, Apple, banana, apricot. Answer with the sorted words only, comma-separated."
         }
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\S"
-          ]
+          "items": [
+            "apple",
+            "apricot",
+            "banana",
+            "pear"
+          ],
+          "ordered": true
         },
-        "reference": "allocate, apportion, divide_amount"
+        "reference": "apple, apricot, banana, pear",
+        "wrong": [
+          "Apple, apricot, pear, banana",
+          "apricot, apple, banana, pear",
+          "apple, apricot, banana",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
@@ -710,23 +819,27 @@
       "seed": [],
       "turns": [
         {
-          "say": "Without using any tools, from memory: how is an ISBN-13's check digit computed?"
+          "say": "Without using any tools, from memory of how ISBN-13 check digits work: what is the check digit of the ISBN-13 that begins 978-0-306-40615? The digit only."
         }
       ],
       "check": {
         "expect": {
-          "any": [
-            "weight",
-            "mod",
-            "1\\D+3",
-            "alternat"
+          "numbers": [
+            7
           ]
         },
-        "reference": "Weights 1 and 3 alternate; the check digit makes the sum a multiple of 10 (mod 10)."
+        "reference": "7",
+        "wrong": [
+          "3",
+          "978-0-306-40615-7",
+          "7 or 3",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
-      "id": "nt-haiku",
+      "id": "nt-days",
       "category": "no_tool",
       "kind": "question",
       "workspace": "shelf",
@@ -734,16 +847,23 @@
       "seed": [],
       "turns": [
         {
-          "say": "Without using any tools: write a haiku about an overdue library book."
+          "say": "Without using any tools: a library loan starts on 2026-03-01 and is due on 2026-03-22. How many days long is the loan? The number only."
         }
       ],
       "check": {
         "expect": {
-          "all": [
-            "\\S"
+          "numbers": [
+            21
           ]
         },
-        "reference": "Pages wait in dust"
+        "reference": "21",
+        "wrong": [
+          "22",
+          "20",
+          "three weeks",
+          "I refuse.",
+          "I can't tell without running the code."
+        ]
       }
     },
     {
