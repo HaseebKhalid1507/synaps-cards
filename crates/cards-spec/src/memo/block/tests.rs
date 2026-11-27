@@ -270,6 +270,17 @@ fn an_edit_echoed_then_in_the_history_is_in_the_chat() {
     assert_eq!((d.state(), d.memo.entries().len()), (Some(State::Sending), 2));
     assert_eq!(d.entry().unwrap().seen.n, 1, "it has seen the first");
     assert!(t2.starts_with("[block plan edited r2] "), "{t2}");
+    // Retired is settled for good: the covering edit landing, then a
+    // rollback of both, move nothing of it.
+    let here = Some((State::InChat, Some(Retired::Here)));
+    d.lands(&t2);
+    d.settles();
+    assert_eq!(d.memo.get(&first).map(|e| (e.state, e.retired)), here, "still this desk's");
+    d.history.truncate(d.history.len() - 2);
+    d.on(Event::Attached);
+    d.settles();
+    d.after(30);
+    assert_eq!(d.memo.get(&first).map(|e| (e.state, e.retired)), here, "no view, event or clock moves it");
 }
 
 /// One edit in flight per incarnation; none to an incarnation that isn't
@@ -569,6 +580,8 @@ fn our_first_sighting_keeps_the_entry_and_a_covering_edit_retires_it() {
     e.view(false, None, true);
     assert_eq!((e.state(), e.retired()), (Some(State::Queued), Some(Retired::Elsewhere)));
     assert!(!e.may_resend());
+    assert!(e.memo.in_flight(&r(PLAN), &e.live(PLAN).0).is_none(), "retired: not in flight");
+    assert!(e.hand_back(skip("deploy")).is_ok(), "the block takes a hand-back");
 
     let mut q = Desk::new();
     let t = q.queued(false);
@@ -703,7 +716,11 @@ fn a_resend_click_on_a_view_with_ours_queued_sends_nothing() {
     d.lands(&t);
     let covering = theirs(&d, set("steps.bandaid.state", json!("todo")));
     d.lands(&covering);
-    assert_eq!((d.resend_on(Some(&t), false), d.state(), d.retired()), (Resend::No, Some(State::InChat), Some(Retired::Elsewhere)), "rule 2");
+    assert_eq!(
+        (d.resend_on(Some(&t), false), d.state(), d.retired()),
+        (Resend::No, Some(State::InChat), Some(Retired::Elsewhere)),
+        "rule 2"
+    );
 
     let mut d = Desk::new();
     d.unconfirmed();
@@ -1451,4 +1468,28 @@ fn an_edit_in_place_of_one_seen_is_unknown() {
     d.on(Event::Idle);
     d.settles();
     assert_eq!(d.retired(), Some(Retired::Elsewhere), "as long as what was seen, and not it");
+}
+
+/// The card memo keeps its own rule (§3.7, "Bounds"): a card's answer is
+/// its whole text, so a notice line after it makes another message.
+#[test]
+fn a_cards_answer_is_still_matched_by_its_whole_text() {
+    use crate::fold::{self, Event as F};
+    use crate::{CardId, Envelope, Input, Reply, parse_answer, parse_input};
+    let ask = json!({"question": "Which approach?", "options": ["Refactor", "Rewrite"]});
+    let Input::Create { doc, wait } = parse_input(&ask).unwrap() else { unreachable!() };
+    let id = CardId::parse("c4f9x2a").unwrap();
+    let line = Envelope::showing(id.clone(), &doc, wait).to_string();
+    let f = fold::fold(&[
+        F::Call { tool_id: "t1".into(), name: "cards_ui".into(), input: ask },
+        F::Result { tool_id: "t1".into(), text: line },
+    ]);
+    let mut m = super::super::Memo::default();
+    let now = Instant::now();
+    let reply = Reply::Answer(parse_answer(&doc, &json!({"choice": "Rewrite"})).unwrap());
+    let t = m.press(f.bound(&id).unwrap(), reply, now).unwrap();
+    m.on(Event::Echo { text: &format!("{t}{}", trailer(1).text()), driver: false }, now);
+    assert_eq!(m.get(&id).unwrap().state, State::Sending, "with a notice line, another message");
+    m.on(Event::Echo { text: &t, driver: false }, now);
+    assert_eq!(m.get(&id).unwrap().state, State::Queued);
 }
