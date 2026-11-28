@@ -202,6 +202,19 @@ class Record(unittest.TestCase):
         self.assertEqual(also["wire_interval_per_round"]["on"]["rounds"], 1)
 
 
+class BlockOnly(unittest.TestCase):
+    def test_every_block_only_round_is_reported_beside_the_closing_ones(self):
+        rows = [dict(row("a", "on", 1, closing=1), block_only_rounds=3), dict(row("b", "on", 1), block_only_rounds=0), row("a", "off", 1)]
+        recs = [{"task": t, "arm": a, "repeat": 1, "fold": {"lines": []}, "judge": {"pass": True}} for t, a in (("a", "on"), ("b", "on"), ("a", "off"))]
+        orig = report.per_turn
+        report.per_turn = lambda rec, counter: ([r for r in rows if (r["task"], r["arm"]) == (rec["task"], rec["arm"])], [])
+        try:
+            also = report.build(recs, _Counter(), 900, [], {"mode": "test"})["also"]
+        finally:
+            report.per_turn = orig
+        self.assertEqual(also["block_only_rounds"], {"rounds": 3, "closing": 1, "turns_with": 1, "turns": 2})
+
+
 class _Desk(desk.StandIn):
     def __init__(self, refuse=None):
         super().__init__()

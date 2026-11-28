@@ -190,6 +190,17 @@ class Classifier(unittest.TestCase):
         w.round(text="Fixed.")
         self.assertEqual(closing(one(w.done())).closing_rounds, 2)
 
+    def test_a_block_only_response_before_another_tool_is_no_closing_round_but_is_counted(self):
+        # Shady's trace (review #14): real tool, block-only, `bash true`, final text.
+        w = Wire().start()
+        w.results(w.round([("read", {})]))
+        w.results(w.round([("cards_block", BLOCK)]))
+        w.results(w.round([("bash", {"command": "true"})]))
+        w.round(text="Fixed.")
+        t = one(w.done())
+        self.assertEqual(closing(t).closing_rounds, 0)
+        self.assertEqual([r.block_only for r in t.rounds], [False, True, False, False])
+
     def test_a_card_is_the_turns_work(self):
         w = Wire().start()
         w.results(w.round([("cards_block", PUT)]))

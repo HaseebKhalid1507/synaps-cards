@@ -77,6 +77,12 @@ class Round:
     def block_calls(self):
         return [c for c in self.calls if c.name == BLOCK_TOOL]
 
+    @property
+    def block_only(self):
+        """A response whose calls are all block calls (classify.py's "A tail
+        metric"), wherever it falls in the turn."""
+        return bool(self.calls) and all(c.name == BLOCK_TOOL for c in self.calls)
+
 
 @dataclass
 class Result:

@@ -18,6 +18,14 @@ after a steer answers the user, so it isn't closing; and with blocks off
 the response after a steer is the turn's one, so k stays 1 as §2.8 says.
 This is the one reading the classifier adds to the text.
 
+**A tail metric, not a chatter detector.** It counts the block-only
+responses at the turn's end, as §2.8 defines closing rounds; it doesn't see
+one that another tool call follows (a block-only response, then `bash`,
+then the final text: no closing round), and a later tool result or steer
+moves the anchor past the earlier ones. Every block-only response,
+wherever it falls, is `block_only_rounds` (turns.py's `Round.block_only`;
+report.py, reported with no gate).
+
 A `cards_ui` result counts as another tool's: a card is the turn's work.
 A turn that ended with no response after its anchor (cancelled, or an
 error) has k = 0: no closing rounds, and `complete` is false. So is a turn

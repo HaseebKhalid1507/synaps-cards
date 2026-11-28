@@ -10,7 +10,8 @@ event-started turns are listed apart, outside every denominator.
 **A gate row** passes only if it passes on the pooled runs **and** in at
 least 2 of the 3 repeats (§2.8): always 2 of repeats 1, 2 and 3, a repeat
 with no runs failing every row. Where §2.8 leaves the population open,
-the reading here is the stricter one, and each is stated:
+the reading here is the stricter one, each is stated, and each is frozen
+with the method (never adjusted after seeing data):
 - *block-call output per turn* is over the on-turns that made at least one
   block call (a turn with none adds a zero that would pull the median
   down); how many made none is reported beside it;
@@ -164,6 +165,7 @@ def per_turn(rec, counter):
             "measured": t.measured, "unmeasured_rounds": len(t.unmeasured), "planned_turns": rec.get("planned_turns", 1),
             "rounds": len(t.rounds),
             "tool_calls": sum(len(r.calls) for r in t.rounds),
+            "block_only_rounds": sum(r.block_only for r in t.rounds),
             "output": sum(r.output for r in t.rounds),
             "input_side": sum(r.input_side for r in t.rounds),
             "usage": {k: sum((r.usage or {}).get(k, 0) for r in t.rounds)
@@ -372,6 +374,9 @@ def build(records, counter, definition, not_run, meta, plan=None):
     on = [r for r in turn_rows if r["arm"] == "on"]
     also = {
         "closing_input": sum(r["closing"]["input"] for r in on),
+        "block_only_rounds": {"rounds": sum(r.get("block_only_rounds", 0) for r in on),
+                              "closing": sum(r["closing"]["rounds"] for r in on if r["closing"]["complete"]),
+                              "turns_with": sum(1 for r in on if r.get("block_only_rounds")), "turns": len(on)},
         "result_input": sum(r["attributed"]["result_input"] for r in on if r["attributed"]),
         "unseen_ops": sum(r["attributed"]["unseen_ops"] for r in on if r["attributed"]),
         "unseen_tokens": sum(r["attributed"]["unseen_tokens"] for r in on if r["attributed"]),
