@@ -528,9 +528,10 @@ class Spend(unittest.TestCase):
                 if self.path == "/v1/messages":
                     body = {"model": "claude-haiku-4-5-20261001", "content": [{"type": "tool_use", "id": "t", "name": "cards_block",
                                                                               "input": {"ops": []}}],
-                            "usage": {"input_tokens": 200_000, "output_tokens": 40}}
+                            "stop_reason": "tool_use", "usage": {"input_tokens": 200_000, "output_tokens": 40}}
                 else:
-                    body = {"model": "m", "choices": [{"message": {"tool_calls": [{"function": {"name": "cards_block", "arguments": '{"ops":[]}'}}]}}],
+                    body = {"model": "m", "choices": [{"message": {"tool_calls": [{"function": {"name": "cards_block", "arguments": '{"ops":[]}'}}]},
+                                                       "finish_reason": "tool_calls"}],
                             "usage": {"prompt_tokens": 200_000, "completion_tokens": 40}}
                 raw = json.dumps(body).encode()
                 self.send_response(200)
@@ -547,8 +548,8 @@ class Spend(unittest.TestCase):
                 b = spend.Budget(1.0, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
                 a = providers.Anthropic("claude-haiku-4-5", "k", base=base, on_usage=b.paid("probe"))
                 o = providers.OpenAICompatible("claude-haiku-4-5", base, on_usage=b.paid("probe"))
-                self.assertEqual(a.force(body), (40, {"ops": []}))
-                self.assertEqual(o.force(body), (40, {"ops": []}))
+                self.assertEqual(a.force(body), _called(40, {"ops": []}))
+                self.assertEqual(o.force(body), _called(40, {"ops": []}) | {"stop": "tool_calls"})
                 paid = [json.loads(x) for x in Path(tmp, "paid.jsonl").read_text().splitlines()]
         finally:
             up.shutdown()
@@ -556,18 +557,20 @@ class Spend(unittest.TestCase):
         self.assertEqual([x["what"] for x in paid], ["probe", "probe"])
         self.assertAlmostEqual(b.spent, 2 * (0.2 + 40 * 5e-6), places=9)
         (pa, ra), (po, ro) = sent
-        self.assertEqual((pa, ra["tool_choice"], ra["max_tokens"]), ("/v1/messages", {"type": "tool", "name": "cards_block"}, 4096))
-        self.assertEqual((po, ro["tool_choice"], ro["stream"]), ("/chat/completions", {"type": "function", "function": {"name": "cards_block"}}, False))
+        self.assertEqual((pa, ra["tool_choice"], ra["max_tokens"]), ("/v1/messages", {"type": "tool", "name": "cards_block", "disable_parallel_tool_use": True}, 4096))
+        self.assertEqual((po, ro["tool_choice"], ro["parallel_tool_calls"], ro["stream"]),
+                         ("/chat/completions", {"type": "function", "function": {"name": "cards_block"}}, False, False))
         self.assertEqual(a.models, {"claude-haiku-4-5-20261001"})
         # The dry run's scripted model calls it as asked, its output priced as any call's.
         from b5 import scripted
         m = scripted.Scripted()
         try:
             c = {"ops": [{"op": "patch", "id": "plan", "state": {"fix": "done"}}]}
-            out, got = providers.OpenAICompatible("stub", m.url).force(calibrate.forced(c, []))
+            r = providers.OpenAICompatible("stub", m.url).force(calibrate.forced(c, []))
         finally:
             m.close()
-        self.assertEqual((got, out), (c, scripted.tokens(json.dumps(c, ensure_ascii=False)) + 4))
+        self.assertEqual(r, _called(scripted.tokens(json.dumps(c, ensure_ascii=False)) + 4, c) | {"stop": "tool_calls"})
+        self.assertEqual(calibrate.alone(r), [], "one call and nothing else")
 
     def test_the_estimate_counts_the_whole_matrix(self):
         # B6 needs the D8 hand-backs too (report.required): the run to
@@ -635,7 +638,7 @@ class Estimate(unittest.TestCase):
 
         def force(body):
             n["force"] += 1
-            return 10, _forced_input(body)
+            return _called(10, _forced_input(body))
         f, raw = calibrate.calibrate(calls, [], count, len, "chars")
         calibrate.output_control(calls, [], force, len)
         self.assertEqual((n["count"], raw["requests"], calibrate.proxy_requests(len(calls))), (291, 291, 291))
@@ -1055,7 +1058,7 @@ def qualifying():
     receipt = thirds(calibrate.RECEIPT)
     pts = [(x, 9.0 + 0.9 * (receipt + x)) for x in range(10, 10 + 3 * calibrate.CALIBRATION_MIN, 3)]
     f = calibrate.fit(pts, "thirds", receipt)
-    out = calibrate.output_control(calibrate.load()[0], [], lambda body: (6 + 0.9 * thirds(compact(_forced_input(body))), _forced_input(body)),
+    out = calibrate.output_control(calibrate.load()[0], [], lambda body: _called(6 + 0.9 * thirds(compact(_forced_input(body))), _forced_input(body)),
                                    lambda s: f.ratio * thirds(s))
     return count.Calibrated(f, thirds, out)
 
@@ -1063,6 +1066,13 @@ def qualifying():
 def _forced_input(body):
     """The input an output-control request asks the model for."""
     return json.loads(body["messages"][0]["content"][0]["text"][len(calibrate.FORCE):])
+
+
+def _called(output, call_input):
+    """A forced call's response (providers.py's shape): the one call asked
+    for and nothing else."""
+    return {"output": output, "calls": [{"name": "cards_block", "input": call_input}], "text": "", "other": [],
+            "stop": "tool_use", "by_call": True}
 
 
 def frozen_meta(**kw):

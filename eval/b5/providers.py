@@ -16,10 +16,19 @@ converted to it (`from_chat`) and back (`to_chat`).
 
 **A forced call** (`Provider.force`, calibrate.py's output control): a
 completion that must call the tool named by the body's `tool_choice`
-(Anthropic's `tool`, an OpenAI-compatible provider's `function`), not
-streamed. It returns the reported output tokens and the input the model
-gave the call. Each is paid, with an endpoint too: its usage goes to
-`on_usage` before it returns.
+(Anthropic's `tool`, an OpenAI-compatible provider's `function`), one
+call only (Anthropic's `disable_parallel_tool_use`, an OpenAI-compatible
+provider's `parallel_tool_calls: false`), not streamed. It returns the
+whole response as one shape, never just its first call (review #14
+round 3, R3-1): `{"output"`: the reported output tokens, or None;
+`"calls"`: every call, `{"name", "input"}`, the input None if it isn't
+JSON; `"text"`: all its text; `"other"`: what else it carried (thinking,
+reasoning, a refusal, another choice); `"stop"`: why it stopped, and
+`"by_call"`: whether that was the call (Anthropic's `tool_use`, an
+OpenAI-compatible provider's `tool_calls` or `stop`)`}`. Whether it is
+one call and nothing else is the method's to say (calibrate.py's
+`alone`), not the adapter's. Each is paid, with an endpoint too,
+whatever it carried: its usage goes to `on_usage` before it returns.
 
 **The tap** (`Tap`) sits between the daemon and its provider: the daemon's
 base URL points at it (`SYNAPS_ANTHROPIC_BASE_URL`, or the local
@@ -79,6 +88,8 @@ def to_chat(body, model):
         out["tools"] = tools
     if (body.get("tool_choice") or {}).get("type") == "tool":
         out["tool_choice"] = {"type": "function", "function": {"name": body["tool_choice"]["name"]}}
+        if body["tool_choice"].get("disable_parallel_tool_use"):
+            out["parallel_tool_calls"] = False
     return out
 
 
@@ -158,8 +169,8 @@ class Anthropic:
         return post(self.count_url, b, self.headers())["input_tokens"]
 
     def force(self, body):
-        """A forced call (module docs): `(output tokens, the call's input or
-        None)`. Paid: its usage goes to `on_usage` first."""
+        """A forced call (module docs): the response's shape. Paid: its
+        usage goes to `on_usage` first."""
         b = {"model": self.model, "max_tokens": FORCE_MAX_TOKENS, "messages": body["messages"], "tools": body["tools"],
              "tool_choice": body["tool_choice"]}
         if body.get("system"):
@@ -170,8 +181,7 @@ class Anthropic:
             self.models.add(r["model"])
         if self.on_usage is not None:
             self.on_usage({k: u.get(k) or 0 for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")})
-        use = next((c for c in r.get("content") or [] if c.get("type") == "tool_use" and c.get("name") == body["tool_choice"]["name"]), None)
-        return u.get("output_tokens", 0), (use["input"] if use else None)
+        return anthropic_shape(r)
 
 
 class OpenAICompatible:
@@ -200,8 +210,8 @@ class OpenAICompatible:
         return u["prompt_tokens"]
 
     def force(self, body):
-        """A forced call (module docs): `(output tokens, the call's input or
-        None)`. Paid: its usage goes to `on_usage` first."""
+        """A forced call (module docs): the response's shape. Paid: its
+        usage goes to `on_usage` first."""
         req = to_chat(body, self.model) | {"max_tokens": FORCE_MAX_TOKENS, "stream": False}
         headers = {"authorization": f"Bearer {self.key}"} if self.key else {}
         r = post(self.count_url, req, headers, timeout=300)
@@ -212,13 +222,42 @@ class OpenAICompatible:
             cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
             self.on_usage({"input_tokens": u.get("prompt_tokens", 0) - cached, "cache_read_input_tokens": cached,
                            "output_tokens": u.get("completion_tokens", 0)})
-        name = req["tool_choice"]["function"]["name"]
-        call = next((c for c in ((r.get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
-                     if (c.get("function") or {}).get("name") == name), None)
+        return chat_shape(r)
+
+
+def _count(v):
+    """A reported token count, or None if there isn't one."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def anthropic_shape(r):
+    """A Messages response to a forced call, as the module docs' shape."""
+    content = r.get("content") or []
+    return {"output": _count((r.get("usage") or {}).get("output_tokens")),
+            "calls": [{"name": c.get("name"), "input": c.get("input")} for c in content if c.get("type") == "tool_use"],
+            "text": "".join(c.get("text") or "" for c in content if c.get("type") == "text"),
+            "other": [c.get("type") for c in content if c.get("type") not in ("tool_use", "text")],
+            "stop": r.get("stop_reason"), "by_call": r.get("stop_reason") == "tool_use"}
+
+
+def chat_shape(r):
+    """A chat completion's response to a forced call, as the module docs'
+    shape: its first choice, any other choice a part of it."""
+    choices = r.get("choices") or [{}]
+    m, u = choices[0].get("message") or {}, r.get("usage") or {}
+    calls = []
+    for c in m.get("tool_calls") or []:
+        f = c.get("function") or {}
         try:
-            return u.get("completion_tokens", 0), (json.loads(call["function"]["arguments"]) if call else None)
-        except (json.JSONDecodeError, TypeError):
-            return u.get("completion_tokens", 0), None
+            inp = json.loads(f.get("arguments")) if isinstance(f.get("arguments"), str) else None
+        except json.JSONDecodeError:
+            inp = None
+        calls.append({"name": f.get("name"), "input": inp})
+    other = (["reasoning"] if m.get("reasoning_content") or m.get("reasoning")
+             or ((u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0) > 0 else [])
+    other += (["refusal"] if m.get("refusal") else []) + ["another choice"] * (len(choices) - 1)
+    return {"output": _count(u.get("completion_tokens")), "calls": calls, "text": _text(m.get("content")) if m.get("content") else "",
+            "other": other, "stop": choices[0].get("finish_reason"), "by_call": choices[0].get("finish_reason") in ("tool_calls", "stop")}
 
 
 # ── The tap ────────────────────────────────────────────────────────────────

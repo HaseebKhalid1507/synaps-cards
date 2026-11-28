@@ -1,6 +1,8 @@
 import json
 import random
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from b5 import calibrate, providers
 from b5.calibrate import RECEIPT, compact, fit, pair
@@ -147,11 +149,11 @@ class Counting(unittest.TestCase):
         self.assertTrue(Calibrated(fitted(intercept=9.0 + len(RECEIPT)), chars, control(6)).can_flip_default)
 
 
-def endpoint_count(wobble=lambda args: 0, drift=None):
+def endpoint_count(wobble=lambda args: 0, drift=None, result=4):
     """A token-count endpoint: a token a character of text and of a call's
     compact arguments, 7 for a call's wrapper (plus `wobble(args)`: the
-    framing a serialization adds) and 4 for a result's. `drift`, a list,
-    makes each count of the bare probe one more than the last."""
+    framing a serialization adds) and `result` for a result's. `drift`, a
+    list, makes each count of the bare probe one more than the last."""
     def count(body):
         n = len(body.get("system") or "")
         for m in body["messages"]:
@@ -162,7 +164,7 @@ def endpoint_count(wobble=lambda args: 0, drift=None):
                     a = compact(part["input"])
                     n += len(a) + 7 + wobble(a)
                 elif part["type"] == "tool_result":
-                    n += len(part["content"]) + 4
+                    n += len(part["content"]) + result
         if drift is not None and len(body["messages"]) == 3 and len(body["messages"][1]["content"]) == 1:
             drift.append(1)
             n += len(drift)
@@ -173,20 +175,27 @@ def endpoint_count(wobble=lambda args: 0, drift=None):
 CALLS = [{"ops": [{"op": "remove", "id": "x" * (1 + k % 23)}] * (1 + k % 16)} for k in range(210)]
 
 
+def called(output, call_input):
+    """A forced call's response (providers.py's shape): one call to
+    `cards_block` with `call_input` and nothing else, `output` reported."""
+    return {"output": output, "calls": [{"name": "cards_block", "input": call_input}], "text": "", "other": [],
+            "stop": "tool_use", "by_call": True}
+
+
 def forced_model(framing=7, wobble=lambda args: 0, no_call=()):
     """A provider's forced call (calibrate.py's output control): it calls
     the tool with the input asked for, and reports its output as the
     arguments' characters plus `framing` (plus `wobble`). `no_call`: the
-    request numbers that make no call."""
+    request numbers that make no call, ending the turn instead."""
     seen = []
 
     def force(body):
         seen.append(body)
         got = json.loads(body["messages"][0]["content"][0]["text"][len(calibrate.FORCE):])
         if len(seen) - 1 in no_call:
-            return 3, None
+            return {"output": 3, "calls": [], "text": "", "other": [], "stop": "end_turn", "by_call": False}
         a = compact(got)
-        return len(a) + framing + wobble(a), got
+        return called(len(a) + framing + wobble(a), got)
     force.seen = seen
     return force
 
@@ -194,7 +203,7 @@ def forced_model(framing=7, wobble=lambda args: 0, no_call=()):
 def control(framing, spread=0):
     """An output control's summary, as calibrate.output_control gives it."""
     return {"framing": framing, "requests": 16, "framing_quartiles": [framing - spread, framing, framing + spread],
-            "framing_range": [framing - spread, framing + spread], "no_call": 0, "exact": 16}
+            "framing_range": [framing - spread, framing + spread], "samples": 16, "excluded": 0, "excluded_by": {}, "exact": 16}
 
 
 class EndpointCounting(unittest.TestCase):
@@ -251,7 +260,7 @@ class OutputControl(unittest.TestCase):
         force = forced_model(framing=7)
         e.output = calibrate.output_control(CALLS, TOOLS, force, e.text)
         self.assertEqual(e.output["requests"], 16)
-        self.assertTrue(all(b["tool_choice"] == {"type": "tool", "name": "cards_block"} for b in force.seen))
+        self.assertTrue(all(b["tool_choice"] == {"type": "tool", "name": "cards_block", "disable_parallel_tool_use": True} for b in force.seen))
         self.assertEqual((e.call_framing, e.result_framing), (6, 3))
         self.assertTrue(e.can_flip_default, e.describe().get("why_not"))
         # A call is what the model wrote for it: its arguments and its own
@@ -285,8 +294,9 @@ class OutputControl(unittest.TestCase):
         self.assertIn("output framing 70.00 outside", calibrate.output_problems(control(70), allowance)[0])
         self.assertIn("the result's framing -6.00", calibrate.output_problems(control(15), allowance)[0])
         out = calibrate.output_control(CALLS, TOOLS, forced_model(no_call=(0, 5)), lambda s: len(s))
-        self.assertEqual((out["no_call"], out["requests"]), (2, 16))
-        self.assertIn("2 of the output control's 16 requests made no call", calibrate.output_problems(out, allowance)[0])
+        self.assertEqual((out["excluded"], out["samples"], out["requests"]), (2, 14, 16))
+        self.assertIn("2 of the output control's 16 requests: not one call and nothing else "
+                      "(no call: 2; stopped by 'end_turn', not by the call: 2)", calibrate.output_problems(out, allowance)[0])
         # The proxy's counter, the same way.
         f = fitted(intercept=9.0 + len(RECEIPT))
         c = Calibrated(f, chars, calibrate.output_control(CALLS, TOOLS, forced_model(framing=6), lambda s: f.ratio * chars(s)))
@@ -301,6 +311,175 @@ class OutputControl(unittest.TestCase):
         self.assertEqual(sizes, sorted(sizes))
         self.assertLessEqual(sizes[-1], calibrate.OUTPUT_MAX_BYTES)
         self.assertLess(sizes[0] * 10, sizes[-1], "short and long calls both")
+
+
+SMALL = {"ops": [{"op": "remove", "id": "x"}]}  # 34 characters, compact
+ASKED = object()  # in a stub's answer: the input the request asked for
+
+
+def asked(req):
+    """The input a forced request asks for (calibrate.py's `forced`), in
+    either provider's shape."""
+    m = [m for m in req["messages"] if m["role"] == "user"][-1]
+    c = m["content"] if isinstance(m["content"], str) else m["content"][0]["text"]
+    return json.loads(c[len(calibrate.FORCE):])
+
+
+def uses(want, inputs):
+    return [want if x is ASKED else x for x in inputs]
+
+
+def anthropic(*inputs, text=None, thinking=False, stop="tool_use", usage=True, name="cards_block", output=None):
+    """A stub's Messages response to a forced request: a `tool_use` per
+    input (`ASKED`, the one asked for), and `text` or a thinking block
+    first if given, each call to `name`. Its output is what a model would
+    report (unless `output` says otherwise): each call's arguments, a
+    character a token, plus a wrapper of 7, and the text's."""
+    def answer(req):
+        ins = uses(asked(req), inputs)
+        content = ([{"type": "thinking", "thinking": "Hm.", "signature": "s"}] if thinking else []) \
+            + ([{"type": "text", "text": text}] if text else []) \
+            + [{"type": "tool_use", "id": f"toolu_{k}", "name": name, "input": x} for k, x in enumerate(ins)]
+        out = sum(len(compact(x)) + 7 for x in ins) + len(text or "") + 3 * thinking if output is None else output
+        return {"model": "claude-stub-1", "type": "message", "role": "assistant", "content": content, "stop_reason": stop,
+                "usage": {"input_tokens": 100, "output_tokens": out} if usage else {}}
+    return answer
+
+
+def chat(*inputs, text=None, reasoning=None, finish="tool_calls", raw=None):
+    """The same as an OpenAI-compatible chat completion (`raw`: the
+    arguments as sent, instead of each input's JSON)."""
+    def answer(req):
+        ins = uses(asked(req), inputs)
+        calls = [{"id": f"call_{k}", "type": "function", "function": {"name": "cards_block", "arguments": raw or compact(x)}}
+                 for k, x in enumerate(ins)]
+        msg = {"role": "assistant", "content": text, "tool_calls": calls} | ({"reasoning_content": reasoning} if reasoning else {})
+        out = sum(len(compact(x)) + 7 for x in ins) + len(text or "") + len(reasoning or "")
+        return {"model": "stub", "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": out}}
+    return answer
+
+
+class Stub:
+    """A provider's forced-call endpoint, offline: every POST is answered
+    by `answer(request)`; `seen` keeps the requests."""
+
+    def __init__(self, answer):
+        self.seen, stub = [], self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                req = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                stub.seen.append(req)
+                raw = json.dumps(answer(req)).encode()
+                self.send_response(200)
+                self.send_header("content-length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class OneCallAlone(unittest.TestCase):
+    """The output control's sample is a response of one call and nothing
+    else (review #14 round 3, R3-1; calibrate.py's "The output control"):
+    the provider's real adapter, its response as a model could send it,
+    and the counter that would flip the default."""
+
+    def measure(self, answer, provider="anthropic"):
+        """An endpoint counter whose output control ran through `provider`'s
+        adapter against a stub answering `answer`: the counter, what was
+        paid, the requests as sent. Shady's endpoint: a pair allowance of
+        60, so a contaminated framing still sits inside every bound."""
+        count = endpoint_count(result=55)
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, count)
+        e, paid, stub = Endpoint(count, TOOLS, framing, raw), [], Stub(answer)
+        try:
+            p = (providers.Anthropic("claude-stub", "k", base=stub.url, on_usage=paid.append) if provider == "anthropic"
+                 else providers.OpenAICompatible("stub", stub.url, on_usage=paid.append))
+            e.output = calibrate.output_control(CALLS, TOOLS, p.force, e.text)
+        finally:
+            stub.close()
+        return e, paid, stub.seen
+
+    def test_shadys_second_call_is_excluded_never_framing(self):
+        # Shady's repro: a pair allowance of 60, a call's wrapper 7, and
+        # the call asked for, exactly, plus a second small one on every
+        # request. At a29f248 the control measured 47 for a call's framing
+        # and qualified: a small call counted 82, its output 41.
+        self.assertEqual(calibrate.endpoint(CALLS, TOOLS, endpoint_count(result=55))[0], 60)
+        honest, paid, _ = self.measure(anthropic(ASKED))
+        self.assertEqual((honest.call_framing, honest.can_flip_default), (6, True), honest.describe().get("why_not"))
+        self.assertEqual(honest.call(SMALL), 41, "a call is its arguments and its own wrapper")
+        e, paid, _ = self.measure(anthropic(ASKED, SMALL))
+        self.assertFalse(e.can_flip_default, f"a call's framing measured {e.call_framing}, a small call counted {e.call(SMALL)}")
+        self.assertEqual((e.output["exact"], e.output["excluded"], e.output["framing"]), (0, 16, None), "never 47")
+        self.assertIn("16 of the output control's 16 requests: not one call and nothing else (2 calls: 16), excluded, never framing",
+                      e.describe()["why_not"])
+        self.assertNotEqual(e.call(SMALL), 82)
+        self.assertEqual(len(paid), 16, "every request is paid, excluded or not")
+
+    def test_one_contaminated_request_is_left_out_and_named(self):
+        n = []
+
+        def answer(req):
+            n.append(1)
+            return anthropic(ASKED, SMALL)(req) if len(n) == 5 else anthropic(ASKED)(req)
+        e, _, _ = self.measure(answer)
+        self.assertFalse(e.can_flip_default)
+        out = e.output
+        self.assertEqual((out["excluded"], out["exact"], out["framing"], out["framing_range"]), (1, 15, 6, [6, 6]), "not folded in")
+        self.assertEqual(out["calls"][4]["excluded"], ["2 calls"])
+        self.assertIn("1 of the output control's 16 requests: not one call and nothing else (2 calls: 1)", e.describe()["why_not"])
+
+    def test_text_or_reasoning_with_the_call_is_excluded(self):
+        for answer, provider, reason in [
+            (anthropic(ASKED, text="Calling it now."), "anthropic", "text"),
+            (anthropic(ASKED, thinking=True), "anthropic", "thinking"),
+            (chat(ASKED, text="Sure."), "openai", "text"),
+            (chat(ASKED, SMALL), "openai", "2 calls"),
+            (chat(ASKED, reasoning="Let me think."), "openai", "reasoning"),
+        ]:
+            with self.subTest(provider=provider, reason=reason):
+                e, paid, _ = self.measure(answer, provider)
+                self.assertFalse(e.can_flip_default)
+                self.assertIn(f"16 of the output control's 16 requests: not one call and nothing else ({reason}: 16)", e.describe()["why_not"])
+                self.assertEqual(len(paid), 16)
+
+    def test_a_cut_off_unreported_or_unreadable_response_is_excluded(self):
+        for answer, provider, reason in [
+            (anthropic(ASKED, stop="max_tokens"), "anthropic", "stopped by 'max_tokens', not by the call"),
+            (anthropic(ASKED, usage=False), "anthropic", "no output count"),
+            (anthropic(ASKED, output=0), "anthropic", "no output count"),
+            (anthropic(ASKED, name="read"), "anthropic", "a call to another tool"),
+            (chat(ASKED, finish="length"), "openai", "stopped by 'length', not by the call"),
+            (chat(ASKED, raw='{"ops": ['), "openai", "arguments that aren't JSON"),
+        ]:
+            with self.subTest(provider=provider, reason=reason):
+                e, _, _ = self.measure(answer, provider)
+                self.assertFalse(e.can_flip_default)
+                self.assertIn(f"({reason}: 16)", e.describe()["why_not"])
+
+    def test_the_request_asks_for_one_call_and_a_changed_input_counts_as_written(self):
+        e, _, seen = self.measure(anthropic(ASKED))
+        self.assertTrue(all(r["tool_choice"] == {"type": "tool", "name": "cards_block", "disable_parallel_tool_use": True} for r in seen))
+        _, _, seen = self.measure(chat(ASKED), "openai")
+        self.assertTrue(all(r["tool_choice"] == {"type": "function", "function": {"name": "cards_block"}} and r["parallel_tool_calls"] is False
+                            for r in seen))
+        # A call whose input isn't the one asked for still qualifies, and is
+        # counted by the arguments it has, as the run counts every call.
+        e, _, _ = self.measure(anthropic(SMALL))
+        self.assertEqual((e.output["exact"], e.output["excluded"], e.output["framing"]), (1, 0, 6), "only CALLS[0] asked for SMALL")
+        self.assertTrue(e.can_flip_default, e.describe().get("why_not"))
 
 
 class Qualifying(unittest.TestCase):

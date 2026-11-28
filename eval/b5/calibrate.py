@@ -59,23 +59,34 @@ the call's framing is measured where it is paid, on output:
 **The output control** (`output_control`): `OUTPUT_CALLS` calls of the
 calibration set, spread over its sizes up to `OUTPUT_MAX_BYTES` (a call's
 framing doesn't grow with its length, and a long one costs output), each
-sent as a request that makes the model call `cards_block` with exactly
-that input and nothing else (`forced`: the provider's forced tool choice,
-Anthropic's `tool_choice` `tool` and an OpenAI-compatible one's
-`function`). A request's reported output, less the counter's count of the
-arguments the model actually generated (as the run counts every call:
-their compact JSON), is that call's **framing on output**; the control's
-is the median. The run's counter then counts a call as its arguments plus
-that framing, and **the result's framing** is the pair's allowance less
-it: what the call and its result cost as input beyond the call's own
-output. Each request is paid (output tokens), with an endpoint too: it
-goes to the budget's ledger as a probe. The control qualifies if its
-framing is within the framing bounds, its framings' interquartile range
-within `endpoint_framing_iqr`, every request made a call, and the
-result's framing within −`endpoint_framing_iqr` to the framing bound (a
-call's input framing can sit a token under its output's, never far).
-Without the control a counter attributes the pair's whole allowance to
-output (the conservative reading), and can't flip the default.
+sent as a request that makes the model call `cards_block` once with
+exactly that input and nothing else (`forced`: the provider's forced
+tool choice, Anthropic's `tool_choice` `tool` and an OpenAI-compatible
+one's `function`, parallel calls off). Asking isn't evidence (review #14
+round 3, R3-1): a response is a **sample** only if it is one call and
+nothing else (`alone`): a reported output count; stopped by the call,
+not cut off at the cap or for another reason; exactly one call, to
+`cards_block`, its arguments JSON; and no text, thinking, reasoning,
+refusal or other choice. Any other response is **excluded**, its
+reasons kept with it, and never folded into the framing: its output
+holds more than one call's wrapper. A sample's reported output, less the
+counter's count of the arguments the model actually generated (as the
+run counts every call: their compact JSON), is that call's **framing on
+output**; the control's is the samples' median. A call whose input isn't
+the one asked for is still a sample, counted by the arguments it has
+(`exact` says how many matched): it is one call, and its arguments are
+counted as written. The run's counter then counts a call as its
+arguments plus that framing, and **the result's framing** is the pair's
+allowance less it: what the call and its result cost as input beyond the
+call's own output. Each request is paid (output tokens), with an
+endpoint too, a sample or not: it goes to the budget's ledger as a
+probe. The control qualifies if no request was excluded, its framing is
+within the framing bounds, its framings' interquartile range within
+`endpoint_framing_iqr`, and the result's framing within
+−`endpoint_framing_iqr` to the framing bound (a call's input framing can
+sit a token under its output's, never far). Without the control a
+counter attributes the pair's whole allowance to output (the
+conservative reading), and can't flip the default.
 
 **Qualifying** (`problems`, `endpoint_problems`): a counter can flip the
 default only if its calibration is sound by these bounds, fixed before any
@@ -92,6 +103,7 @@ tools every probe carries and of the calibration set, the number of
 requests made, the baselines, and every pair's raw difference.
 """
 
+import collections
 import hashlib
 import json
 import math
@@ -279,7 +291,7 @@ def forced(call_input, tools):
     """The output control's request for one call (module docs): the model
     made to call `cards_block` with `call_input`, and nothing else. Neutral
     form, Anthropic's `tool_choice` (providers.py converts it)."""
-    return {"system": FORCE_SYSTEM, "tools": tools, "tool_choice": {"type": "tool", "name": "cards_block"},
+    return {"system": FORCE_SYSTEM, "tools": tools, "tool_choice": {"type": "tool", "name": "cards_block", "disable_parallel_tool_use": True},
             "messages": [{"role": "user", "content": [{"type": "text", "text": FORCE + compact(call_input)}]}]}
 
 
@@ -292,34 +304,66 @@ def output_calls(calls, n=OUTPUT_CALLS):
     return [small[round(i * (len(small) - 1) / (n - 1))] for i in range(n)]
 
 
+def alone(r, name="cards_block"):
+    """Why a forced call's response (providers.py's shape) isn't one call
+    to `name` and nothing else (module docs, "The output control"): empty
+    when it is a sample."""
+    why, o = [], r.get("output")
+    if not isinstance(o, (int, float)) or isinstance(o, bool) or not 0 < o < math.inf:
+        why.append("no output count")
+    if not r.get("by_call"):
+        why.append(f"stopped by {r.get('stop')!r}, not by the call")
+    calls = r.get("calls") or []
+    if not calls:
+        why.append("no call")
+    elif len(calls) > 1:
+        why.append(f"{len(calls)} calls")
+    if any(c.get("name") != name for c in calls):
+        why.append("a call to another tool")
+    if any(c.get("input") is None for c in calls):
+        why.append("arguments that aren't JSON")
+    if r.get("text"):
+        why.append("text")
+    why += sorted(set(r.get("other") or []))
+    return why
+
+
 def output_control(calls, tools, force, text):
     """The call's framing on output (module docs). `force(body)` sends a
-    forced call: `(its reported output tokens, the input the model gave
-    the call, or None if it made none)`; `text(s)` is the run's counter's
-    count of a text. A dict: the median `framing`, its spread, and every
-    request as it went."""
+    forced call and gives its response's shape (providers.py's module
+    docs); `text(s)` is the run's counter's count of a text. A dict: the
+    samples' median `framing`, its spread, the requests excluded and why,
+    and every request as it went."""
     rows = []
     for c in output_calls(calls):
-        out, got = force(forced(c, tools))
-        args = None if got is None else text(compact(got))
-        rows.append({"bytes": len(compact(c).encode()), "output": out, "args": args,
-                     "framing": None if args is None else out - args, "exact": got == c})
-    fr = sorted(r["framing"] for r in rows if r["framing"] is not None)
-    return {"framing": statistics.median(fr) if fr else None, "requests": len(rows),
+        r = force(forced(c, tools))
+        why = alone(r)
+        got = None if why else r["calls"][0]["input"]
+        args = None if why else text(compact(got))
+        rows.append({"bytes": len(compact(c).encode()), "output": r.get("output"), "n_calls": len(r.get("calls") or []),
+                     "stop": r.get("stop"), "args": args, "framing": None if why else r["output"] - args,
+                     "exact": not why and got == c, "excluded": why})
+    fr = sorted(r["framing"] for r in rows if not r["excluded"])
+    by = collections.Counter(w for r in rows for w in r["excluded"])
+    return {"framing": statistics.median(fr) if fr else None, "requests": len(rows), "samples": len(fr),
             "framing_quartiles": (statistics.quantiles(fr, n=4) if len(fr) >= 2 else fr * 3) or None,
-            "framing_range": [fr[0], fr[-1]] if fr else None, "no_call": sum(r["framing"] is None for r in rows),
-            "exact": sum(r["exact"] for r in rows), "calls": rows}
+            "framing_range": [fr[0], fr[-1]] if fr else None, "excluded": sum(bool(r["excluded"]) for r in rows),
+            "excluded_by": dict(sorted(by.items())), "exact": sum(r["exact"] for r in rows), "calls": rows}
 
 
 def output_problems(out, allowance):
     """Why an output control can't back a counter that flips the default
     (module docs, "The output control"): empty when it can."""
     q = QUALIFY
-    if not out or out.get("framing") is None:
+    if not out:
         return ["no output control: the call's framing on output wasn't measured"]
     found = []
-    if out["no_call"]:
-        found.append(f"{out['no_call']} of the output control's {out['requests']} requests made no call")
+    if out["excluded"]:
+        by = "; ".join(f"{w}: {n}" for w, n in out["excluded_by"].items())
+        found.append(f"{out['excluded']} of the output control's {out['requests']} requests: not one call and nothing else ({by}), "
+                     "excluded, never framing")
+    if out["framing"] is None:
+        return found + ["no output control sample: the call's framing on output wasn't measured"]
     f, iqr = out["framing"], q["endpoint_framing_iqr"]
     if not q["framing"][0] <= f <= q["framing"][1]:
         found.append(f"the call's output framing {f:.2f} outside {q['framing'][0]:g}–{q['framing'][1]:g} tokens")
