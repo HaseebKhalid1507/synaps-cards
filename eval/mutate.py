@@ -34,6 +34,7 @@ EVAL = Path(__file__).resolve().parent
 C, T, N, K, R = "b5/classify.py", "b5/turns.py", "b5/count.py", "b5/calibrate.py", "b5/report.py"
 H, S, D, P, X = "b5/harness.py", "b5/spend.py", "b5/desk.py", "b5/providers.py", "b5/taskset.py"
 E, M, U, J = "b5/estimate.py", "b5/daemon.py", "run.py", "tasks/set.json"
+A = "../docs/blocks.md"  # §2.8, the authority: the copy holds docs/ beside eval/
 
 MUTATIONS = [
     # The turn and the round (turns.py)
@@ -263,6 +264,12 @@ MUTATIONS = [
     ("run: the pilot's records stamped real (R3-2)", U, 'stamp("pilot")', 'stamp("real")'),
     ("run: the pilot's meta isn't its records' experiment (R3-2)", U,
      '    meta = {"mode": st["mode"], "experiment": st["experiment"], "model": a.model,', '    meta = {"mode": st["mode"], "experiment": None, "model": a.model,'),
+    ("authority: the endpoint's allowance keeps the receipt (R3-3)", A, "`d − arguments − receipt`", "`d − arguments`"),
+    ("authority: the depth pilot not ratified (R3-3)", A, "**The one exception: the depth pilot**", "**The depth pilot**"),
+    ("authority: the pilot can't bias the comparison (R3-3)", A, "But choosing tasks by their off-arm depth still shapes the workload, and the freeze says so.",
+     "So it can't bias the comparison."),
+    ("authority: a response that makes the call is a sample (R3-1)", A, "a response is a sample only if it **is** one call and nothing else",
+     "a response is a sample if it makes the call"),
     ("pilot: both arms (pilot)", H, '    return [(0, t, "off") for t in tasks if t["category"] == "coding"]',
      '    return [(0, t, a) for t in tasks if t["category"] == "coding" for a in ("on", "off")]'),
     ("pilot: its report eligible (pilot)", R, '"meta": meta, "mode": "pilot", "eligible_for_b6": False,', '"meta": meta, "mode": "pilot", "eligible_for_b6": True,'),

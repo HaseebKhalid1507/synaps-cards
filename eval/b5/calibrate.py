@@ -42,9 +42,9 @@ size, and the ratio and intercept with each call left out in turn.
 **With an endpoint** (`endpoint`), no fit is needed. The arguments are
 counted by the endpoint, as text (`text_probe`), and the pair's
 allowance is calibrated once: the median over the calibration set of
-d(c) − text(compact(c)) − text(RECEIPT) (§2.8: "a probe message with one
-block call, minus the same message without it, minus the arguments' own
-count"). Every call is then its arguments' count plus one framing, the
+d(c) − text(compact(c)) − text(RECEIPT) (§2.8's `d − arguments −
+receipt`: the receipt is the result input's, never the allowance's).
+Every call is then its arguments' count plus one framing, the
 same for every call (count.py), never its own pair's: the method's,
 frozen for the run, and the raw differences it came from are kept.
 

@@ -278,6 +278,31 @@ class Authority(unittest.TestCase):
         self.assertIn("**The result's framing** (the pair's allowance less the call's) is input overhead", self.DOC)
         self.assertIn("never attributed to block-call output", self.DOC)
 
+    def test_2_8_states_each_allowance_as_it_is_computed(self):
+        # Review #14 round 3, R3-3: calibrate.endpoint subtracts the receipt
+        # too (`d - args - receipt`); §2.8 said `with − without − arguments`,
+        # which counts the receipt twice. The proxy's, once, unambiguously.
+        self.assertIn("With an endpoint, it is the median over the set's calls of `d − arguments − receipt`", self.DOC)
+        self.assertIn("Without one, it is `intercept − ratio × proxy(receipt)`", self.DOC)
+        self.assertNotIn("minus the same message without it, minus the arguments' own count", self.DOC)
+        self.assertNotIn("and the pair's allowance below as the intercept", self.DOC)
+
+    def test_2_8_ratifies_the_depth_pilot_and_claims_no_more_for_it(self):
+        # Review #14 round 3, R3-3: the pre-freeze, off-only pilot is
+        # observations, disclosed and never reused; it doesn't select on an
+        # on/off contrast, but its off-arm screen shapes the workload.
+        self.assertIn("**The one exception: the depth pilot**", self.DOC)
+        self.assertIn("every coding task runs once, blocks off only", self.DOC)
+        self.assertIn("their complete results, and every task replaced or revised after them, are published with the freeze", self.DOC)
+        self.assertIn("It doesn't select on an observed on/off contrast", self.DOC)
+        self.assertIn("choosing tasks by their off-arm depth still shapes the workload", self.DOC)
+        self.assertNotIn("can't bias", self.DOC)
+
+    def test_2_8_states_the_output_controls_one_call_and_nothing_else(self):
+        # Review #14 round 3, R3-1, as calibrate.py's `alone` holds it.
+        self.assertIn("a response is a sample only if it **is** one call and nothing else", self.DOC)
+        self.assertIn("Any other response is excluded with its reason, never folded into the framing", self.DOC)
+
 
 if __name__ == "__main__":
     unittest.main()

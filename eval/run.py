@@ -38,8 +38,10 @@ never eligible (report.py).
 candidate model (b5/spend.py), from the set's own shape, and the depth
 pilot's: no provider call.
 
-**The depth pilot** (`--pilot`; review #14 round 2) screens the long
-tasks' depth before the set is frozen: every coding task of the set, 22,
+**The depth pilot** (`--pilot`; review #14 round 2; §2.8's one exception
+to "fixed before any data", ratified in round 3) screens the long tasks'
+depth before the set is frozen, its complete results and any task
+replaced after them published with the freeze: every coding task of the set, 22,
 blocks off, once each, on `--model` (the model B5b will run), through the
 same isolated daemon, round parser, ledger and soft stop as a real run.
 It spends money, so it takes its own approval, written out
