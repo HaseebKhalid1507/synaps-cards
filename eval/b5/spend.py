@@ -20,7 +20,10 @@ total past it stops the run (`OverBudget`; a turn is cancelled first).
 
 **A soft stop, not a hard cap:** a charge is known only once its response
 is done, so the response that crosses the budget is already paid, and so is
-whatever the engine had in flight when the turn was cancelled. The budget
+whatever the engine had in flight when the turn was cancelled. That is
+charged too: the stopped run drains its session to the `idle`, and every
+usage the session records is charged once, whatever read it (harness.py's
+"The budget"), so the ledger has every response the run saw. The budget
 bounds when the run stops spending, not to the cent what it spent. The dry
 run prices nothing.
 """

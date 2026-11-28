@@ -640,9 +640,14 @@ class _Session:
     def cancel(self):
         self.queue = [{"ev": "aborted", "context_saved": True}, {"ev": "idle"}]
 
+    on_usage = None
+
     def next(self, timeout):
         if self.queue:
-            self.events.append((float(len(self.events)), self.queue.pop(0)))
+            ev = self.queue.pop(0)
+            self.events.append((float(len(self.events)), ev))
+            if self.on_usage is not None and (ev.get("event") or {}).get("session") == "usage":
+                self.on_usage(ev["event"])  # as daemon.Session records it
 
     def until(self, pred, timeout):
         while self.queue:
@@ -655,6 +660,12 @@ class _Session:
 
     def close(self):
         pass
+
+
+def _as(cls, obj):
+    """`obj` as an instance of its subclass `cls`, its state kept."""
+    obj.__class__ = cls
+    return obj
 
 
 class _Iso:
@@ -708,6 +719,45 @@ class BudgetStop(unittest.TestCase):
                            plan=[(task["id"], a, r) for r in (1, 2, 3) for a in ("on", "off")])
         self.assertEqual(rep["verdict"], "not eligible")
         self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
+
+    def test_usage_that_comes_while_the_run_stops_is_charged_too(self):
+        # Review #14 round 2, R2-6. Shady's: the first response, $0.20,
+        # passes a $0.10 budget; another already in flight brings $0.50
+        # while the turn is cancelled and the history read. The record had
+        # both ($0.70); the budget and paid.jsonl had only the first.
+        class InFlight(_Session):
+            def cancel(self):
+                self.queue = [{"ev": "stream", "event": {"kind": "session", "session": "usage", "input_tokens": 0,
+                                                         "output_tokens": 100_000}},  # $0.50 on Haiku 4.5
+                              {"ev": "aborted", "context_saved": True}, {"ev": "idle"}]
+
+            def messages(self):  # the query reads the wire as the daemon's does: what comes first is recorded first
+                while self.queue:
+                    self.next(0)
+                return super().messages()
+
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        with tempfile.TemporaryDirectory() as tmp:
+            b = spend.Budget(0.1, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+            r = harness.Runner(_Iso([40_000]), "claude-haiku-4-5", desk.StandIn(), Path(tmp), budget=b)  # $0.20
+            made = r.iso.session
+            r.iso.session = lambda *a: _as(InFlight, made(*a))
+            with self.assertRaises(spend.OverBudget) as e:
+                r.run(0, 0, task, "off")
+            paid = [json.loads(x) for x in Path(tmp, "paid.jsonl").read_text().splitlines()]
+        rec = e.exception.record
+        used = [ev["event"]["output_tokens"] for _, ev in rec["events"] if (ev.get("event") or {}).get("session") == "usage"]
+        self.assertEqual(used, [40_000, 100_000], "the record has both")
+        self.assertAlmostEqual(b.spent, 0.70, places=9)
+        self.assertEqual([x["usd"] for x in paid], [0.2, 0.5])
+        self.assertEqual((rec["stopped"], rec["drained"], rec.get("in_flight_unknown")), ("over budget", True, None))
+
+    def test_a_stopped_run_whose_session_never_idles_says_so(self):
+        s = _Session([])
+        s.events = [(0.0, {"ev": "turn_started", "trigger": "user"})]
+        self.assertFalse(harness.drain(s, timeout=0))
+        s.events.append((1.0, {"ev": "idle"}))
+        self.assertTrue(harness.drain(s, timeout=0), "idle already: nothing in flight")
 
     def test_no_room_for_another_run_stops_the_run_too(self):
         task = next(t for t in TASKS if t["id"] == "shelf-q-days")

@@ -39,12 +39,20 @@ Then the run's record: the session's events, its history, the fold report
 and the judged outcome (taskset.py).
 
 **The budget** (real runs, spend.py): every usage is priced and written to
-the ledger as it comes; a turn is cancelled when the total passes the
-budget, and no run starts that could pass it. **A run the budget stopped**
-still gives its record, marked `stopped`, with everything it had (events,
+the ledger exactly once, as the session records it (daemon.py's
+`on_usage`), whatever read it: the turn's loop, a history query, or the
+drain after a cancel or a timeout (review #14 round 2, R2-6). A turn is
+cancelled when the total passes the budget, and no run starts that could
+pass it. **A run the budget stopped** stops new work, then drains: it
+reads the session until its `idle` (at most `DRAIN` seconds), so the
+usage of what was already in flight is charged too, then takes the
+history. Its record is marked `stopped`, with everything it had (events,
 what was sent, the history and its fold when the session could give them;
-no judge), so the report is of every run that spent: the stop is a soft one
-(spend.py), and the report says the experiment is incomplete.
+no judge), and `drained`: true at the `idle`, or false, with
+`in_flight_unknown`, when the session gave none in time (a response
+still in flight may be paid and never seen). So the report is of every
+run that spent: the stop is a soft one (spend.py), and the report says
+the experiment is incomplete.
 """
 
 import json
@@ -59,6 +67,7 @@ from .turns import BLOCK_TOOL
 TURN_TIMEOUT = 900
 DRY_TURN_TIMEOUT = 120
 QUEUED_GRACE = 1.5  # seconds after an idle in which a queued steer starts its turn
+DRAIN = 60  # seconds a stopped run waits for its session's idle (module docs, "The budget")
 
 
 def plan(tasks, repeats=3):
@@ -99,6 +108,14 @@ class Runner:
         self.requests = requests  # () → the provider requests since the last call
         self.arm = None
         self.timeout = DRY_TURN_TIMEOUT if dry else TURN_TIMEOUT
+        self.over = None  # why the budget stopped the run, once it has
+
+    def charge(self, usage):
+        """A session's `on_usage` (module docs, "The budget"): every usage
+        charged once; past the budget, the stop is noted, never raised
+        mid-read, so a drain keeps charging."""
+        if self.budget and not self.budget.charge(usage, "run") and self.over is None:
+            self.over = f"spent {self.budget.spent:.2f} of {self.budget.usd:.2f} USD"
 
     def set_arm(self, arm):
         if arm != self.arm:
@@ -115,6 +132,7 @@ class Runner:
         rec = {"n": n, "task": task["id"], "category": task["category"], "arm": arm, "repeat": repeat + 1,
                "planned_turns": len(groups(task["turns"])), "tools": self.tools, "workspace": str(ws), "sent": [], "steps": [], "t0": time.time()}
         s = self.iso.session(ws, self.model, f"b5-{task['id']}-{arm}-r{repeat + 1}")
+        s.on_usage = self.charge
         conv = s.meta.get("journal_id") or s.id
         rec["session"] = {k: s.meta.get(k) for k in ("id", "journal_id", "host_pid", "model")}
         stop = None
@@ -127,6 +145,9 @@ class Runner:
             rec["history"] = s.messages()
         except OverBudget as e:
             stop, rec["stopped"] = e, "over budget"
+            rec["drained"] = drain(s)
+            if not rec["drained"]:
+                rec["in_flight_unknown"] = True
             try:
                 rec["history"] = s.messages()
             except Exception as why:  # the session may be gone: the record keeps what it had
@@ -210,9 +231,9 @@ class Runner:
                 started |= kind == "turn_started"
                 if kind == "stream" and (ev.get("event") or {}).get("session") == "usage":
                     rounds += 1
-                    if self.budget and not self.budget.charge(ev["event"], "run"):
+                    if self.over:  # charged as it was recorded (`charge`)
                         s.cancel()
-                        raise OverBudget(f"spent {self.budget.spent:.2f} of {self.budget.usd:.2f} USD")
+                        raise OverBudget(self.over)
                     for f in [f for f in pending if f["after_round"] <= rounds]:
                         pending.remove(f)
                         self.fire(s, conv, f, rec, rounds)
@@ -227,6 +248,8 @@ class Runner:
                     continue
                 break
         history = s.messages()
+        if self.over:  # passed during a timeout's drain or the history's read
+            raise OverBudget(self.over)
         lost = [m for m in rec["sent"][sent_before:] if not desk.received(history, m["text"])]
         for m in lost:
             m["lost"] = True
@@ -250,6 +273,30 @@ class Runner:
         else:
             rec["steps"].append({"step": "steer", "round": rounds})
             self.send(s, conv, "steer", f["steer"], rec, steer=True)
+
+
+def drain(s, timeout=None):
+    """Read a cancelled session until its `idle` (module docs, "The
+    budget"): every usage on the way is charged as it is recorded. Whether
+    the session is idle: at once if its last turn has ended already (the
+    engine sends a response's usage before its turn's `idle`)."""
+    if ended(s.events):
+        return True
+    try:
+        s.until(lambda f: (f.get("event") or {}).get("ev") == "idle", DRAIN if timeout is None else timeout)
+    except Exception:  # timed out, or the session is gone: the wire says how far it got
+        pass
+    return ended(s.events)
+
+
+def ended(events):
+    """Whether the last turn of `events` has had its `idle` (or none began)."""
+    for _, e in reversed(events):
+        if e.get("ev") == "idle":
+            return True
+        if e.get("ev") == "turn_started":
+            return False
+    return True
 
 
 def _last_card(events):

@@ -174,7 +174,12 @@ class Isolated:
 class Session:
     """One owned scratch session of the eval's daemon, on its session wire.
     `events` is this session's `(t, ev)` pairs, in wire order; `prompts`
-    every prompt the daemon raised, each denied."""
+    every prompt the daemon raised, each denied. `on_usage`, when set, is
+    called with each `session: usage` event once, as it is recorded,
+    whatever read it (a turn's loop, a history query, a drain): the one
+    place a paid response is charged (spend.py's guard)."""
+
+    on_usage = None
 
     def __init__(self, sock, cwd, name, version, pid, model):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -230,6 +235,8 @@ class Session:
         if f.get("type") == "event" and f.get("session_id") == getattr(self, "id", None):
             ev = f.get("event") or {}
             self.events.append((round(time.monotonic() - self.t0, 3), ev))
+            if self.on_usage is not None and ev.get("ev") == "stream" and (ev.get("event") or {}).get("session") == "usage":
+                self.on_usage(ev["event"])
             if ev.get("ev") == "prompt":  # nothing here asks: record it, deny it
                 self.prompts.append(ev)
                 self.cmd({"cmd": "answer", "prompt_id": ev.get("request", {}).get("id"), "value": None})
