@@ -4,10 +4,14 @@ time, and check that a named test of eval's suite catches it.
 
 Each mutation switches off one rule of the method as eval/b5 states it, in
 a copy of this checkout's `eval/` (the checkout is never touched), then
-runs `python3 -m unittest discover -s tests` there. A mutation counts as
-caught only if a named test failed on it; one whose anchor isn't found
-exactly once is a bad anchor. The pass is good only with every mutation
-caught: a survivor is a rule no test holds.
+runs `python3 -m unittest discover -s tests` there. The copy is laid out
+as the checkout is (`eval/` and `docs/`: the suite reads §2.8), and the
+pass first runs the suite on it unmutated: if that fails, nothing after
+it means anything, and the pass stops. A mutation counts as caught only
+if a named test failed on it; a test module that fails to import is no
+test, so that run is bad, and so is one whose anchor isn't found exactly
+once. The pass is good only with every mutation caught: a survivor is a
+rule no test holds.
 
     python3 eval/mutate.py [--jobs N] [--out FILE] [--anchors] [FILTER]
 
@@ -233,20 +237,44 @@ MUTATIONS = [
 ]
 
 
+def copy():
+    """A disposable copy of the checkout's `eval/` and `docs/` (module docs)."""
+    tmp = Path(tempfile.mkdtemp(prefix="b5mut-"))
+    shutil.copytree(EVAL, tmp / "eval", ignore=shutil.ignore_patterns("__pycache__"))
+    if (EVAL.parent / "docs").is_dir():
+        shutil.copytree(EVAL.parent / "docs", tmp / "docs")
+    return tmp
+
+
+def suite(tmp):
+    return subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=tmp / "eval",
+                          capture_output=True, text=True, timeout=600, env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"})
+
+
+def baseline():
+    """The suite on an unmutated copy: `(ok, its last lines)`."""
+    tmp = copy()
+    try:
+        r = suite(tmp)
+        return r.returncode == 0, r.stderr.strip().splitlines()[-3:]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def one(m):
     name, rel, old, new = m
-    tmp = Path(tempfile.mkdtemp(prefix="b5mut-"))
+    tmp = copy()
     try:
-        shutil.copytree(EVAL, tmp / "eval", ignore=shutil.ignore_patterns("__pycache__"))
         f = tmp / "eval" / rel
         text = f.read_text()
         if text.count(old) != 1:
             return "bad", f"- {name}: BAD ANCHOR ({text.count(old)} matches in {rel})"
         f.write_text(text.replace(old, new))
-        r = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests"], cwd=tmp / "eval",
-                           capture_output=True, text=True, timeout=600, env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"})
+        r = suite(tmp)
         failed = sorted(set(re.findall(r"^(?:FAIL|ERROR): (\S+) \((\S+)\)", r.stderr, re.M)))
         names = sorted({cls for _, cls in failed})  # `module.Class.test`
+        if any(n.startswith("unittest.loader.") for n in names):
+            return "bad", f"- {name}: a test module failed to import: {', '.join(n for n in names if n.startswith('unittest.loader.'))}"
         if r.returncode != 0 and names:
             return "caught", f"- {name}: caught by {len(names)}: {', '.join(names)}"
         if r.returncode == 0:
@@ -277,14 +305,18 @@ def main(argv=None):
         bad = anchors(todo)
         print("\n".join(bad + [f"{len(todo) - len(bad)}/{len(todo)} anchors found once"]))
         return 1 if bad else 0
-    lines, kinds = [], []
+    ok, tail = baseline()
+    print(f"baseline, unmutated: {'OK' if ok else 'FAILED'}: {' / '.join(tail)}", flush=True)
+    if not ok:
+        raise SystemExit("the suite fails on the unmutated copy: no mutation can mean anything")
+    lines, kinds = [f"baseline, unmutated: {' / '.join(tail)}"], []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
         for kind, line in ex.map(one, todo):
             kinds.append(kind)
             lines.append(line)
             print(line, flush=True)
     caught, survived = kinds.count("caught"), kinds.count("survived")
-    summary = f"{caught}/{len(todo)} caught by a named test, {survived} survived, {len(todo) - caught - survived} bad anchors or unclassified"
+    summary = f"{caught}/{len(todo)} caught by a named test, {survived} survived, {len(todo) - caught - survived} bad (anchors, imports) or unclassified"
     print(summary)
     if a.out:
         Path(a.out).write_text("\n".join(lines) + "\n" + summary + "\n")
