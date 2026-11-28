@@ -550,10 +550,13 @@ class Spend(unittest.TestCase):
             m.close()
         self.assertEqual((got, out), (c, scripted.tokens(json.dumps(c, ensure_ascii=False)) + 4))
 
-    def test_the_estimate_counts_the_runnable_set(self):
+    def test_the_estimate_counts_the_whole_matrix(self):
+        # B6 needs the D8 hand-backs too (report.required): the run to
+        # approve is the whole matrix's.
         t = estimate.table(TASKS)
         e = t["rows"]["expected_warm"]
-        self.assertEqual((e["tasks"], e["runs"], e["turns"]), (42, 252, 282))
+        self.assertEqual((e["tasks"], e["runs"], e["turns"]), (45, 270, 318))
+        self.assertEqual(e["runs"], sum(report.required().values()))
         for m in spend.CANDIDATES:
             self.assertLess(e["usd"][m], t["rows"]["expected_cold"]["usd"][m])
             self.assertLess(t["rows"]["expected_cold"]["usd"][m], t["rows"]["long_cold"]["usd"][m])
@@ -594,10 +597,43 @@ class Estimate(unittest.TestCase):
     def test_the_table_names_scenarios_and_the_probes_not_a_budget(self):
         t = estimate.table(TASKS)
         self.assertNotIn("the budget)", t["markdown"])
-        for part in ("Expected, warm prefix", "Expected, cold prefix", "Long scenario", "Paid probes", "not a cap"):
+        for part in ("Expected, warm prefix", "Expected, cold prefix", "Long scenario", "Paid probes", "not a cap", "+15%"):
             self.assertIn(part, t["markdown"])
         for m in spend.CANDIDATES:
-            self.assertGreater(t["probes_usd"][m], 0)
+            self.assertGreater(t["control_usd"][m], 0, "the output control is paid, with an endpoint too")
+            self.assertGreater(t["probes_usd"][m], t["control_usd"][m])
+
+    def test_the_paid_probes_are_the_requests_calibrate_makes(self):
+        # Review #14 round 2, R2-8: the estimate priced 288 × 2 proxy probes;
+        # the calibration makes 288 + 3 (a shared baseline, three times).
+        # Count what the procedures actually send, and pin the estimate to it.
+        calls, _ = calibrate.load()
+        n = {"count": 0, "force": 0}
+
+        def count(body):
+            n["count"] += 1
+            return 100 + len(json.dumps(body))
+
+        def force(body):
+            n["force"] += 1
+            return 10, _forced_input(body)
+        f, raw = calibrate.calibrate(calls, [], count, len, "chars")
+        calibrate.output_control(calls, [], force, len)
+        self.assertEqual((n["count"], raw["requests"], calibrate.proxy_requests(len(calls))), (291, 291, 291))
+        self.assertEqual(n["force"], 16)
+        self.assertEqual(estimate.probes(calls)["requests"], n["force"])
+        self.assertEqual(estimate.probes(calls, endpoint=False)["requests"], n["count"] + 2 + n["force"], "and the definition control's 2")
+        t = estimate.table(TASKS)
+        self.assertEqual((t["probes_usd"]["claude-sonnet-5-5"], t["control_usd"]["claude-sonnet-5-5"]), (1.56, 0.06))
+
+    def test_the_budget_at_the_margin_covers_the_long_scenario_by_15_percent(self):
+        t = estimate.table(TASKS)
+        for m in spend.CANDIDATES:
+            need = (t["rows"]["long_cold"]["usd"][m] + t["control_usd"][m]) * 1.15
+            self.assertGreaterEqual(t["margin_usd"][m], need)
+            self.assertLess(t["margin_usd"][m] - 5, need)
+            self.assertEqual(t["margin_usd"][m] % 5, 0)
+        self.assertEqual(t["margin_usd"]["claude-sonnet-5-5"], 70, "the D8 tasks in, $60 leaves 3%")
 
 
 def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, ops=4, skipped=0, repairs=0, reputs=0, rounds=6,

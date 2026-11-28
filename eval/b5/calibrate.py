@@ -110,6 +110,7 @@ FORCE_SYSTEM = "You are a probe of tool-call framing. Call the tool exactly as a
 FORCE = "Call cards_block once, with exactly this input:\n"
 OUTPUT_CALLS = 16
 OUTPUT_MAX_BYTES = 2048
+BASELINES = 3  # the shared `without`, counted first, halfway and last
 CALIBRATION_MIN = 200
 EVAL = Path(__file__).resolve().parent.parent
 CALIBRATION = EVAL / "calibration.jsonl"
@@ -219,6 +220,12 @@ def steady(baselines, models):
     if len(set(models)) > 1:
         out.append(f"more than one model answered: {sorted(set(models))}")
     return out
+
+
+def proxy_requests(n_calls):
+    """The requests a proxy calibration of `n_calls` makes (module docs):
+    one `with` a call, and the shared baseline `BASELINES` times."""
+    return n_calls + BASELINES
 
 
 def calibrate(calls, tools, count, proxy, proxy_name):
