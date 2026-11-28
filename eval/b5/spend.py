@@ -113,54 +113,70 @@ class Budget:
 
 @dataclass
 class Shape:
-    """One category's turn, as the estimate assumes it."""
+    """One kind of turn, as the estimate assumes it."""
     rounds: int  # provider responses per turn
-    turns: int  # turns per task
     out: int  # output tokens per round (text, thinking, calls)
     tool_in: int  # tokens each round's tool results add to the context
     user_in: int  # tokens of the user's message
 
 
-def turn_usage(prefix, s, block_out=0, block_in=0, extra_rounds=0):
-    """One turn's reported usage, with prompt caching as the engine sets it:
-    each request re-reads the context so far from the cache, and writes
-    what's new since the last one. `prefix` is the system prompt and the
-    tool definitions; `block_out`, `block_in` are what blocks add per round
-    (their calls, their results), and `extra_rounds` the closing rounds."""
-    n = s.rounds + extra_rounds
-    ctx, read, write, out = prefix + s.user_in, 0, 0, 0
-    cached = prefix  # the prefix is warm after the first request of a run
-    for _ in range(n):
-        read += cached
-        write += ctx - cached
-        out += s.out + block_out
-        cached = ctx
-        ctx += s.out + block_out + s.tool_in + block_in
-    return {"input_tokens": UNCACHED_PER_REQUEST * n, "output_tokens": out, "cache_read_input_tokens": read,
+def session_usage(prefix, turns, block_out=0, block_in=0, closing=0, warm=True):
+    """One run's reported usage: its `turns` (Shapes) in one session, each
+    starting from the history the last one left (the context carries over),
+    with prompt caching as the engine sets it: each request reads from the
+    cache what the last one sent, and writes what's new. `prefix` is the
+    system prompt and the tool definitions. `warm`: they are in the cache
+    before the session's first request (an earlier run's, within the cache's
+    5 minutes); cold, the first request writes them. With blocks, every turn
+    adds `block_out` output tokens and `block_in` of results, spread over its
+    rounds, and `closing` rounds to a turn of more than 2."""
+    ctx, cached = prefix, prefix if warm else 0
+    read = write = out = requests = 0
+    for s in turns:
+        ctx += s.user_in
+        n = s.rounds + (closing if s.rounds > 2 else 0)
+        b_out, b_in = (block_out // max(n, 1), block_in // max(n, 1)) if block_out or block_in else (0, 0)
+        for _ in range(n):
+            read += cached
+            write += ctx - cached
+            out += s.out + b_out
+            requests += 1
+            cached = ctx
+            ctx += s.out + b_out + s.tool_in + b_in
+    return {"input_tokens": UNCACHED_PER_REQUEST * requests, "output_tokens": out, "cache_read_input_tokens": read,
             "cache_creation_input_tokens": write}
 
 
-def estimate(tasks, prefix, shapes, block, repeats=3, needs_ok=()):
+def turn_kinds(task, steers_said_instead=False):
+    """The turns one run of `task` takes, by kind (estimate.py's shapes): a
+    coding task's one turn, and one more per steer said instead (it missed
+    the turn and started the next); a card task's turn that shows the card,
+    then its answer's coding turn; a hand-back's proposal, then its coding
+    turn."""
+    starts = sum(1 for s in task["turns"] if {"say", "answer", "hand_back"} & set(s))
+    steers = sum(1 for s in task["turns"] if "steer" in s) if steers_said_instead else 0
+    if task["category"] == "interactive":
+        return ["card"] + ["coding"] * (starts - 1)
+    return [task["category"]] * starts + ["steer"] * steers
+
+
+def estimate(tasks, prefix, shapes, block, repeats=3, needs_ok=(), warm=True, steers_said_instead=False):
     """Usage of a full run: every task the run can do, both arms, `repeats`
-    times; plus the calibration's probes. `block` = (out, in, closing
-    rounds) per turn with blocks on, spread over its rounds. A dict of
-    totals per arm."""
+    times. `block` = what blocks add per turn (out, in, closing rounds) and
+    the definition on every request. A dict of totals per arm."""
     tot = {"on": {}, "off": {}, "tasks": 0, "turns": 0, "runs": 0}
     for t in tasks:
         if any(n not in needs_ok for n in t["needs"]):
             continue
-        s = shapes[t["category"]]
+        turns = [shapes[k] for k in turn_kinds(t, steers_said_instead)]
         tot["tasks"] += 1
         for arm in ("on", "off"):
             if arm == "on":
-                per_round_out = block["out"] // max(s.rounds, 1)
-                per_round_in = block["in"] // max(s.rounds, 1)
-                u = turn_usage(prefix + block["definition"], s, per_round_out, per_round_in,
-                               block["closing"] if s.rounds > 2 else 0)
+                u = session_usage(prefix + block["definition"], turns, block["out"], block["in"], block["closing"], warm)
             else:
-                u = turn_usage(prefix, s)
+                u = session_usage(prefix, turns, warm=warm)
             for k, v in u.items():
-                tot[arm][k] = tot[arm].get(k, 0) + v * s.turns * repeats
-            tot["turns"] += s.turns * repeats
+                tot[arm][k] = tot[arm].get(k, 0) + v * repeats
+            tot["turns"] += len(turns) * repeats
             tot["runs"] += repeats
     return tot

@@ -372,10 +372,52 @@ class Spend(unittest.TestCase):
 
     def test_the_estimate_counts_the_runnable_set(self):
         t = estimate.table(TASKS)
-        e = t["rows"]["expected"]
+        e = t["rows"]["expected_warm"]
         self.assertEqual((e["tasks"], e["runs"], e["turns"]), (42, 252, 282))
         for m in spend.CANDIDATES:
-            self.assertLess(e["usd"][m], t["rows"]["high"]["usd"][m])
+            self.assertLess(e["usd"][m], t["rows"]["expected_cold"]["usd"][m])
+            self.assertLess(t["rows"]["expected_cold"]["usd"][m], t["rows"]["long_cold"]["usd"][m])
+
+
+class Estimate(unittest.TestCase):
+    """Review #14, P3 12: scenarios, not a budget; the cache warm and cold;
+    the context carried from turn to turn; said-instead steers; the paid
+    probes apart."""
+
+    def setUp(self):
+        self.S = spend.Shape(rounds=2, out=100, tool_in=0, user_in=10)
+
+    def test_a_cold_prefix_is_written_by_the_first_request(self):
+        warm = spend.session_usage(1000, [self.S], warm=True)
+        cold = spend.session_usage(1000, [self.S], warm=False)
+        # Request 1 reads 1000 (warm) or writes 1010 (cold); request 2 reads 1010, writes 100.
+        self.assertEqual((warm["cache_read_input_tokens"], warm["cache_creation_input_tokens"]), (2010, 110))
+        self.assertEqual((cold["cache_read_input_tokens"], cold["cache_creation_input_tokens"]), (1010, 1110))
+
+    def test_a_later_turn_starts_from_the_history_the_last_left(self):
+        u = spend.session_usage(1000, [self.S, self.S], warm=True)
+        # Turn 2's first request reads what turn 1's last one sent (1000 + 10 + 100) from the
+        # cache, not the prefix alone; it writes turn 1's last reply and its own message.
+        self.assertEqual(u["cache_read_input_tokens"], 2010 + 1110 + 1220)
+        self.assertEqual(u["cache_creation_input_tokens"], 110 + 110 + 100)
+        self.assertEqual(u["output_tokens"], 400)
+
+    def test_steers_said_instead_add_turns_in_the_long_scenario(self):
+        steered = next(t for t in TASKS if any("steer" in s for s in t["turns"]))
+        self.assertEqual(spend.turn_kinds(steered), ["coding"])
+        self.assertEqual(spend.turn_kinds(steered, steers_said_instead=True), ["coding", "steer"])
+        card = next(t for t in TASKS if t["category"] == "interactive" and not t["needs"])
+        self.assertEqual(spend.turn_kinds(card), ["card", "coding"])
+        t = estimate.table(TASKS)
+        self.assertEqual(t["rows"]["long_cold"]["turns"] - t["rows"]["expected_cold"]["turns"], 4 * 2 * 3)
+
+    def test_the_table_names_scenarios_and_the_probes_not_a_budget(self):
+        t = estimate.table(TASKS)
+        self.assertNotIn("the budget)", t["markdown"])
+        for part in ("Expected, warm prefix", "Expected, cold prefix", "Long scenario", "Paid probes", "not a cap"):
+            self.assertIn(part, t["markdown"])
+        for m in spend.CANDIDATES:
+            self.assertGreater(t["probes_usd"][m], 0)
 
 
 def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, ops=4, skipped=0, repairs=0, reputs=0, rounds=6,
