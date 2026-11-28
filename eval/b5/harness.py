@@ -160,7 +160,7 @@ class Runner:
         rec["fold"] = (helper(self.iso.cards_eval, "fold", json.dumps(rec["history"], ensure_ascii=False))
                        if rec.get("history") is not None else {"lines": []})
         rec["requests"] = self.requests() if self.requests else []
-        rec["judge"] = None if stop else taskset.judge(task, ws, text=_last_text(rec["events"]))
+        rec["judge"] = None if stop else taskset.judge(task, ws, text=final_text(rec["events"]))
         rec["t1"] = time.time()
         if stop is not None:
             stop.record = rec
@@ -322,15 +322,10 @@ def live_block(board, kind=None, last=False):
     return (ok[-1] if last else ok[0])["id"] if ok else None
 
 
-def _last_text(events):
-    """The text of the last turn's responses."""
-    out, last = [], []
-    for _, ev in events:
-        if ev.get("ev") == "turn_started":
-            out = []
-        s = ev.get("event") or {}
-        if s.get("llm") == "text":
-            out.append(s.get("text", ""))
-        if ev.get("ev") == "idle":
-            last = out
-    return "".join(last or out)
+def final_text(events):
+    """The answer an `expect` judges (taskset.py): of the last turn's
+    responses (turns.py's rounds), the last one with text. The text of the
+    responses before it is narration ("I'll run the tests."), not the
+    answer."""
+    ts = turns.turns(events)
+    return next((r.text for r in reversed(ts[-1].rounds) if r.text.strip()), "") if ts else ""

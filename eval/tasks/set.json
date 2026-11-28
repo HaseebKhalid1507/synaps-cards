@@ -435,6 +435,7 @@
           "asset, liability, equity, income",
           "asset, liability, equity, income, expense, revenue",
           "assets and liabilities",
+          "Not asset, liability, equity, income, expense.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -465,6 +466,7 @@
           "[33, 33, 34]",
           "[33, 33, 33]",
           "[34, 33, 33, 0]",
+          "Not [34, 33, 33].",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -493,6 +495,8 @@
           "13",
           "12 of 13",
           "Ran 12 tests in 0.004s",
+          "12 tests failed.",
+          "Not 12.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -526,6 +530,7 @@
           "date, entry, memo, account, amount",
           "entry, date, memo, account",
           "entry, date, memo, account, amount, currency",
+          "Not entry, date, memo, account, amount.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -555,6 +560,7 @@
           "asset, liability, equity, income, expense",
           "asset",
           "liability, equity",
+          "Not asset, expense.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -583,6 +589,7 @@
           "20",
           "21 or 28",
           "3 weeks",
+          "It is not 21.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -611,6 +618,7 @@
           "0.25",
           "25 or 50",
           "10",
+          "Not 25.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -639,6 +647,7 @@
           "5",
           "3 to 5",
           "unlimited",
+          "Not 3.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -667,6 +676,7 @@
           "shelf/loans.py",
           "shelf/models.py, shelf/loans.py",
           "models",
+          "Not shelf/models.py.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -695,6 +705,7 @@
           "10",
           "9 of 10",
           "all of them",
+          "Not 9.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -726,6 +737,7 @@
           "1, 2, 3, 4",
           "0, 2, 2",
           "0, 1, 2, 3",
+          "Do not use 0, 2, 2, 4.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -745,20 +757,14 @@
       ],
       "check": {
         "expect": {
-          "all": [
-            "debit\\W+[^,\\n]*(suppl|expense)",
-            "credit\\W+[^,\\n]*cash"
-          ],
-          "none": [
-            "debit\\W+[^,\\n]*cash",
-            "credit\\W+[^,\\n]*(suppl|expense)"
-          ]
+          "form": "debit: *(office +)?suppl(y|ies)( +expense| *\\(expense\\))?, *credit: *cash( +account)?"
         },
         "reference": "debit: Office supplies, credit: Cash",
         "wrong": [
           "debit: Cash, credit: Office supplies",
           "debit: Office supplies",
           "debit: Cash, credit: Cash",
+          "Do NOT debit: Office supplies, do NOT credit: Cash.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -791,6 +797,7 @@
           "Apple, apricot, pear, banana",
           "apricot, apple, banana, pear",
           "apple, apricot, banana",
+          "Not apple, apricot, banana, pear.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -819,6 +826,7 @@
           "3",
           "978-0-306-40615-7",
           "7 or 3",
+          "Not 7.",
           "I refuse.",
           "I can't tell without running the code."
         ]
@@ -847,6 +855,7 @@
           "22",
           "20",
           "three weeks",
+          "Not 21.",
           "I refuse.",
           "I can't tell without running the code."
         ]

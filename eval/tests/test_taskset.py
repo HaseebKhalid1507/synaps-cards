@@ -131,13 +131,37 @@ class Checks(unittest.TestCase):
         for tid, text in (("ledger-q-split", "`[34, 33, 33]`"), ("ledger-q-kinds", "- asset\n- liability\n- equity\n- income\n- expense"),
                           ("ledger-q-kinds", "Assets, liabilities, equity, income and expenses."), ("shelf-q-book", "`shelf/models.py`"),
                           ("ledger-q-tests", "12."), ("nt-half-even", "0, 2, 2, 4"), ("nt-sort", "apple, apricot, banana, pear."),
-                          ("nt-double-entry", "debit: Office supplies (expense), credit: Cash"), ("ledger-q-debit", "1. Asset\n2. Expense")):
+                          ("nt-double-entry", "debit: Office supplies (expense), credit: Cash"), ("ledger-q-debit", "1. Asset\n2. Expense"),
+                          ("shelf-q-days", "**21**"), ("ledger-q-split", "(34, 33, 33)"), ("nt-isbn", "`7`\n"),
+                          ("nt-double-entry", "Debit: Office Supplies Expense, Credit: Cash.")):
             with self.subTest(task=tid, text=text):
                 self.assertTrue(taskset.judge(by[tid], text=text)["pass"], taskset.judge(by[tid], text=text))
 
+    def test_the_right_tokens_under_a_negation_fail(self):
+        # Review #14 round 2, R2-5. Shady's four, each passed on 6f7e8fc:
+        # the numbers were found in the prose, and the regex found its words.
+        by = {t["id"]: t for t in TASKS}
+        for tid, text in (("shelf-q-days", "It is not 21."), ("ledger-q-tests", "12 tests failed."),
+                          ("nt-half-even", "Do not use 0, 2, 2, 4."), ("nt-double-entry", "Do NOT debit: Office supplies, do NOT credit: Cash.")):
+            with self.subTest(task=tid):
+                self.assertFalse(taskset.judge(by[tid], text=text)["pass"], text)
+                self.assertIn(text, by[tid]["check"]["wrong"], "frozen with the task")
+        # And every task's own reference, negated or wrapped in prose.
+        for t in (t for t in TASKS if "expect" in t["check"]):
+            ref = t["check"]["reference"]
+            for text in (f"Not {ref}.", f"It is not {ref}.", f"Do not use {ref}.", f"{ref} is wrong.", f"Never {ref}",
+                         f"The answer isn't {ref}.", f"I think it's {ref}, but I'm not sure."):
+                with self.subTest(task=t["id"], text=text):
+                    self.assertFalse(taskset.judge(t, text=text)["pass"], text)
+            negated = [w for w in t["check"]["wrong"] if " not " in f" {w.casefold()} " or w.startswith("Not ")]
+            self.assertTrue(negated, f"{t['id']}: the reference under a negation is frozen with the task")
+
     def test_numbers_and_items_are_read_as_the_docs_say(self):
-        self.assertEqual(taskset.numbers("978-0-306-40615-7"), [978, 0, 306, 40615, 7])
-        self.assertEqual(taskset.numbers("-2, 0.5 and 12."), [-2, 0.5, 12])
+        self.assertIsNone(taskset.numbers("978-0-306-40615-7"))
+        self.assertEqual(taskset.numbers("**-2, 0.5, 12.**"), [-2, 0.5, 12])
+        self.assertIsNone(taskset.numbers("-2, 0.5 and 12."), "comma-separated, as the prompts ask")
+        self.assertIsNone(taskset.numbers("[34, 33, 33"))
+        self.assertEqual(taskset.bare("  `**21**`.\n"), "21")
         self.assertEqual(taskset.items("1. `asset`\n2) expense."), ["asset", "expense"])
         self.assertEqual(taskset.items("standard and expense; 'x'"), ["standard", "expense", "x"])
 

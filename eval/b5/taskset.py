@@ -46,23 +46,32 @@ frozen set has none since its one-line repairs gave way to long tasks). Its
   (`checks/<id>.py`, copied in as `tests/test_b5_check.py` after the run)
   all pass: `python3 -m unittest` exits 0, compiled from source (no
   bytecode the run left is read);
-- `expect`: the text of the task's last turn, `answer` (the final text,
-  case-folded), is checked by every rule the task gives, all of which must
-  hold. Each task's answer is deterministic: a number, a list or a fixed
-  form, so a refusal, a wrong value or an over-inclusive list fails:
-  - `numbers`: the numbers in the answer (`NUMBER`: an integer or a
-    decimal, a minus sign only where no word or digit is glued before it)
-    are exactly these, in order;
+- `expect`: the task's **answer** is the final text: of the last turn's
+  responses, the last one with text (harness.py's `final_text`; the text
+  of earlier responses is the agent's narration, not its answer). It is
+  checked by every rule the task gives, all of which must hold. Each
+  task's answer is deterministic: a number, a list or a fixed form, and
+  its prompt asks for that alone, so the whole answer is read by the
+  form's grammar, never searched for tokens: a refusal, a wrong value, an
+  over-inclusive list, prose around the answer, or the right tokens under
+  a negation ("It is not 21.", "Do not use 0, 2, 2, 4.") fails (review #14
+  round 2, R2-5). Its dress is allowed: the whitespace, backticks and
+  emphasis around it, and a closing period (`bare`).
+  - `numbers`: the bare answer is these numbers, in order, and nothing
+    else: one number, or a list of them separated by commas, in brackets
+    or parentheses or none (`NUMBERS`; a number is an integer or a
+    decimal, a minus sign its own);
   - `items`: the answer is a list (split at commas, semicolons, new lines
     and a lone "and"; each item without its bullet, numbering, quotes,
     backticks and outer punctuation) whose items match these patterns one
-    to one: none missing, none extra, none matched twice; in this order
-    if `ordered`;
-  - `all`, `none`: every pattern of `all` is found in the answer, and none
-    of `none`.
+    to one, each item whole: none missing, none extra, none matched
+    twice; in this order if `ordered`;
+  - `form`: the bare answer, whole, is this pattern (case-folded): a fixed
+    form, as `debit: ACCOUNT, credit: ACCOUNT`.
   Every task also freezes `reference`, a right answer, and `wrong`, wrong
-  answers its judge must refuse; tests/test_taskset.py holds both, and a
-  few refusals, to the judge.
+  answers its judge must refuse, among them the reference under a
+  negation; tests/test_taskset.py holds both, a few refusals, and every
+  reference negated, to the judge.
 
 **`needs`** names what a task waits for: `D8` (take, edit, hand back). B5a
 marks such a task "needs D8, not run"; B5b runs it unchanged.
@@ -90,10 +99,13 @@ LONG_WORK_LINES = 5
 STEPS = ("say", "steer", "dismiss", "answer", "hand_back")
 NEEDS = ("D8",)
 CHECK_NAME = "test_b5_check.py"
-EXPECT = {"numbers", "items", "ordered", "all", "none"}
+EXPECT = {"numbers", "items", "ordered", "form"}
 HAND_BACK = {"block", "edit", "say", "message"}
 EDITS = {"append_step", "append_text", "keep"}
-NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
+NUMBER = r"-?\d+(?:\.\d+)?"
+_LIST = rf"{NUMBER}(?:\s*,\s*{NUMBER})*"
+NUMBERS = re.compile(rf"\[\s*({_LIST})\s*\]|\(\s*({_LIST})\s*\)|({_LIST})")
+DRESS = re.compile(r"^[\s`*_]+|[\s`*_.]+$")
 ITEM_SPLIT = re.compile(r"[,;\n]|\band\b")
 ITEM_EDGE = re.compile(r"^(?:\s|[-*•]|\d+[.)]\s)*[\s`'\"“”‘’(\[]*|[\s`'\"“”‘’)\].:!]*$")
 
@@ -222,8 +234,19 @@ def judge(task, workspace=None, text="", root=TASKS, timeout=120):
     return {"pass": not why, "how": "expect", "detail": text[-400:], **({"why": why} if why else {})}
 
 
+def bare(text):
+    """The answer without its dress (module docs): the whitespace, backticks
+    and emphasis around it, and a closing period."""
+    return DRESS.sub("", text or "")
+
+
 def numbers(text):
-    return [float(x) for x in NUMBER.findall(text)]
+    """The numbers the bare answer is, in order, or None if it is anything
+    else (module docs, `numbers`)."""
+    hit = NUMBERS.fullmatch(bare(text))
+    if not hit:
+        return None
+    return [float(x) for x in re.split(r"\s*,\s*", next(g for g in hit.groups() if g))]
 
 
 def items(text):
@@ -234,7 +257,7 @@ def expect(e, text):
     """Why `text` fails the rules `e` (module docs): empty when it passes."""
     out, low = [], text.casefold()
     if "numbers" in e and numbers(text) != [float(x) for x in e["numbers"]]:
-        out.append(f"numbers {numbers(text)}, not {e['numbers']}")
+        out.append(f"not the numbers {e['numbers']} alone: {bare(text)[:80]!r}")
     if "items" in e:
         got, pats = items(text), [re.compile(p, re.IGNORECASE) for p in e["items"]]
         if e.get("ordered"):
@@ -244,6 +267,6 @@ def expect(e, text):
                 and all(sum(bool(p.fullmatch(g)) for p in pats) == 1 for g in got)
         if not ok:
             out.append(f"items {got}")
-    out += [f"no {p!r}" for p in e.get("all", []) if not re.search(p, low, re.IGNORECASE | re.DOTALL)]
-    out += [f"has {p!r}" for p in e.get("none", []) if re.search(p, low, re.IGNORECASE | re.DOTALL)]
+    if "form" in e and not re.fullmatch(e["form"], bare(low), re.IGNORECASE | re.DOTALL):
+        out.append(f"not the form {e['form']!r}: {bare(text)[:80]!r}")
     return out

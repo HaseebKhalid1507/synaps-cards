@@ -150,6 +150,21 @@ class HandBack(unittest.TestCase):
         self.assertTrue(out["text"].startswith("Apply it.\n[stand-in hand-back of block plan: "))
 
 
+class FinalText(unittest.TestCase):
+    def test_the_answer_is_the_last_response_with_text_not_the_narration(self):
+        # A tool-using question: "I'll run the tests." rides the call, the
+        # answer comes alone. The judge reads the answer (taskset.py).
+        w = Wire().start("How many tests ran? Just the number.")
+        w.results(w.round([("bash", {"command": "python3 -m unittest"})], text="I'll run the tests."))
+        w.round(text="12")
+        w.round([("cards_block", BLOCK)])  # a closing call with no text
+        events = w.done().events
+        self.assertEqual(harness.final_text(events), "12")
+        task = next(t for t in TASKS if t["id"] == "ledger-q-tests")
+        self.assertTrue(taskset.judge(task, text=harness.final_text(events))["pass"])
+        self.assertEqual(harness.final_text(Wire().start("x").done().events), "")
+
+
 class Record(unittest.TestCase):
     """Review #14, P3 13: the run's record names the harness, the binary,
     the adapter and the configuration; latency is two named intervals."""
