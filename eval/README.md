@@ -14,6 +14,7 @@ exact rules are in its module's docs, and its tests pin them.
 | The runs: blocks on/off × 3 repeats, interleaved, against an isolated daemon (as `scripts/smoke.py` isolates one) | `b5/harness.py`, `b5/daemon.py`, `run.py` | `tests/test_harness.py`; the dry run |
 | The desk seam: D6b's dismiss notices (and D8's hand-backs) come from synaps-desk over `b5-desk/1`, never typed in | `b5/desk.py` | `tests/test_harness.py` (`Seam`) |
 | Providers, the tap, spend and the budget guard | `b5/providers.py`, `b5/spend.py`, `b5/estimate.py` | `tests/test_harness.py` |
+| The mutation pass: each rule of the method broken on purpose, one exact edit at a time, and caught by a named test (`python3 eval/mutate.py`) | `mutate.py` (the manifest and its runner) | every mutation caught, none surviving |
 | The report: the gate's rows (pooled **and** 2 of 3 repeats), the rows reported with no gate, and the set's shape as the run played it (coding ≥ 6 rounds, short 1–2, no tool call, the card answered; blocks off). The gate passes only if the shape holds. A coding task under 6 rounds blocks off is reported apart, never as long, and every row is reported per bucket | `b5/report.py` | `tests/test_harness.py` (`Gate`, `SetShape`) |
 
 ## Running it
