@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import run
-from b5 import calibrate, count, daemon, desk, estimate, harness, providers, report, spend, taskset
+from b5 import calibrate, count, daemon, desk, estimate, harness, providers, report, spend, taskset, turns
 from b5.calibrate import compact
 from wire import BLOCK, PUT, Wire
 
@@ -820,20 +820,31 @@ class Eligibility(unittest.TestCase):
     as it plays, every gate row passing."""
 
     @staticmethod
-    def run_events(task, arm, cut=False):
-        w = Wire().start(task["turns"][0]["say"])
-        cat, ids = task["category"], []
+    def run_events(task, arm, cut=False, silent=False):
+        """One run's events, its tool ids, and the user's messages as sent
+        (each starting the turn it opens, so the history has them)."""
+        say = task["turns"][0]["say"]
+        w = Wire().start(say)
+        cat, ids, hb = task["category"], [], next((s["hand_back"] for s in task["turns"] if "hand_back" in s), None)
+        if silent:  # Shady's: TurnStarted, done, Idle, no response
+            return w.done().events, ids
         if cat == "no_tool":
             w.round(text="An answer.")
         elif cat == "short":
             w.results(w.round([("read", {"path": "a"})]))
             w.round(text="An answer.")
         else:
-            if cat == "interactive":
+            if hb:
+                got = w.round([("cards_block", PUT)] if arm == "on" else [], text="My proposal.")
+                ids += got
+                w.results(got)
+                w.done()
+                w.start(Eligibility.HANDED if arm == "on" else hb["message"])
+            elif cat == "interactive":
                 w.results(w.round([("cards_ui", {"question": "Which?"})]), "Card cabc123 is showing (cards/1 #1): Which?")
                 w.round(text="Waiting.")
                 w.done()
-                w.start("[card cabc123] Which? → A")
+                w.start(Eligibility.ANSWER)
             for k in range(5):
                 calls = [("bash", {"k": k})] + ([("cards_block", BLOCK)] if arm == "on" and k in (0, 4) else [])
                 got = w.round(calls)
@@ -845,27 +856,47 @@ class Eligibility(unittest.TestCase):
                 w.round(text="Done.")
         return w.done().events, ids
 
-    def records(self, repeats=(1, 2, 3), drop=0, cut=None, probe=lambda task, repeat: True):
+    HANDED = "Go ahead.\n[block plan edited r1]"
+    ANSWER = "[card cabc123] Which? → A\n{\"choice\":\"A\"}"
+    STEER = "Also: keep it short."
+
+    def records(self, repeats=(1, 2, 3), drop=0, cut=None, probe=lambda task, repeat: True, tasks=None, silent=None):
+        """The frozen set's whole matrix (report.required), every run as it
+        would be recorded: its events, steps, what the user sent, and the
+        history (the agent's received input)."""
         recs = []
-        for r, t, arm in harness.plan(TASKS, 3)[0]:
+        for r, t, arm in harness.plan([dict(x, needs=[]) for x in (TASKS if tasks is None else tasks)], 3)[0]:
             if r + 1 not in repeats:
                 continue
-            events, ids = self.run_events(t, arm, cut=(t["id"], arm, r + 1) == cut)
+            events, ids = self.run_events(t, arm, cut=(t["id"], arm, r + 1) == cut, silent=(t["id"], arm, r + 1) == silent)
             lines = [{"tool_id": i, "event": n, "op": 0, "author": "agent", "did": "patch", "outcome": "applied",
                       "dismissed_before": False} for n, i in enumerate(ids)]
-            steps, sent = [{"step": "answer", "card": "cabc123"}] if t["category"] == "interactive" else [], []
+            steps, sent = [], [{"carry": "submit", "text": t["turns"][0]["say"], "notices": []}]
+            hb = next((s["hand_back"] for s in t["turns"] if "hand_back" in s), None)
+            if hb and arm == "on":
+                steps.append({"step": "hand_back", "as": "block", "block": "plan"})
+                sent.append({"carry": "hand_back", "text": self.HANDED, "notices": []})
+            elif hb:
+                steps.append({"step": "hand_back", "as": "message"})
+                sent.append({"carry": "submit", "text": hb["message"], "notices": []})
+            elif t["category"] == "interactive":
+                steps.append({"step": "answer", "card": "cabc123", "values": {"choice": "A"}})
+                sent.append({"carry": "answer", "text": self.ANSWER, "notices": []})
             if any("dismiss" in s for s in t["turns"]):
                 if arm == "on" and probe(t["id"], r + 1):
                     steps.append({"step": "dismiss", "id": "plan", "outcome": "accepted"})
-                    sent.append({"carry": "steer", "notices": [["plan", "dismissed", 1]]})
+                    sent.append({"carry": "steer", "text": self.STEER + "\n[block plan v1 dismissed]", "notices": [["plan", "dismissed", 1]]})
                 else:
                     steps.append({"step": "dismiss", "outcome": "skipped", "skipped": "no live block"})
+            history = [m for x in sent for m in ({"role": "user", "content": x["text"]}, {"role": "assistant", "content": "…"})]
             recs.append({"task": t["id"], "category": t["category"], "arm": arm, "repeat": r + 1, "events": events,
-                         "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent})
+                         "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent, "history": history})
         return recs[:len(recs) - drop]
 
-    def build(self, recs, counter=None, not_run=(), **meta):
-        plan = [(t["id"], arm, r + 1) for r, t, arm in harness.plan(TASKS, 3)[0]]
+    WHOLE = [(t["id"], arm, r + 1) for r, t, arm in harness.plan([dict(x, needs=[]) for x in TASKS], 3)[0]]
+
+    def build(self, recs, counter=None, not_run=(), plan=WHOLE, **meta):
+        """report.build, with B5b's plan: the whole matrix, D8 included."""
         return report.build(recs, counter or qualifying(), 900, list(not_run), frozen_meta(**meta), plan=plan)
 
     def test_one_repeat_and_an_uncalibrated_counter_is_not_eligible(self):
@@ -874,7 +905,7 @@ class Eligibility(unittest.TestCase):
         self.assertFalse(rep["gate_pass"], "one repeat with an uncalibrated counter is no licence")
         self.assertEqual(rep["verdict"], "not eligible")
         why = " / ".join(rep["not_eligible_because"])
-        for part in ("uncalibrated", "1 repeats", "252 runs missing"):
+        for part in ("uncalibrated", "1 repeats", "180 of the frozen set's 270 runs missing"):
             self.assertIn(part, why)
 
     def test_three_repeats_with_an_uncalibrated_counter_are_not_eligible(self):
@@ -886,21 +917,66 @@ class Eligibility(unittest.TestCase):
 
     def test_the_d8_tasks_not_run_leave_it_not_eligible(self):
         d8 = [t for t in TASKS if t["needs"]]
-        rep = self.build(self.records(), not_run=d8)
-        self.assertFalse(rep["gate_pass"])
-        self.assertEqual(len(rep["not_eligible_because"]), 1)
-        self.assertIn(f"{len(d8)} tasks not run", rep["not_eligible_because"][0])
+        b5a = self.records(tasks=[t for t in TASKS if not t["needs"]])
+        for not_run in (d8, []):  # the caller's list is descriptive: the set says what B6 needs
+            rep = self.build(b5a, not_run=not_run, plan=None)
+            self.assertFalse(rep["gate_pass"])
+            self.assertEqual(rep["not_eligible_because"],
+                             [f"{len(d8)} tasks not run ({', '.join(t['id'] for t in d8)}): B6 needs them, both arms (B5b)"])
         self.assertIn("Gate: **not eligible**", report.markdown(rep))
+
+    def test_the_matrix_is_the_frozen_sets_not_the_callers(self):
+        # Review #14 round 2, R2-2. Shady's: the 252 runs B5a plans, with
+        # the plan that makes them, and no `not_run`, passed: it has no D8
+        # task. So did a run with a coding task left out of the records and
+        # of the plan.
+        b5a = [t for t in TASKS if not t["needs"]]
+        plan = [(t["id"], arm, r + 1) for r, t, arm in harness.plan(b5a, 3)[0]]
+        rep = self.build(self.records(tasks=b5a), plan=plan)
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn("the run's plan isn't the frozen set's: it leaves out 18 of its 270 runs", rep["not_eligible_because"])
+        self.assertIn("3 tasks not run", " / ".join(rep["not_eligible_because"]))
+        coding = next(t["id"] for t in TASKS if t["category"] == "coding")
+        fewer = [t for t in TASKS if t["id"] != coding]
+        rep = self.build(self.records(tasks=fewer), plan=[(t["id"], arm, r + 1) for r, t, arm in harness.plan([dict(x, needs=[]) for x in fewer], 3)[0]])
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn(f"1 tasks of the frozen set not run ({coding})", rep["not_eligible_because"])
+        self.assertEqual(sum(report.required().values()), 270)
+        self.assertTrue(self.build(self.records(), plan=None)["gate_pass"], "the whole matrix, with no plan given")
+
+    def test_every_run_needs_its_judged_outcome(self):
+        # Shady's: every judgment None, and the run passed (the outcome row
+        # had nothing to compare, so nothing was worse).
+        recs = [dict(r, judge=None) for r in self.records()]
+        rep = self.build(recs)
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn("270 runs with no judged outcome", rep["not_eligible_because"])
+        self.assertFalse(rep["gate"]["task_outcome"]["pass"], "no judgment is no outcome, not an outcome no worse")
+        one = self.records()
+        one[7] = dict(one[7], judge={"pass": None, "how": "tests"})
+        self.assertIn("1 runs with no judged outcome", self.build(one)["not_eligible_because"])
+
+    def test_a_turn_the_provider_never_answered_is_not_measured(self):
+        # Shady's: TurnStarted, done, Idle, no response and no usage, in
+        # place of one on-arm no-tool turn: it was measured, and passed.
+        nt = next(t["id"] for t in TASKS if t["category"] == "no_tool")
+        recs = self.records(silent=(nt, "on", 1))
+        (silent,) = [r for r in recs if (r["task"], r["arm"], r["repeat"]) == (nt, "on", 1)]
+        (turn,) = turns.turns(silent["events"])
+        self.assertEqual((turn.outcome, len(turn.rounds), turn.measured), ("done", 0, False))
+        rep = self.build(recs)
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn("1 runs with a turn not measured", " / ".join(rep["not_eligible_because"]))
 
     def test_an_interrupted_run_is_incomplete_not_a_smaller_experiment(self):
         # A budget stop after two whole repeats: they pass, 2 of 3.
         rep = self.build(self.records(repeats=(1, 2)))
         self.assertTrue(all(g["repeats_passing"] == [1, 2] for g in rep["gate"].values()))
         self.assertFalse(rep["gate_pass"])
-        self.assertIn("84 of the plan's 252 runs missing (an interrupted run is incomplete)", rep["not_eligible_because"])
+        self.assertIn("90 of the frozen set's 270 runs missing (an interrupted run is incomplete)", rep["not_eligible_because"])
         rep = self.build(self.records(drop=5))
         self.assertFalse(rep["gate_pass"])
-        self.assertIn("5 of the plan's 252 runs missing", " / ".join(rep["not_eligible_because"]))
+        self.assertIn("5 of the frozen set's 270 runs missing", " / ".join(rep["not_eligible_because"]))
         rep = self.build(self.records()[:-1] + [dict(self.records()[-1], stopped="over budget")])
         self.assertFalse(rep["gate_pass"])
         self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
@@ -1049,14 +1125,16 @@ class SetShape(unittest.TestCase):
         by = {}
         for r in rows:
             by.setdefault((r["task"], r["arm"], r["repeat"]), []).append(r)
-        orig = (report.per_turn, report.rows_of)
+        orig = (report.per_turn, report.rows_of, taskset.load)
         report.per_turn = lambda rec, counter: ([dict(x, measured=True) for x in by[(rec["task"], rec["arm"], rec["repeat"])]], [])
         report.rows_of = lambda *a: {k: {"pass": True} for k in report.GATE}
+        # This set is the frozen one here: eligibility's matrix is the set's.
+        taskset.load = lambda *a: [{"id": t, "needs": [], "turns": []} for t in dict.fromkeys(r["task"] for r in recs)]
         try:
             return report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], qualifying(), 900, [], frozen_meta(),
                                 plan=[(r["task"], r["arm"], r["repeat"]) for r in recs])
         finally:
-            report.per_turn, report.rows_of = orig
+            report.per_turn, report.rows_of, taskset.load = orig
 
     def test_the_gate_passes_only_if_the_shape_holds_and_says_why(self):
         rep = self.build(*self.run_of())

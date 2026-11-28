@@ -23,6 +23,10 @@ it again. **A response whose usage never came** (a stream that failed, was
 cut, or was retried into an error) is no round: it would count as zero
 tokens. It is kept apart, in the turn's `unmeasured`, and a turn with one
 isn't `measured`: the report keeps it out of an eligible run (report.py).
+Nor is **a turn the provider never answered** (no response at all, from
+its `turn_started` to its `idle`): every user-initiated turn is a request
+to the provider, so one with no round measured nothing, and would pass
+for a turn that cost nothing (review #14 round 2, R2-2).
 
 **A call** comes in either of the wire's two forms (`wire.rs` 980-982):
 `tool_use_start` (its name and id) then `tool_use_delta`s (its arguments as
@@ -107,9 +111,9 @@ class Turn:
 
     @property
     def measured(self):
-        """Complete (its `idle`, no error, not aborted), and every response
-        it streamed has its usage."""
-        return self.outcome == "done" and self.t_end is not None and not self.unmeasured
+        """Complete (its `idle`, no error, not aborted), answered (at least
+        one response), and every response it streamed has its usage."""
+        return self.outcome == "done" and self.t_end is not None and bool(self.rounds) and not self.unmeasured
 
     @property
     def user_initiated(self):

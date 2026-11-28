@@ -85,14 +85,20 @@ before it not included).
   can flip the default. Every condition is checked and each one missing is
   named (`not_eligible_because`): a real run (a dry run is never data); a
   counter that can flip the default (the endpoint, or a fitted proxy:
-  count.py); the frozen task set (its digest); exactly three repeats; the
-  plan's runs, every runnable task × both arms × repeats 1–3, each there
-  once, none stopped (an interrupted run is incomplete, not a smaller
-  experiment, and so is one the budget stopped); every user-initiated turn
-  of every run measured (turns.py:
-  its `idle`, every response's usage); no task left out (B6 needs the D8
-  hand-backs' both arms, which B5a doesn't run: §8.1's B5b); the set's
-  shape; no dismissal refused, and every notice probe delivered in 2 of 3.
+  count.py); the frozen task set (its digest); exactly three repeats;
+  **the frozen set's whole matrix** (`required`): every task of the set,
+  the D8 hand-backs included, × both arms × repeats 1–3, each run there
+  once, none stopped. The matrix is the set's, never the caller's: a plan
+  the caller gives is checked against it, and one that leaves runs out is
+  named, but it can't make a smaller experiment whole (review #14 round 2,
+  R2-2). A task with no run at all is named (a D8 task's B5b's: §8.1);
+  a missing run of a task that ran is an interrupted run, incomplete, not
+  a smaller experiment, and so is one the budget stopped. Then: every run
+  judged (one pass or fail each: a run with no judgment is missing
+  evidence, never a pass); every user-initiated turn of every run measured
+  (turns.py: its `idle`, at least one response, every response's usage);
+  the set's shape; no dismissal refused, and every notice probe delivered
+  in 2 of 3.
 - `verdict`: `not eligible` unless it is eligible, whatever the rows say;
   then `passes` or `fails`. `gate_pass` is the verdict `passes`.
 """
@@ -239,7 +245,7 @@ def rows_of(turn_rows, judged, definition):
         off_p = sum(j["pass"] for j in judged if j["task"] == task and j["arm"] == "off")
         if off_p > on_p:
             worse.append(task)
-    out["task_outcome"] = {"worse_with_blocks": worse, "pass": not worse}
+    out["task_outcome"] = {"worse_with_blocks": worse, "judged": len(judged), "pass": bool(judged) and not worse}
     return out
 
 
@@ -283,7 +289,14 @@ def set_shape(records, turn_rows):
     return out
 
 
-def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
+def required(tasks=None):
+    """The runs B6 needs (module docs, "The verdict"): every task of the
+    frozen set, its D8 hand-backs included, × both arms × repeats 1–3."""
+    tasks = taskset.load() if tasks is None else tasks
+    return collections.Counter((t["id"], arm, r) for t in tasks for arm in ("on", "off") for r in REPEATS)
+
+
+def eligibility(records, turn_rows, counter, meta, plan, shape):
     """Why the run can't flip the default: empty when it can (module docs,
     "The verdict")."""
     out = []
@@ -297,16 +310,27 @@ def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
         out.append(f"task set {str(meta.get('taskset'))[:12]}, not the frozen {frozen[:12]}")
     if meta.get("repeats") != len(REPEATS):
         out.append(f"{meta.get('repeats')} repeats, not §2.8's {len(REPEATS)}")
-    if plan is None:
-        out.append("no plan to check the runs against")
-    else:
-        want = collections.Counter(plan)
-        have = collections.Counter((r["task"], r["arm"], r["repeat"]) for r in records)
-        missing, extra = want - have, have - want
-        if missing:
-            out.append(f"{sum(missing.values())} of the plan's {sum(want.values())} runs missing (an interrupted run is incomplete)")
-        if extra:
-            out.append(f"{sum(extra.values())} runs the plan doesn't have, or twice")
+    tasks = taskset.load()
+    want = required(tasks)
+    have = collections.Counter((r["task"], r["arm"], r["repeat"]) for r in records)
+    if plan is not None and collections.Counter(plan) != want:
+        left, added = want - collections.Counter(plan), collections.Counter(plan) - want
+        out.append(f"the run's plan isn't the frozen set's: it leaves out {sum(left.values())} of its {sum(want.values())} runs"
+                   + (f" and has {sum(added.values())} it doesn't" if added else ""))
+    missing, extra = want - have, have - want
+    ran = {t for t, _, _ in have}
+    absent = [t for t in tasks if t["id"] not in ran]
+    d8 = [t["id"] for t in absent if t["needs"]]
+    if d8:
+        out.append(f"{len(d8)} tasks not run ({', '.join(d8)}): B6 needs them, both arms (B5b)")
+    other = [t["id"] for t in absent if not t["needs"]]
+    if other:
+        out.append(f"{len(other)} tasks of the frozen set not run ({', '.join(other)})")
+    gaps = sum(n for (t, _, _), n in missing.items() if t in ran)
+    if gaps:
+        out.append(f"{gaps} of the frozen set's {sum(want.values())} runs missing (an interrupted run is incomplete)")
+    if extra:
+        out.append(f"{sum(extra.values())} runs the frozen set doesn't have, or twice")
     if meta.get("stopped"):
         out.append(f"the run stopped ({meta['stopped']})")
     stopped = [r for r in records if r.get("stopped")]
@@ -315,20 +339,21 @@ def eligibility(records, turn_rows, counter, not_run, meta, plan, shape):
     measured = collections.defaultdict(list)
     for r in turn_rows:
         measured[(r["task"], r["arm"], r["repeat"])].append(r.get("measured", False))
+    unjudged = [rec for rec in records if not isinstance((rec.get("judge") or {}).get("pass"), bool)]
+    if unjudged:
+        out.append(f"{len(unjudged)} runs with no judged outcome")
     bad = [rec for rec in records if not measured.get((rec["task"], rec["arm"], rec["repeat"]))
            or not all(measured[(rec["task"], rec["arm"], rec["repeat"])])]
     if bad:
-        out.append(f"{len(bad)} runs with a turn not measured (no idle, an error, aborted, or a response with no usage)")
-    if not_run:
-        out.append(f"{len(not_run)} tasks not run ({', '.join(t['id'] for t in not_run)}): B6 needs them, both arms (B5b)")
+        out.append(f"{len(bad)} runs with a turn not measured (no idle, an error, aborted, no response, or a response with no usage)")
     if not shape["holds"]:
         out.append("the set's shape doesn't hold")
     probes = notice_probes(records)
     refused = sum(p["refused"] for p in probes.values())
     if refused:
         out.append(f"the desk refused {refused} dismissals")
-    dismissing = {t["id"] for t in taskset.load() if any("dismiss" in s for s in t["turns"])}
-    short = sorted(t for t in {task for task, _, _ in plan or []} & dismissing if probes.get(t, {}).get("delivered", 0) < 2)
+    dismissing = {t["id"] for t in tasks if any("dismiss" in s for s in t["turns"])}
+    short = sorted(t for t in ran & dismissing if probes.get(t, {}).get("delivered", 0) < 2)
     if short:
         out.append(f"the notice probe didn't reach the agent in 2 of 3 on-runs: {', '.join(short)}")
     return out
@@ -353,8 +378,9 @@ def notice_probes(records):
 
 
 def build(records, counter, definition, not_run, meta, plan=None):
-    """The whole report (module docs). `plan` is the run's prescribed runs,
-    `(task, arm, repeat)` (harness.plan, three repeats), for eligibility."""
+    """The whole report (module docs). `not_run` (the tasks the run left for
+    B5b) is descriptive; `plan`, the run's own `(task, arm, repeat)`, is
+    checked against the frozen set's matrix, never taken for it."""
     turn_rows, event_started, judged = [], [], []
     for rec in records:
         rows, ev = per_turn(rec, counter)
@@ -398,7 +424,7 @@ def build(records, counter, definition, not_run, meta, plan=None):
     shape = set_shape(records, turn_rows)
     also["by_bucket"] = by_bucket(records, turn_rows, judged, definition, shape)
     rows_pass = all(g["pass"] for g in gate.values())
-    why_not = eligibility(records, turn_rows, counter, not_run, meta, plan, shape)
+    why_not = eligibility(records, turn_rows, counter, meta, plan, shape)
     verdict = "not eligible" if why_not else ("passes" if rows_pass else "fails")
     return {
         "meta": meta | {"counter": counter.describe()},

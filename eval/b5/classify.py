@@ -29,8 +29,9 @@ report.py, reported with no gate).
 A `cards_ui` result counts as another tool's: a card is the turn's work.
 A turn that ended with no response after its anchor (cancelled, or an
 error) has k = 0: no closing rounds, and `complete` is false. So is a turn
-that isn't `measured` (turns.py: no `idle`, an error, aborted, or a
-response with no usage, which could hide a closing round).
+that isn't `measured` (turns.py: no `idle`, an error, aborted, no
+response at all, or a response with no usage, which could hide a closing
+round).
 """
 
 from dataclasses import dataclass
