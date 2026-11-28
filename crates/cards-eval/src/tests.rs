@@ -272,7 +272,10 @@ fn an_answer_picks_the_option_the_task_names() {
 /// "Don't hide zero-balance accounts". Negation and order change nothing.
 #[test]
 fn a_negation_or_another_order_never_picks_the_opposite() {
-    for options in [["Don't hide zero-balance accounts", "Hide zero-balance accounts"], ["Hide zero-balance accounts", "Don't hide zero-balance accounts"]] {
+    for options in [
+        ["Don't hide zero-balance accounts", "Hide zero-balance accounts"],
+        ["Hide zero-balance accounts", "Don't hide zero-balance accounts"],
+    ] {
         let a = ask_for(json!({"question": "Zeros?", "options": options}), &["Hide zero-balance accounts"]);
         assert_eq!(a["values"], json!({"choice": "Hide zero-balance accounts"}), "{options:?}");
     }
