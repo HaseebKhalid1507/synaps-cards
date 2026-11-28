@@ -16,7 +16,8 @@ Take the responses after the turn's last result from a tool other than
 the engine delivered in it (§2.8: a turn includes its steers). A response
 after a steer answers the user, so it isn't closing; and with blocks off
 the response after a steer is the turn's one, so k stays 1 as §2.8 says.
-This is the one reading the classifier adds to the text.
+§2.8 states this reading since B5a (synaps-cards #14), with the tail-only
+limitation below.
 
 **A tail metric, not a chatter detector.** It counts the block-only
 responses at the turn's end, as §2.8 defines closing rounds; it doesn't see

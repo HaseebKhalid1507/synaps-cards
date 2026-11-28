@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from b5.classify import anchor, closing
 from b5.turns import turns
@@ -258,6 +259,24 @@ class Classifier(unittest.TestCase):
         w.ev({"ev": "aborted", "context_saved": True}).ev({"ev": "idle"})
         c = closing(one(w))
         self.assertEqual((c.k, c.closing_rounds, c.complete), (0, 0, False))
+
+
+class Authority(unittest.TestCase):
+    """§2.8 states what the classifier and the counter do (review #14 round
+    2: the readings B5a made are ratified in the authority, not left in a
+    module's docs)."""
+
+    DOC = (Path(__file__).resolve().parents[2] / "docs" / "blocks.md").read_text()
+
+    def test_2_8_states_the_latest_delivered_steer_and_the_tail_only_limit(self):
+        self.assertIn("the later of the turn's last result from a tool other than `cards_block` and the latest user message "
+                      "delivered in the turn", self.DOC)
+        self.assertIn("A steer the engine queued past the turn's end starts its own turn, which is user-initiated", self.DOC)
+        self.assertIn("**It is a tail metric.**", self.DOC)
+
+    def test_2_8_states_the_two_framings(self):
+        self.assertIn("**The result's framing** (the pair's allowance less the call's) is input overhead", self.DOC)
+        self.assertIn("never attributed to block-call output", self.DOC)
 
 
 if __name__ == "__main__":

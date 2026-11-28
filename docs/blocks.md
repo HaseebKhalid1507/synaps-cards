@@ -506,7 +506,9 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
   The set and its prompts are committed before the first run. Tuning the description never changes them.
 - **A turn** is one user-initiated run, from its `TurnStarted` to the session's `Idle`, steers included. Event-started turns are reported apart, outside the denominator.
 - **A round** is one provider response.
-- **The closing-round classifier.** Take the responses after the turn's last result from a tool other than `cards_block`, or after the user's message if there is none: R1 … Rk. With blocks off, k is 1.
+- **The closing-round classifier.** Take the responses after the later of the turn's last result from a tool other than `cards_block` and the latest user message delivered in the turn (its opening message, or a steer the engine delivered in it; ratified in B5a, synaps-cards #14): R1 … Rk. With blocks off, k is 1.
+  - A response after a steer answers the user, so it isn't closing. A steer the engine queued past the turn's end starts its own turn, which is user-initiated and counts as one.
+  - **It is a tail metric.** It counts the block-only responses at the turn's end. A later ordinary tool result or steer moves the anchor past earlier ones, so a block-only response that another call follows isn't a closing round. B5 reports every block-only response, wherever it falls, beside the gate row, with no gate.
   - **The turn has k − 1 closing rounds,** whichever response carried the final text.
   - **Their input** is the reported input of R2 … Rk: each re-read the context once more.
   - **Their output** isn't split by response, because the final text may ride with the block call or follow it. It is counted in the block-call attribution and in the net-output row.
