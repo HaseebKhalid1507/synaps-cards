@@ -1,0 +1,20 @@
+[
+  {
+    "path": "ledger/exporter.py",
+    "content": "\"\"\"CSV export: the journal in the importer's format (importer.py).\"\"\"\n\nimport csv\nimport io\n\nfrom . import money\nfrom .importer import COLUMNS\n\n\ndef write_csv(journal):\n    \"\"\"`journal` as CSV text: one row per line, the entries numbered from 1\n    in posting order, the amounts as `money.format` prints them.\"\"\"\n    out = io.StringIO()\n    w = csv.writer(out, lineterminator=\"\\n\")\n    w.writerow(COLUMNS)\n    for n, entry in enumerate(journal.entries, 1):\n        for line in entry.lines:\n            w.writerow([n, entry.date.isoformat(), entry.memo, line.account, money.format(line.cents)])\n    return out.getvalue()\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "from . import report\n",
+    "new": "from . import exporter, report\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    s.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"balance\":",
+    "new": "    s.add_argument(\"file\")\n    x = sub.add_parser(\"export\", help=\"the journal as CSV\")\n    x.add_argument(\"file\")\n    x.add_argument(\"out\")\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"export\":\n        with open(a.out, \"w\", encoding=\"utf-8\") as f:\n            f.write(exporter.write_csv(journal))\n    elif a.cmd == \"balance\":"
+  },
+  {
+    "path": "tests/test_exporter.py",
+    "content": "import unittest\n\nfrom ledger import exporter, importer\nfrom ledger.accounts import default_chart\nfrom ledger.journal import Journal\nfrom tests.helpers import SAMPLE, journal\n\n\nclass Export(unittest.TestCase):\n    def test_what_it_writes_imports_back(self):\n        j = journal(*SAMPLE)\n        back = Journal(default_chart())\n        importer.import_into(back, exporter.write_csv(j))\n        self.assertEqual([(e.date, e.memo, e.lines) for e in back.entries], [(e.date, e.memo, e.lines) for e in j.entries])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

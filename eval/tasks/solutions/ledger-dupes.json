@@ -1,0 +1,7 @@
+[
+  {
+    "path": "ledger/importer.py",
+    "old": "def import_into(journal, text):\n    \"\"\"Post every entry of `text` to `journal`: how many.\"\"\"\n    entries = read_csv(text)\n    for e in entries:\n        journal.post(e)\n    return len(entries)",
+    "new": "def _key(entry):\n    return (entry.date, entry.memo, tuple(sorted((line.account, line.cents) for line in entry.lines)))\n\n\ndef import_into(journal, text):\n    \"\"\"Post every entry of `text` not already in `journal`: (imported,\n    skipped).\"\"\"\n    have = {_key(e) for e in journal.entries}\n    imported = skipped = 0\n    for e in read_csv(text):\n        if _key(e) in have:\n            skipped += 1\n            continue\n        journal.post(e)\n        have.add(_key(e))\n        imported += 1\n    return imported, skipped"
+  }
+]

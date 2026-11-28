@@ -1,0 +1,12 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "        self.loans = []\n\n    def on_loan",
+    "new": "        self.loans = []\n        self.queues = {}\n\n    def reserve(self, isbn, member):\n        \"\"\"Put `member` in `isbn`'s queue.\"\"\"\n        self.catalog.get(isbn)\n        q = self.queues.setdefault(isbn, [])\n        if member in q:\n            raise ValueError(f\"{member} has reserved {isbn} already\")\n        q.append(member)\n\n    def queue(self, isbn):\n        return list(self.queues.get(isbn, []))\n\n    def on_loan"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "        if len(self.held_by(member)) >= m.limit:\n            raise ValueError(f\"{m.name} has {m.limit} books already\")",
+    "new": "        if len(self.held_by(member)) >= m.limit:\n            raise ValueError(f\"{m.name} has {m.limit} books already\")\n        q = self.queues.get(isbn)\n        if q:\n            if q[0] != member:\n                raise ValueError(f\"{isbn} is reserved for {q[0]}\")\n            q.pop(0)"
+  }
+]

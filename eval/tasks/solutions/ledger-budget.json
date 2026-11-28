@@ -1,0 +1,25 @@
+[
+  {
+    "path": "ledger/budget.py",
+    "content": "\"\"\"Budgets: planned cents per account and month, from CSV.\n\n    account,month,amount\n    5000,2026-01,1200.00\n\"\"\"\n\nimport csv\nimport io\nimport re\n\nfrom . import money\n\nCOLUMNS = (\"account\", \"month\", \"amount\")\n_MONTH = re.compile(r\"\\d{4}-(0[1-9]|1[0-2])\")\n\n\ndef load_csv(text):\n    \"\"\"`{(account, month): cents}` from `text` (module docs).\"\"\"\n    rows = csv.DictReader(io.StringIO(text))\n    missing = [c for c in COLUMNS if c not in (rows.fieldnames or [])]\n    if missing:\n        raise ValueError(f\"missing columns: {', '.join(missing)}\")\n    out = {}\n    for row in rows:\n        if not any((v or \"\").strip() for v in row.values()):\n            continue\n        account, month = row[\"account\"].strip(), row[\"month\"].strip()\n        if not _MONTH.fullmatch(month):\n            raise ValueError(f\"not a month: {month!r}\")\n        if (account, month) in out:\n            raise ValueError(f\"{account} is budgeted twice for {month}\")\n        out[(account, month)] = money.parse(row[\"amount\"])\n    return out\n"
+  },
+  {
+    "path": "ledger/report.py",
+    "old": "def render(rows):",
+    "new": "def variance(journal, budget, month):\n    \"\"\"Each account `budget` plans for in `month`, by code: rows of (code,\n    name, planned, actual, actual - planned), `actual` the month's net\n    change signed like `statement`.\"\"\"\n    from .accounts import DEBIT_NORMAL\n\n    rows = []\n    for code in sorted(c for c, m in budget if m == month):\n        account = journal.chart.get(code)\n        sign = 1 if account.kind in DEBIT_NORMAL else -1\n        actual = sum(sign * line.cents for entry, line in journal.lines(code) if entry.date.strftime(\"%Y-%m\") == month)\n        planned = budget[(code, month)]\n        rows.append((code, account.name, planned, actual, actual - planned))\n    return rows\n\n\ndef render(rows):"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "from . import report\n",
+    "new": "from . import budget, report\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    s.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"balance\":",
+    "new": "    s.add_argument(\"file\")\n    v = sub.add_parser(\"variance\", help=\"a month's budget against the journal\")\n    v.add_argument(\"file\")\n    v.add_argument(\"budget\")\n    v.add_argument(\"--month\", required=True)\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"variance\":\n        with open(a.budget, encoding=\"utf-8\") as f:\n            plan = budget.load_csv(f.read())\n        print(report.render(report.variance(journal, plan, a.month)), file=out)\n    elif a.cmd == \"balance\":"
+  },
+  {
+    "path": "tests/test_budget.py",
+    "content": "import unittest\n\nfrom ledger import budget, report\nfrom tests.helpers import SAMPLE, journal\n\n\nclass Budget(unittest.TestCase):\n    def test_variance(self):\n        plan = budget.load_csv(\"account,month,amount\\n5000,2026-01,1000.00\\n\")\n        self.assertEqual(report.variance(journal(*SAMPLE), plan, \"2026-01\"), [(\"5000\", \"Rent\", 100000, 120000, 20000)])\n\n    def test_a_month_twice_is_refused(self):\n        with self.assertRaises(ValueError):\n            budget.load_csv(\"account,month,amount\\n5000,2026-01,1.00\\n5000,2026-01,2.00\\n\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

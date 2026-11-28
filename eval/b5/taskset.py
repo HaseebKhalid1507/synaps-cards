@@ -1,0 +1,272 @@
+"""The frozen task set (docs/blocks.md §2.8): `eval/tasks/set.json`, the
+workspaces it runs in, the checks that judge it, and the reference
+solutions that prove each check can pass.
+
+**Frozen.** The set's digest (`digest`) covers set.json and every file
+under the workspaces, checks and solutions. It is committed beside them
+(`tasks/set.sha256`), a test keeps the two equal, and every run records
+it. B5b reuses the set unchanged: a run of a set with another digest isn't
+B5's.
+
+**A task** runs in a fresh copy of its workspace (`prepare`): the
+workspace, then the task's seed edits (a bug put in on purpose; the
+frozen set has none since its one-line repairs gave way to long tasks). Its
+`turns` are the user's side, in order:
+- `say`: a message, sent when the session is idle: it starts a turn;
+- `steer`: a message sent while the turn runs, once the turn has had
+  `after_round` rounds (if the turn ends first, it is said instead, as the
+  next turn's message);
+- `dismiss`: the user dismisses a block (`first_block`: the first live block
+  on the board, harness.py's "A dismissal") once the turn has had
+  `after_round` rounds; the notice rides the user's next message, as the
+  desk sends it (desk.py);
+- `answer`: once the session is idle, the user answers the card the agent
+  last showed, by the fixed policy (`cards-eval answer`): the option whose
+  label is one of `pick`. The prompt asks the agent for exactly the labels
+  it may pick, so the answer means what the check judges. A card with no
+  such option, or two, is an interaction failure: nothing is sent, the step
+  says why, and the run is judged as it stands;
+- `hand_back` (D8, both arms frozen here; §2.8's "hands back an edit"):
+  the user edits the agent's proposal and sends the edit, which starts a
+  turn. The edit is fixed by the task, never by what the agent proposed
+  (`append_step`, `append_text` or `keep: all`), and so is its plain
+  form, `message`: the same intent, as the user would type it.
+  - blocks **on**: the desk takes the agent's live block of the step's
+    `kind` (the latest, not dismissed, not pending), edits it as `edit`
+    says and hands it back with `say` (desk.py). With no such block, the
+    user sends `message` instead, and the step says so;
+  - blocks **off**: the user sends `message`. The task's opening asks for
+    the proposal in the reply (`say_off`) rather than in a block (`say`):
+    the one place a task's prompt differs between the arms, and only by
+    where the proposal goes.
+  The judge is the edited request's: a check of what the edit asks.
+
+**Judged per task** (`judge`), the same in both arms:
+- `tests`: the workspace's own tests and the task's hidden check
+  (`checks/<id>.py`, copied in as `tests/test_b5_check.py` after the run)
+  all pass: `python3 -m unittest` exits 0, compiled from source (no
+  bytecode the run left is read);
+- `expect`: the task's **answer** is the final text: of the last turn's
+  responses, the last one with text (harness.py's `final_text`; the text
+  of earlier responses is the agent's narration, not its answer). It is
+  checked by every rule the task gives, all of which must hold. Each
+  task's answer is deterministic: a number, a list or a fixed form, and
+  its prompt asks for that alone, so the whole answer is read by the
+  form's grammar, never searched for tokens: a refusal, a wrong value, an
+  over-inclusive list, prose around the answer, or the right tokens under
+  a negation ("It is not 21.", "Do not use 0, 2, 2, 4.") fails (review #14
+  round 2, R2-5). Its dress is allowed: the whitespace, backticks and
+  emphasis around it, and a closing period (`bare`).
+  - `numbers`: the bare answer is these numbers, in order, and nothing
+    else: one number, or a list of them separated by commas, in brackets
+    or parentheses or none (`NUMBERS`; a number is an integer or a
+    decimal, a minus sign its own);
+  - `items`: the answer is a list (split at commas, semicolons, new lines
+    and a lone "and"; each item without its bullet, numbering, quotes,
+    backticks and outer punctuation) whose items match these patterns one
+    to one, each item whole: none missing, none extra, none matched
+    twice; in this order if `ordered`;
+  - `form`: the bare answer, whole, is this pattern (case-folded): a fixed
+    form, as `debit: ACCOUNT, credit: ACCOUNT`.
+  Every task also freezes `reference`, a right answer, and `wrong`, wrong
+  answers its judge must refuse, among them the reference under a
+  negation; tests/test_taskset.py holds both, a few refusals, and every
+  reference negated, to the judge.
+
+**`needs`** names what a task waits for: `D8` (take, edit, hand back). B5a
+marks such a task "needs D8, not run"; B5b runs it unchanged.
+"""
+
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+TASKS = Path(__file__).resolve().parent.parent / "tasks"
+SET = TASKS / "set.json"
+FROZEN = TASKS / "set.sha256"
+CATEGORIES = {"coding": 20, "short": 10, "no_tool": 5, "interactive": 5}  # §2.8's minimums
+# Long tasks above §2.8's 20, for the ones whose blocks-off runs don't reach
+# 6 rounds (report.py's "Long tasks"): the set holds them, the gate doesn't.
+SPARES = {"coding": 2}
+# A coding task's reference solution is real work, not a one-line repair
+# (review #14, P1 4): at least this many lines written.
+LONG_WORK_LINES = 5
+STEPS = ("say", "steer", "dismiss", "answer", "hand_back")
+NEEDS = ("D8",)
+CHECK_NAME = "test_b5_check.py"
+EXPECT = {"numbers", "items", "ordered", "form"}
+HAND_BACK = {"block", "edit", "say", "message"}
+EDITS = {"append_step", "append_text", "keep"}
+NUMBER = r"-?\d+(?:\.\d+)?"
+_LIST = rf"{NUMBER}(?:\s*,\s*{NUMBER})*"
+NUMBERS = re.compile(rf"\[\s*({_LIST})\s*\]|\(\s*({_LIST})\s*\)|({_LIST})")
+DRESS = re.compile(r"^[\s`*_]+|[\s`*_.]+$")
+ITEM_SPLIT = re.compile(r"[,;\n]|\band\b")
+ITEM_EDGE = re.compile(r"^(?:\s|[-*•]|\d+[.)]\s)*[\s`'\"“”‘’(\[]*|[\s`'\"“”‘’)\].:!]*$")
+
+
+def load(path=SET):
+    return json.loads(Path(path).read_text())["tasks"]
+
+
+def digest(root=TASKS):
+    """SHA-256 over set.json and every file of the workspaces, checks and
+    solutions, by path in byte order (caches left out)."""
+    h = hashlib.sha256()
+    files = [root / "set.json"] + sorted(
+        p for d in ("workspaces", "checks", "solutions") for p in (root / d).rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts)
+    for p in files:
+        rel = p.relative_to(root).as_posix().encode()
+        data = p.read_bytes()
+        h.update(len(rel).to_bytes(4, "big") + rel + len(data).to_bytes(8, "big") + data)
+    return h.hexdigest()
+
+
+def problems(tasks, root=TASKS):
+    """Everything wrong with the set's shape: empty when it is §2.8's."""
+    out = []
+    ids = [t["id"] for t in tasks]
+    if len(ids) != len(set(ids)):
+        out.append("task ids repeat")
+    for cat, n in CATEGORIES.items():
+        have = sum(t["category"] == cat for t in tasks)
+        if have < n + SPARES.get(cat, 0):
+            out.append(f"{have} {cat} tasks: §2.8 asks at least {n}" + (f", and the set keeps {SPARES[cat]} spares" if cat in SPARES else ""))
+    for t in tasks:
+        where = t["id"]
+        if t["category"] not in CATEGORIES:
+            out.append(f"{where}: no category {t['category']!r}")
+        if not (root / "workspaces" / t["workspace"]).is_dir():
+            out.append(f"{where}: no workspace {t['workspace']!r}")
+        if any(n not in NEEDS for n in t["needs"]):
+            out.append(f"{where}: needs {t['needs']}")
+        turns = t["turns"]
+        if not turns or "say" not in turns[0]:
+            out.append(f"{where}: the first step says something")
+        for s in turns:
+            keys = [k for k in s if k in STEPS]
+            if len(keys) != 1:
+                out.append(f"{where}: a step is one of {STEPS}: {s}")
+            elif keys[0] in ("steer", "dismiss") and not isinstance(s.get("after_round"), int):
+                out.append(f"{where}: a {keys[0]} says after which round")
+            elif keys[0] == "answer" and not (isinstance(s["answer"].get("pick"), list) and s["answer"]["pick"]
+                                              and all(isinstance(p, str) and p.strip() for p in s["answer"]["pick"])):
+                out.append(f"{where}: an answer names the labels it picks")
+            elif keys[0] == "hand_back" and "D8" not in t["needs"]:
+                out.append(f"{where}: a hand-back needs D8")
+            elif keys[0] == "hand_back" and not (HAND_BACK <= set(s["hand_back"]) and set(s["hand_back"]["edit"]) <= EDITS
+                                                 and len(s["hand_back"]["edit"]) == 1 and "say_off" in turns[0]):
+                out.append(f"{where}: a hand-back has {', '.join(sorted(HAND_BACK))}, one edit of {sorted(EDITS)}, and an opening say_off")
+        c = t["check"]
+        if "tests" in c and not (root / c["tests"]).is_file():
+            out.append(f"{where}: no check {c['tests']}")
+        if "expect" in c and (not c["expect"] or not set(c["expect"]) <= EXPECT or not c.get("reference") or not c.get("wrong")):
+            out.append(f"{where}: an expect has {', '.join(sorted(EXPECT))}, a reference and wrong answers")
+        if t["category"] == "coding" and "tests" not in c:
+            out.append(f"{where}: a coding task is judged by tests")
+        if t["category"] == "coding" and (t.get("solution") and (root / t["solution"]).is_file()):
+            edits = json.loads((root / t["solution"]).read_text())
+            written = sum(len((e.get("new") or e.get("content") or "").splitlines()) for e in edits)
+            if written < LONG_WORK_LINES:
+                out.append(f"{where}: its reference solution writes {written} line(s): a coding task is ≥ {LONG_WORK_LINES} lines of work")
+    return out
+
+
+def apply(workspace, edits):
+    """Apply `edits` to the files under `workspace`: each replaces one exact
+    occurrence of `old` with `new` in `path`, or writes `content`."""
+    for e in edits:
+        p = Path(workspace) / e["path"]
+        if "content" in e:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(e["content"])
+            continue
+        text = p.read_text()
+        n = text.count(e["old"])
+        if n != 1:
+            raise ValueError(f"{e['path']}: the edit's text is there {n} times, not once: {e['old'][:60]!r}")
+        p.write_text(text.replace(e["old"], e["new"]))
+
+
+def prepare(task, dest, root=TASKS):
+    """A fresh copy of the task's workspace at `dest`, seeded."""
+    dest = Path(dest)
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(root / "workspaces" / task["workspace"], dest, ignore=shutil.ignore_patterns("__pycache__"))
+    apply(dest, task["seed"])
+    return dest
+
+
+def solve(task, workspace, root=TASKS):
+    """Apply the task's reference solution (the dry run's model, and the
+    set's own test)."""
+    apply(workspace, json.loads((root / task["solution"]).read_text()))
+
+
+def judge(task, workspace=None, text="", root=TASKS, timeout=120):
+    """`{"pass": bool, "how": …, "detail": …}` for one run (module docs)."""
+    c = task["check"]
+    if "tests" in c:
+        ws = Path(workspace)
+        shutil.copyfile(root / c["tests"], ws / "tests" / CHECK_NAME)
+        # Compiled from source, always: a .pyc in the workspace (an earlier
+        # test run) is trusted by its source's whole-second mtime and size,
+        # so an edit of the same length in the same second would be judged
+        # as the code before it.
+        with tempfile.TemporaryDirectory() as cache:
+            try:
+                r = subprocess.run([sys.executable, "-m", "unittest", "-q"], cwd=ws, capture_output=True, text=True, timeout=timeout,
+                                   env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": cache})
+                ok, detail = r.returncode == 0, (r.stdout + r.stderr)[-1500:]
+            except subprocess.TimeoutExpired:
+                ok, detail = False, f"the tests ran past {timeout}s"
+            finally:
+                (ws / "tests" / CHECK_NAME).unlink(missing_ok=True)
+        return {"pass": ok, "how": "tests", "detail": detail}
+    why = expect(c["expect"], text)
+    return {"pass": not why, "how": "expect", "detail": text[-400:], **({"why": why} if why else {})}
+
+
+def bare(text):
+    """The answer without its dress (module docs): the whitespace, backticks
+    and emphasis around it, and a closing period."""
+    return DRESS.sub("", text or "")
+
+
+def numbers(text):
+    """The numbers the bare answer is, in order, or None if it is anything
+    else (module docs, `numbers`)."""
+    hit = NUMBERS.fullmatch(bare(text))
+    if not hit:
+        return None
+    return [float(x) for x in re.split(r"\s*,\s*", next(g for g in hit.groups() if g))]
+
+
+def items(text):
+    return [s for s in (ITEM_EDGE.sub("", x).strip().casefold() for x in ITEM_SPLIT.split(text)) if s]
+
+
+def expect(e, text):
+    """Why `text` fails the rules `e` (module docs): empty when it passes."""
+    out, low = [], text.casefold()
+    if "numbers" in e and numbers(text) != [float(x) for x in e["numbers"]]:
+        out.append(f"not the numbers {e['numbers']} alone: {bare(text)[:80]!r}")
+    if "items" in e:
+        got, pats = items(text), [re.compile(p, re.IGNORECASE) for p in e["items"]]
+        if e.get("ordered"):
+            ok = len(got) == len(pats) and all(p.fullmatch(g) for p, g in zip(pats, got))
+        else:
+            ok = len(got) == len(pats) and all(sum(bool(p.fullmatch(g)) for g in got) == 1 for p in pats) \
+                and all(sum(bool(p.fullmatch(g)) for p in pats) == 1 for g in got)
+        if not ok:
+            out.append(f"items {got}")
+    if "form" in e and not re.fullmatch(e["form"], bare(low), re.IGNORECASE | re.DOTALL):
+        out.append(f"not the form {e['form']!r}: {bare(text)[:80]!r}")
+    return out

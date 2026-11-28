@@ -1,0 +1,46 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "FINE_PER_DAY = 25  # cents\n",
+    "new": "FINE_PER_DAY = 25  # cents\nMAX_OWED = 500  # cents: owing more, a member can't borrow\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "    returned: datetime.date | None = None\n",
+    "new": "    returned: datetime.date | None = None\n    fine: int = 0  # cents, recorded at the return\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "        self.loans = []\n",
+    "new": "        self.loans = []\n        self.payments = []  # (member, cents)\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "        m = self.members[member]\n        if self.on_loan(isbn):",
+    "new": "        m = self.members[member]\n        if self.owed(member) > MAX_OWED:\n            raise ValueError(f\"{m.name} owes {self.owed(member)} cents\")\n        if self.on_loan(isbn):"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "        loan.returned = today\n        return fine(loan, today)\n",
+    "new": "        loan.returned = today\n        loan.fine = fine(loan, today)\n        return loan.fine\n\n    def pay(self, member, cents):\n        \"\"\"Record `member`'s payment of `cents`.\"\"\"\n        self.members[member]\n        if cents <= 0:\n            raise ValueError(f\"a payment is a positive amount: {cents}\")\n        self.payments.append((member, cents))\n\n    def owed(self, member):\n        \"\"\"`member`'s recorded fines minus their payments, in cents.\"\"\"\n        fines = sum(l.fine for l in self.loans if l.member == member)\n        return fines - sum(c for m, c in self.payments if m == member)\n"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "                   \"returned\": l.returned.isoformat() if l.returned else None} for l in loans.loans],\n    }",
+    "new": "                   \"returned\": l.returned.isoformat() if l.returned else None} for l in loans.loans],\n        \"payments\": [{\"member\": m, \"cents\": c} for m, c in loans.payments],\n    }"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "                                datetime.date.fromisoformat(l[\"due\"]), returned))\n    return loans",
+    "new": "                                datetime.date.fromisoformat(l[\"due\"]), returned, l.get(\"fine\", 0)))\n    loans.payments = [(p[\"member\"], p[\"cents\"]) for p in data.get(\"payments\", [])]\n    return loans"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"search\":",
+    "new": "    l.add_argument(\"file\")\n    p = sub.add_parser(\"pay\", help=\"record a payment\")\n    p.add_argument(\"file\")\n    p.add_argument(\"member\")\n    p.add_argument(\"amount\")\n    o = sub.add_parser(\"owed\", help=\"what members owe\")\n    o.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"pay\":\n        whole, _, frac = a.amount.partition(\".\")\n        loans.pay(a.member, int(whole or \"0\") * 100 + int(frac.ljust(2, \"0\")[:2] or \"0\"))\n        store.save(a.file, loans)\n    elif a.cmd == \"owed\":\n        for _, m in sorted(loans.members.items()):\n            cents = loans.owed(m.id)\n            if cents:\n                print(f\"{m.id}  {m.name}  {cents // 100}.{cents % 100:02d}\", file=out)\n    elif a.cmd == \"search\":"
+  },
+  {
+    "path": "tests/test_fees.py",
+    "content": "import datetime\nimport unittest\n\nfrom tests.helpers import BOOKS, d, library\n\n\nclass Fees(unittest.TestCase):\n    def test_a_fine_is_owed_until_paid(self):\n        lib = library()\n        loan = lib.lend(BOOKS[0].isbn, \"m1\", d(\"2026-03-01\"))\n        lib.give_back(BOOKS[0].isbn, loan.due + datetime.timedelta(days=2))\n        self.assertEqual(lib.owed(\"m1\"), 50)\n        lib.pay(\"m1\", 50)\n        self.assertEqual(lib.owed(\"m1\"), 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "path": "shelf/catalog.py",
+    "old": "            score = len(want & set(words(book.title)))",
+    "new": "            title = set(words(book.title))\n            score = sum(1 for w in want if any(t.startswith(w) for t in title))"
+  },
+  {
+    "path": "tests/test_catalog.py",
+    "old": "        self.assertEqual([b.title for b in found], [\"The Quiet Garden\", \"Émile and the Quiet Sea\"])",
+    "new": "        self.assertEqual([b.title for b in found], [\"The Quiet Garden\", \"Gardens of Stone\", \"Émile and the Quiet Sea\"])"
+  }
+]

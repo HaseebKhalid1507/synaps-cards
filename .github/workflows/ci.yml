@@ -60,6 +60,13 @@ jobs:
       - name: Goldens (scripts/oracle.py, the second implementation)
         if: runner.os == 'Linux'
         run: python3 scripts/oracle.py --check
+      # B5's method (docs/blocks.md §2.8): the frozen task set and its
+      # digest, the turn, the classifier, the counting and the harness.
+      # Standard library only; no provider and no daemon.
+      - name: B5's method (eval/tests)
+        if: runner.os == 'Linux'
+        working-directory: eval
+        run: python3 -m unittest discover -s tests
       # The plugin's own install build (design §1.1): what Synaps runs as
       # `extension.setup`, leaving the manifest's `extension.command`.
       - name: Setup script (scripts/setup.sh, then the manifest's command)

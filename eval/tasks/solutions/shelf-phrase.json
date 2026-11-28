@@ -1,0 +1,12 @@
+[
+  {
+    "path": "shelf/catalog.py",
+    "old": "from .text import words\n",
+    "new": "import re\n\nfrom .text import words\n\n\ndef _contains(seq, part):\n    return any(seq[i:i + len(part)] == part for i in range(len(seq) - len(part) + 1))\n"
+  },
+  {
+    "path": "shelf/catalog.py",
+    "old": "        want = set(words(query))\n        if not want:\n            return []\n        scored = []\n        for book in self.books.values():\n            score = len(want & set(words(book.title)))",
+    "new": "        phrases = [p for p in (words(q) for q in re.findall(r'\"([^\"]*)\"', query)) if p]\n        want = set(words(re.sub(r'\"[^\"]*\"', \" \", query))) | {w for p in phrases for w in p}\n        if not want:\n            return []\n        scored = []\n        for book in self.books.values():\n            title = words(book.title)\n            if not all(_contains(title, p) for p in phrases):\n                continue\n            score = len(want & set(title))"
+  }
+]

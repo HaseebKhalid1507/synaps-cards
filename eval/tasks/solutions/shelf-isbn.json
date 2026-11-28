@@ -1,0 +1,7 @@
+[
+  {
+    "path": "shelf/models.py",
+    "old": "    year: int | None = None\n",
+    "new": "    year: int | None = None\n\n    def __post_init__(self):\n        digits = self.isbn.replace(\"-\", \"\").replace(\" \", \"\")\n        if len(digits) != 13 or not digits.isdigit():\n            raise ValueError(f\"an ISBN-13 has 13 digits: {self.isbn!r}\")\n        check = (10 - sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(digits[:12])) % 10) % 10\n        if check != int(digits[12]):\n            raise ValueError(f\"{self.isbn!r}: the check digit should be {check}\")\n        self.isbn = digits\n"
+  }
+]

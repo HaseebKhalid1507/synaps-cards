@@ -1,0 +1,27 @@
+[
+  {
+    "path": "ledger/report.py",
+    "old": "def statement(journal, code):\n    \"\"\"`code`'s lines with a running balance: rows of (date, memo, cents,\n    running cents), signed by the account's kind.\"\"\"",
+    "new": "def statement(journal, code, since=None):\n    \"\"\"`code`'s lines with a running balance: rows of (date, memo, cents,\n    running cents), signed by the account's kind. With `since`, the lines on\n    or after it, after an opening row with the balance before it.\"\"\""
+  },
+  {
+    "path": "ledger/report.py",
+    "old": "        rows.append((entry.date, entry.memo, sign * line.cents, running))\n    return rows",
+    "new": "        rows.append((entry.date, entry.memo, sign * line.cents, running))\n    if since is not None:\n        before = [r for r in rows if r[0] < since]\n        opening = before[-1][3] if before else 0\n        rows = [(since, \"Opening balance\", 0, opening)] + [r for r in rows if r[0] >= since]\n    return rows"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "import argparse\nimport sys\n",
+    "new": "import argparse\nimport datetime\nimport sys\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    s.add_argument(\"file\")\n    a = ap.parse_args(argv)",
+    "new": "    s.add_argument(\"file\")\n    s.add_argument(\"--since\", type=datetime.date.fromisoformat, help=\"only lines on or after this date (YYYY-MM-DD)\")\n    a = ap.parse_args(argv)"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "        print(report.render(report.statement(journal, a.code)), file=out)",
+    "new": "        print(report.render(report.statement(journal, a.code, since=a.since)), file=out)"
+  }
+]

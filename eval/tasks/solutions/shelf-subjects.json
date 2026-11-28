@@ -1,0 +1,31 @@
+[
+  {
+    "path": "shelf/models.py",
+    "old": "    year: int | None = None\n",
+    "new": "    year: int | None = None\n    subjects: list = field(default_factory=list)\n"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "        catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", [])), b.get(\"year\")))",
+    "new": "        catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", [])), b.get(\"year\"), list(b.get(\"subjects\", []))))"
+  },
+  {
+    "path": "shelf/catalog.py",
+    "old": "from .text import words\n",
+    "new": "from .text import fold, words\n"
+  },
+  {
+    "path": "shelf/catalog.py",
+    "old": "    def search(self, query):\n        \"\"\"Books whose titles share words with `query`, the most shared\n        first, then by title.\"\"\"\n        want = set(words(query))\n        if not want:\n            return []\n        scored = []\n        for book in self.books.values():\n            score = len(want & set(words(book.title)))",
+    "new": "    def by_subject(self, subject):\n        \"\"\"The books with `subject` (case and accents ignored), by title.\"\"\"\n        want = fold(subject)\n        return sorted((b for b in self.books.values() if want in {fold(s) for s in b.subjects}), key=lambda b: b.title)\n\n    def search(self, query):\n        \"\"\"Books whose titles share words with `query`, the most shared\n        first, then by title; `subject:WORD` terms keep only the books with\n        one of those subjects.\"\"\"\n        subjects = {fold(t[len(\"subject:\"):]) for t in query.split() if t.startswith(\"subject:\")}\n        want = set(words(\" \".join(t for t in query.split() if not t.startswith(\"subject:\"))))\n        books = [b for b in self.books.values() if not subjects or subjects & {fold(s) for s in b.subjects}]\n        if not want:\n            return sorted(books, key=lambda b: b.title) if subjects else []\n        scored = []\n        for book in books:\n            score = len(want & set(words(book.title)))"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"search\":",
+    "new": "    l.add_argument(\"file\")\n    j = sub.add_parser(\"subjects\", help=\"subjects and their counts\")\n    j.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"subjects\":\n        counts = {}\n        for b in loans.catalog.books.values():\n            for s in b.subjects:\n                counts[s] = counts.get(s, 0) + 1\n        for s in sorted(counts):\n            print(f\"{s}  {counts[s]}\", file=out)\n    elif a.cmd == \"search\":"
+  },
+  {
+    "path": "tests/test_subjects.py",
+    "content": "import unittest\n\nfrom shelf.catalog import Catalog\nfrom shelf.models import Book\n\n\nclass Subjects(unittest.TestCase):\n    def test_a_subject_filter(self):\n        c = Catalog()\n        c.add(Book(\"1\", \"Quiet Garden\", subjects=[\"Poetry\"]))\n        c.add(Book(\"2\", \"Quiet Stone\", subjects=[\"History\"]))\n        self.assertEqual([b.isbn for b in c.search(\"quiet subject:poetry\")], [\"1\"])\n        self.assertEqual([b.isbn for b in c.by_subject(\"history\")], [\"2\"])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

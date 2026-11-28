@@ -1,0 +1,17 @@
+[
+  {
+    "path": "ledger/report.py",
+    "old": "def render(rows):",
+    "new": "def monthly(journal, code):\n    \"\"\"`code`'s net change per calendar month: rows of (\"YYYY-MM\", cents),\n    in month order, signed by the account's kind; months with no lines\n    left out.\"\"\"\n    from .accounts import DEBIT_NORMAL\n\n    sign = 1 if journal.chart.get(code).kind in DEBIT_NORMAL else -1\n    months = {}\n    for entry, line in journal.lines(code):\n        key = entry.date.strftime(\"%Y-%m\")\n        months[key] = months.get(key, 0) + sign * line.cents\n    return sorted(months.items())\n\n\ndef render(rows):"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    s.add_argument(\"file\")\n    a = ap.parse_args(argv)",
+    "new": "    s.add_argument(\"file\")\n    m = sub.add_parser(\"monthly\", help=\"one account's net change per month\")\n    m.add_argument(\"code\")\n    m.add_argument(\"file\")\n    a = ap.parse_args(argv)"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    else:\n        print(report.render(report.statement(journal, a.code)), file=out)",
+    "new": "    elif a.cmd == \"monthly\":\n        print(report.render(report.monthly(journal, a.code)), file=out)\n    else:\n        print(report.render(report.statement(journal, a.code)), file=out)"
+  }
+]

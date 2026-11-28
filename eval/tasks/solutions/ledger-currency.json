@@ -1,0 +1,46 @@
+[
+  {
+    "path": "ledger/journal.py",
+    "old": "    account: str\n    cents: int  # debits positive, credits negative\n",
+    "new": "    account: str\n    cents: int  # debits positive, credits negative\n    currency: str = \"USD\"\n"
+  },
+  {
+    "path": "ledger/journal.py",
+    "old": "        for line in entry.lines:\n            self.chart.get(line.account)\n",
+    "new": "        for line in entry.lines:\n            self.chart.get(line.account)\n        if len({line.currency for line in entry.lines}) > 1:\n            raise ValueError(f\"entry {entry.memo!r} mixes currencies\")\n"
+  },
+  {
+    "path": "ledger/journal.py",
+    "old": "    def lines(self, account, until=None):\n        \"\"\"`account`'s lines, in date order, with their entries.\"\"\"\n        out = []\n        for e in sorted(self.entries, key=lambda e: e.date):\n            if until is not None and e.date > until:\n                continue\n            for line in e.lines:\n                if line.account == account:\n                    out.append((e, line))\n        return out\n\n    def balance(self, account, until=None):\n        \"\"\"`account`'s balance in cents, signed by its kind: positive is its\n        normal side.\"\"\"\n        from .accounts import DEBIT_NORMAL\n\n        raw = sum(line.cents for _, line in self.lines(account, until))",
+    "new": "    def lines(self, account, until=None, currency=None):\n        \"\"\"`account`'s lines, in date order, with their entries; only\n        `currency`'s if one is given.\"\"\"\n        out = []\n        for e in sorted(self.entries, key=lambda e: e.date):\n            if until is not None and e.date > until:\n                continue\n            for line in e.lines:\n                if line.account == account and (currency is None or line.currency == currency):\n                    out.append((e, line))\n        return out\n\n    def balance(self, account, until=None, currency=\"USD\"):\n        \"\"\"`account`'s balance in cents in `currency`, signed by its kind:\n        positive is its normal side.\"\"\"\n        from .accounts import DEBIT_NORMAL\n\n        raw = sum(line.cents for _, line in self.lines(account, until, currency))"
+  },
+  {
+    "path": "ledger/importer.py",
+    "old": "import csv\nimport datetime\nimport io\n",
+    "new": "import csv\nimport datetime\nimport io\nimport re\n"
+  },
+  {
+    "path": "ledger/importer.py",
+    "old": "        entries[key].lines.append(Line(row[\"account\"].strip(), money.parse(row[\"amount\"])))",
+    "new": "        currency = (row.get(\"currency\") or \"\").strip() or \"USD\"\n        if not re.fullmatch(r\"[A-Z]{3}\", currency):\n            raise ValueError(f\"not a currency code: {currency!r}\")\n        entries[key].lines.append(Line(row[\"account\"].strip(), money.parse(row[\"amount\"]), currency))"
+  },
+  {
+    "path": "ledger/report.py",
+    "old": "def trial_balance(journal):\n    \"\"\"Every account with its balance, by account code: rows of\n    (code, name, balance in cents).\"\"\"\n    rows = []\n    for account in sorted(journal.chart, key=lambda a: a.code):\n        rows.append((account.code, account.name, journal.balance(account.code)))",
+    "new": "def trial_balance(journal, currency=\"USD\"):\n    \"\"\"Every account with its balance in `currency`, by account code: rows\n    of (code, name, balance in cents).\"\"\"\n    rows = []\n    for account in sorted(journal.chart, key=lambda a: a.code):\n        rows.append((account.code, account.name, journal.balance(account.code, currency=currency)))"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    b.add_argument(\"file\")\n",
+    "new": "    b.add_argument(\"file\")\n    b.add_argument(\"--currency\", default=\"USD\")\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "        print(report.render(report.trial_balance(journal)), file=out)",
+    "new": "        print(report.render(report.trial_balance(journal, a.currency)), file=out)"
+  },
+  {
+    "path": "tests/test_currency.py",
+    "content": "import unittest\n\nfrom ledger import importer\nfrom ledger.accounts import default_chart\nfrom ledger.journal import Entry, Journal, Line\nfrom tests.helpers import d\n\n\nclass Currency(unittest.TestCase):\n    def test_a_missing_currency_is_usd(self):\n        e = importer.read_csv(\"entry,date,memo,account,amount\\n1,2026-01-05,X,1000,1.00\\n1,2026-01-05,X,3000,-1.00\\n\")[0]\n        self.assertEqual({l.currency for l in e.lines}, {\"USD\"})\n\n    def test_an_entry_in_two_currencies_is_refused(self):\n        with self.assertRaises(ValueError):\n            Journal(default_chart()).post(Entry(d(\"2026-01-05\"), \"X\", [Line(\"1000\", 1, \"EUR\"), Line(\"3000\", -1)]))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

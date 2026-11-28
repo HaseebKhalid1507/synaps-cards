@@ -1,0 +1,12 @@
+[package]
+name = "cards-eval"
+description = "B5's fold report (docs/blocks.md §2.8): every op, edit and notice of a stored history, as cards-spec's board folds it, for the eval harness (eval/)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cards-spec = { path = "../cards-spec" }
+serde_json.workspace = true
