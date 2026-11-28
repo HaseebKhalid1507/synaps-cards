@@ -31,13 +31,19 @@ python3 eval/run.py --dry-run --synaps PATH/TO/synaps --work DIR [--d8-stand-in]
 # The mutation pass: every rule broken once, each caught by a named test.
 python3 eval/mutate.py --jobs 6
 
-# The spend estimate of a full run, per candidate model. No provider call.
+# The spend estimate of a full run (the whole matrix) and of the depth
+# pilot, per candidate model. No provider call.
 python3 eval/run.py --estimate
+
+# The depth pilot spends money: every coding task, blocks off, once, on the
+# model B5b will run; its own approval. Never B6 data (run.py's docs).
+ANTHROPIC_API_KEY=… python3 eval/run.py --pilot --provider anthropic --model claude-… \
+    --budget-usd 8 --approved pilot:claude-…@8 --synaps PATH --work DIR
 
 # A real run spends money: it needs the approval written out, synaps-desk's
 # adapter and the credential in the environment (run.py's docs).
 ANTHROPIC_API_KEY=… python3 eval/run.py --provider anthropic --model claude-… \
-    --budget-usd 60 --approved claude-…@60 --desk 'synaps-desk-b5 …' --synaps PATH --work DIR
+    --budget-usd 70 --approved claude-…@70 --desk 'synaps-desk-b5 …' --synaps PATH --work DIR
 ```
 
 The run installs this checkout as a user installs the plugin (a clone at

@@ -536,6 +536,55 @@ def build(records, counter, definition, not_run, meta, plan=None):
     }
 
 
+PILOT_DEPTH = 6  # §2.8's long task: ≥ 6 rounds (module docs, "The set's shape")
+
+
+def pilot(records, meta):
+    """The depth pilot's report (run.py's `--pilot`): each coding task's one
+    off-run, its user-initiated turns' rounds and their margin over 6, and
+    whether it was measured and judged. A screen for the set's long tasks
+    before the set is frozen: never B6 data, never eligible, whatever its
+    numbers, and one off-run is not the two of three the experiment holds a
+    task to (`set_shape`)."""
+    rows = []
+    for rec in records:
+        ts = [x for x in turns.turns(rec["events"]) if x.user_initiated]
+        rounds = sum(len(x.rounds) for x in ts)
+        rows.append({"task": rec["task"], "arm": rec["arm"], "rounds": rounds, "margin": rounds - PILOT_DEPTH, "turns": len(ts),
+                     "measured": bool(ts) and all(x.measured for x in ts), "pass": (rec.get("judge") or {}).get("pass"),
+                     "stopped": rec.get("stopped")})
+    coding = [x["id"] for x in taskset.load() if x["category"] == "coding"]
+    ok = [r for r in rows if r["measured"] and not r["stopped"]]
+    return {
+        "meta": meta, "mode": "pilot", "eligible_for_b6": False, "verdict": "pilot",
+        "not_eligible_because": ["a depth pilot: blocks off, each coding task once; a screen, never B6 data"],
+        "tasks": rows,
+        "summary": {"tasks": len(rows), "of": len(coding), "missing": [x for x in coding if x not in {r["task"] for r in rows}],
+                    "at_depth": sum(r["rounds"] >= PILOT_DEPTH for r in ok), "need": taskset.CATEGORIES["coding"],
+                    "spares": taskset.SPARES["coding"], "under_depth": sorted(r["task"] for r in ok if r["rounds"] < PILOT_DEPTH),
+                    "margins": sorted(r["margin"] for r in ok), "unmeasured": sorted(r["task"] for r in rows if r not in ok),
+                    "not_off": sorted(r["task"] for r in rows if r["arm"] != "off")},
+    }
+
+
+def pilot_markdown(rep):
+    m, s = rep["meta"], rep["summary"]
+    lines = [f"# B5 depth pilot: {m.get('model')}, blocks off, once (never B6 data)", "",
+             f"Head `{str(m.get('head') or '?')[:7]}`{' (dirty)' if m.get('head_dirty') else ''}, task set "
+             f"`{str(m.get('taskset') or '?')[:12]}`, spent ${m.get('spent_usd') or 0:.2f}"
+             + (f", **stopped: {m['stopped']}**" if m.get("stopped") else "") + ".", "",
+             f"{s['at_depth']} of {s['of']} coding tasks reached {PILOT_DEPTH} rounds (the set needs {s['need']}, with "
+             f"{s['spares']} spares). Under: {', '.join(f'`{x}`' for x in s['under_depth']) or 'none'}. "
+             f"Not measured: {', '.join(f'`{x}`' for x in s['unmeasured']) or 'none'}. "
+             f"Not run: {', '.join(f'`{x}`' for x in s['missing']) or 'none'}. "
+             "One off-run a task: a screen, not the experiment's two of three.", "",
+             "| Task | Rounds | Over 6 | Turns | Measured | Judged |", "|---|---|---|---|---|---|"]
+    for r in sorted(rep["tasks"], key=lambda r: (r["margin"], r["task"])):
+        lines.append(f"| `{r['task']}` | {r['rounds']} | {r['margin']:+d} | {r['turns']} | {'yes' if r['measured'] else '**no**'} | "
+                     f"{'-' if r['pass'] is None else 'pass' if r['pass'] else 'fail'} |")
+    return "\n".join(lines) + "\n"
+
+
 def request_latency(records):
     """The tap's send-to-last-byte per provider request, per arm (module
     docs, "Latency")."""

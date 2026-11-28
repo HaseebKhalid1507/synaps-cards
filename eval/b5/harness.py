@@ -81,6 +81,12 @@ def plan(tasks, repeats=3):
     return order, [t for t in tasks if t["needs"]]
 
 
+def pilot_plan(tasks):
+    """The depth pilot's runs (run.py's `--pilot`): every coding task of the
+    set, blocks off, once, in the set's order."""
+    return [(0, t, "off") for t in tasks if t["category"] == "coding"]
+
+
 def groups(turns):
     """The task's steps as turns: each a starter and the steps that fire in it."""
     out = []

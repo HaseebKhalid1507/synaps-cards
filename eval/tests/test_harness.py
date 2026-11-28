@@ -1276,6 +1276,86 @@ class Eligibility(unittest.TestCase):
         self.assertIn("3 repeats", str(e.exception))
 
 
+class Pilot(unittest.TestCase):
+    """The depth pilot (run.py's `--pilot`): the coding tasks, blocks off,
+    once, on the intended model; never B6 data, and no way round the
+    experiment's rules."""
+
+    ARGV = ["--pilot", "--provider", "anthropic", "--synaps", "/nonexistent/synaps", "--model", "claude-sonnet-5-5",
+            "--budget-usd", "8", "--approved", "pilot:claude-sonnet-5-5@8"]
+
+    def refused(self, argv):
+        with self.assertRaises(SystemExit) as e:
+            run.main(argv)
+        return str(e.exception)
+
+    def test_it_plans_every_coding_task_blocks_off_once(self):
+        order = harness.pilot_plan(TASKS)
+        self.assertEqual(len(order), 22)
+        self.assertEqual({(r, arm) for r, _, arm in order}, {(0, "off")})
+        self.assertEqual([t["id"] for _, t, _ in order], [t["id"] for t in TASKS if t["category"] == "coding"])
+
+    def test_it_takes_its_own_approval_and_relaxes_nothing(self):
+        for extra in (["--repeats", "1"], ["--tasks", "ledger-since"], ["--desk", "/x"], ["--d8-stand-in"]):
+            self.assertIn("are the experiment's", self.refused(self.ARGV + extra))
+        run_approval = [x if x != "pilot:claude-sonnet-5-5@8" else "claude-sonnet-5-5@8" for x in self.ARGV]
+        self.assertIn("isn't this pilot's pilot:claude-sonnet-5-5@8", self.refused(run_approval))
+        self.assertIn("--approved pilot:MODEL@USD", self.refused([x for x in self.ARGV if not x.startswith("pilot:") and x != "--approved"]))
+        self.assertEqual(self.refused(["--pilot", "--dry-run", "--synaps", "/x"]), "2", "a pilot is on a provider")
+        # And a pilot's approval is no run's.
+        argv = ["--provider", "anthropic", "--synaps", "/x", "--model", "claude-sonnet-5-5", "--budget-usd", "8",
+                "--approved", "pilot:claude-sonnet-5-5@8", "--desk", "/x"]
+        self.assertIn("isn't this run's", self.refused(argv))
+
+    def test_its_report_is_each_tasks_depth_and_never_eligible(self):
+        coding = [t for t in TASKS if t["category"] == "coding"]
+        recs = []
+        for i, t in enumerate(coding[:-1]):  # the last one never ran
+            w = Wire().start("Do it.")
+            for k in range(4 + i % 5):  # 5 to 9 rounds
+                w.results(w.round([("bash", {"k": k})]))
+            w.round(text="Done.")
+            recs.append({"task": t["id"], "category": "coding", "arm": "off", "repeat": 1, "events": w.done().events,
+                         "judge": {"pass": i % 7 != 0}, "fold": {"lines": []}, "steps": [], "sent": []})
+        rep = report.pilot(recs, {"mode": "pilot", "model": "claude-sonnet-5-5", "head": "abc1234", "taskset": "f" * 64})
+        s = rep["summary"]
+        self.assertEqual((rep["eligible_for_b6"], rep["verdict"], s["tasks"], s["of"], s["missing"]), (False, "pilot", 21, 22, [coding[-1]["id"]]))
+        self.assertEqual(sorted(r["rounds"] for r in rep["tasks"])[:2], [5, 5])
+        self.assertEqual(s["at_depth"], 21 - len(s["under_depth"]))
+        self.assertEqual(s["margins"], sorted(r["rounds"] - 6 for r in rep["tasks"]))
+        md = report.pilot_markdown(rep)
+        self.assertIn("never B6 data", md)
+        self.assertIn("a screen, not the experiment's two of three", md)
+        # A pilot's records are never an experiment's.
+        self.assertIn("a pilot run, never data", report.build(recs, qualifying(), 900, [], frozen_meta(mode="pilot"))["not_eligible_because"])
+
+    def test_it_runs_off_once_through_the_same_runner_ledger_and_stop(self):
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        grace, helper = harness.QUEUED_GRACE, harness.helper
+        harness.QUEUED_GRACE, harness.helper = 0, lambda *a: {"lines": []}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                b = spend.Budget(5, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+                records = []
+                run.run_all(argparse.Namespace(repeats=3, provider="anthropic"), [task], _Iso([1000]), "claude-haiku-4-5", desk.StandIn(),
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b, order=[(0, task, "off")])
+                paid = Path(tmp, "paid.jsonl").read_text().splitlines()
+        finally:
+            harness.QUEUED_GRACE, harness.helper = grace, helper
+        self.assertEqual([(r["task"], r["arm"], r["repeat"]) for r in records], [("shelf-q-days", "off", 1)])
+        self.assertEqual(len(paid), 1)
+
+    def test_its_estimate_and_budget(self):
+        t = estimate.table(TASKS)
+        pp = t["pilot"]
+        self.assertEqual(pp["tasks"], 22)
+        s = pp["usd"]
+        self.assertEqual((s["expected_warm"]["claude-sonnet-5-5"], s["expected_cold"]["claude-sonnet-5-5"], s["long_cold"]["claude-sonnet-5-5"]),
+                         (1.58, 2.11, 6.10))
+        self.assertEqual(pp["budget_usd"]["claude-sonnet-5-5"], 8)
+        self.assertIn("The depth pilot (`--pilot`)", t["markdown"])
+
+
 class SetShape(unittest.TestCase):
     """§2.8's set as the run played it, blocks off (report.py's "The set's
     shape"): 20 coding tasks of ≥ 6 rounds, 10 short of 1–2, 5 with no tool

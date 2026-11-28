@@ -30,6 +30,9 @@ budget that leaves the soft stop that much room.
   tuning target and its gate), 180 tokens of results per turn, one closing
   round per turn of more than 2 rounds, and the definition's ~1,000 input
   tokens (§2.8's cap) on every request.
+- **The depth pilot** (run.py's `--pilot`, `pilot`): every coding task,
+  blocks off, once, in the same scenarios; no probes (it has no counter).
+  Its budget beside it: 15% over its long scenario, in whole dollars.
 - **The scenarios:** *expected* (as above, steers riding their turn), warm
   and cold; *long*: twice the rounds and twice the output per round, every
   steer said instead, cold: a model that thinks aloud or wanders. Long is a
@@ -94,6 +97,22 @@ def budget_at_margin(long_usd, probes_usd):
     return 5 * -(-need // 5)
 
 
+def pilot(tasks, prefix=PREFIX):
+    """The depth pilot's spend (module docs): its scenarios per model, and
+    its budget at the margin."""
+    coding = [t for t in tasks if t["category"] == "coding"]
+    out = {}
+    for label, (shapes, warm, said) in SCENARIOS.items():
+        tot = {}
+        for t in coding:
+            u = spend.session_usage(prefix, [shapes[k] for k in spend.turn_kinds(t, said)], warm=warm)
+            for k, v in u.items():
+                tot[k] = tot.get(k, 0) + v
+        out[label] = {m: round(spend.cost(m, tot), 2) for m in spend.CANDIDATES}
+    return {"tasks": len(coding), "usd": out,
+            "budget_usd": {m: -(-out["long_cold"][m] * (1 + MARGIN) // 1) for m in spend.CANDIDATES}}
+
+
 def table(tasks, prefix=PREFIX, repeats=3, calls=None):
     calls = calibrate.load()[0] if calls is None else calls
     rows = {}
@@ -122,5 +141,10 @@ def table(tasks, prefix=PREFIX, repeats=3, calls=None):
            "", "Every candidate is an Anthropic model, counted with the token-count endpoint: free, so only the output "
            "control's forced calls are paid. The column with no count endpoint is what the same run through an "
            "OpenAI-compatible gateway would add: the proxy's calibration, the definition control and the output control."]
+    pp = pilot(tasks, prefix)
+    md += ["", f"The depth pilot (`--pilot`): the {pp['tasks']} coding tasks, blocks off, once, no probes.", "",
+           "| Model | " + " | ".join(LABELS.values()) + f" | Its budget, +{MARGIN:.0%} |", "|---|" + "---|" * (len(LABELS) + 1)]
+    for m in spend.CANDIDATES:
+        md.append(f"| `{m}` | " + " | ".join(f"${pp['usd'][k][m]:,.2f}" for k in SCENARIOS) + f" | ${pp['budget_usd'][m]:,.0f} |")
     return {"rows": rows, "probes": paid, "probes_usd": probes_usd, "control_usd": control_usd, "margin_usd": margin_usd,
-            "prefix": prefix, "markdown": "\n".join(md)}
+            "pilot": pp, "prefix": prefix, "markdown": "\n".join(md)}

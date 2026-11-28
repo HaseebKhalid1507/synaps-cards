@@ -7,6 +7,8 @@ three repeats, interleaved, against the eval's own isolated daemon
     eval/run.py --provider anthropic --model claude-… --budget-usd 40 --approved claude-…@40 \\
                 --desk 'CMD' --synaps PATH [--work DIR]
     eval/run.py --estimate [--json]
+    eval/run.py --pilot --provider anthropic --model claude-… --budget-usd 7 --approved pilot:claude-…@7 \\
+                --synaps PATH [--work DIR]
 
 **The dry run** is free: the provider is the scripted model (b5/scripted.py)
 served here, the counter is calibrated against it with its own tokenizer
@@ -33,7 +35,25 @@ every run that spent, the stopped one marked: an incomplete experiment,
 never eligible (report.py).
 
 **The estimate** (`--estimate`) prints the spend of a full run per
-candidate model (b5/spend.py), from the set's own shape: no provider call.
+candidate model (b5/spend.py), from the set's own shape, and the depth
+pilot's: no provider call.
+
+**The depth pilot** (`--pilot`; review #14 round 2) screens the long
+tasks' depth before the set is frozen: every coding task of the set, 22,
+blocks off, once each, on `--model` (the model B5b will run), through the
+same isolated daemon, round parser, ledger and soft stop as a real run.
+It spends money, so it takes its own approval, written out
+(`--approved pilot:MODEL@USD`: a run's approval is never a pilot's, nor
+the other way round), and a budget. No desk (blocks off: nothing rides a
+message, so the stand-in passes the text through), no calibration, no
+output or definition control, no counter: it measures rounds, nothing
+attributed. It never relaxes the experiment's rules: `--repeats`,
+`--tasks`, `--desk` and `--d8-stand-in` are refused, and its records are
+`mode: pilot`, which the report never makes eligible. It writes
+`pilot.json` and `pilot.md` (report.py's `pilot`): each task's rounds and
+their margin over 6, and the head, tree and task-set digest it ran.
+One off-run per task is a screen, not the two-of-three the experiment
+holds a task to.
 
 **The run's record** (`report.json`'s `meta`) is what B5b needs to say it ran
 the same harness: the head and whether its tree was clean, the task set's
@@ -71,6 +91,8 @@ def main(argv=None):
     mode.add_argument("--dry-run", action="store_true", help="the scripted model and the stand-in desk: free, never data")
     mode.add_argument("--provider", choices=("anthropic", "openai_compatible"), help="a real run (spends money)")
     mode.add_argument("--estimate", action="store_true", help="the spend estimate of a full run, per candidate model")
+    ap.add_argument("--pilot", action="store_true",
+                    help="with --provider: the depth pilot, the coding tasks blocks off once (spends money; never B6 data)")
     ap.add_argument("--synaps", help="the synaps binary (built from SynapsCLI dev)")
     ap.add_argument("--work", help="where the run's files go (default: a new temporary directory)")
     ap.add_argument("--keep", action="store_true", help="keep the run's workspaces")
@@ -91,6 +113,8 @@ def main(argv=None):
         t = table(taskset.load())
         print(json.dumps(t, indent=1) if a.json else t["markdown"])
         return 0
+    if a.pilot and not a.provider:
+        ap.error("--pilot runs on a provider: --provider and --model")
     if not a.synaps:
         ap.error("--synaps is required for a run")
     tasks = taskset.load()
@@ -100,6 +124,8 @@ def main(argv=None):
     frozen = taskset.FROZEN.read_text().split()[0]
     if taskset.digest() != frozen:
         ap.error("the task set differs from its frozen digest (tasks/set.sha256)")
+    if a.pilot:
+        return pilot(a, tasks, frozen)
     if a.provider:
         return real(a, tasks, frozen)
     return dry(a, tasks, frozen)
@@ -164,21 +190,7 @@ def real(a, tasks, frozen):
     for t in tasks:
         if has_d8 and t["needs"] == ["D8"]:
             t["needs"] = []
-    if a.provider == "anthropic":
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise SystemExit("ANTHROPIC_API_KEY isn't set")
-        prov = providers.Anthropic(a.model, key, on_usage=budget.paid("probe"))
-        tap = providers.Tap(providers.ANTHROPIC)
-        env = {"ANTHROPIC_API_KEY": key, "SYNAPS_ANTHROPIC_BASE_URL": tap.url}
-        model_id = a.model
-    else:
-        if not a.base_url:
-            raise SystemExit("openai_compatible takes --base-url")
-        prov = providers.OpenAICompatible(a.model, a.base_url, os.environ.get("OPENAI_API_KEY"), on_usage=budget.paid("probe"))
-        tap = providers.Tap(a.base_url)
-        env = {"LOCAL_ENDPOINT": tap.url}
-        model_id = f"local/{a.model}"
+    prov, tap, env, model_id = upstream(a, budget)
     iso = daemon.Isolated(a.synaps, work, env=env)
     started = time.time()
     records, definition, stopped = [], None, None
@@ -220,16 +232,79 @@ def real(a, tasks, frozen):
                   config(a, prov, the_desk, endpoint=prov.has_endpoint))
 
 
+def upstream(a, budget):
+    """A real run's provider (its paid probes charged to `budget`), the tap
+    the daemon reaches it through, the daemon's environment for it, and the
+    model id the daemon is given."""
+    if a.provider == "anthropic":
+        key = os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise SystemExit("ANTHROPIC_API_KEY isn't set")
+        prov = providers.Anthropic(a.model, key, on_usage=budget.paid("probe"))
+        tap = providers.Tap(providers.ANTHROPIC)
+        return prov, tap, {"ANTHROPIC_API_KEY": key, "SYNAPS_ANTHROPIC_BASE_URL": tap.url}, a.model
+    if not a.base_url:
+        raise SystemExit("openai_compatible takes --base-url")
+    prov = providers.OpenAICompatible(a.model, a.base_url, os.environ.get("OPENAI_API_KEY"), on_usage=budget.paid("probe"))
+    tap = providers.Tap(a.base_url)
+    return prov, tap, {"LOCAL_ENDPOINT": tap.url}, f"local/{a.model}"
+
+
+def pilot(a, tasks, frozen):
+    """The depth pilot (module docs): it spends money, so it checks
+    everything first."""
+    if a.repeats != len(report.REPEATS) or a.tasks or a.desk or a.d8_stand_in:
+        raise SystemExit("the pilot runs every coding task of the set once, blocks off, with no desk: "
+                         "--repeats, --tasks, --desk and --d8-stand-in are the experiment's")
+    if not (a.model and a.budget_usd and a.approved):
+        raise SystemExit("the pilot takes --model, --budget-usd and --approved pilot:MODEL@USD (run.py's docs)")
+    if a.approved != f"pilot:{a.model}@{a.budget_usd:g}":
+        raise SystemExit(f"--approved {a.approved!r} isn't this pilot's pilot:{a.model}@{a.budget_usd:g}")
+    work = Path(a.work or tempfile.mkdtemp(prefix="b5-pilot-")).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+    budget = spend.Budget(a.budget_usd, a.model, ledger=work / "paid.jsonl")
+    the_desk = desk.StandIn()  # blocks off: nothing rides, the text goes as typed
+    the_desk.hello()
+    prov, tap, env, model_id = upstream(a, budget)
+    iso = daemon.Isolated(a.synaps, work, env=env)
+    started, records, stopped = time.time(), [], None
+    try:
+        iso.install()
+        iso.start()
+        tap.take()
+        run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget, order=harness.pilot_plan(tasks))
+    except spend.OverBudget as e:
+        stopped = f"over budget: {e}"
+        print(f"stopped: {e}", file=sys.stderr)
+    finally:
+        rec = iso.stop()
+        tap.close()
+    rec["spent_usd"], rec["stopped"] = round(budget.spent, 4), stopped
+    meta = {"mode": "pilot", "model": a.model, "head": rec.get("head"), "head_dirty": rec.get("head_dirty"), "taskset": frozen,
+            "synaps": rec.get("synaps_version"), "synaps_sha256": rec.get("synaps_sha256"), "daemon": rec,
+            "config": config(a, prov, the_desk, endpoint=prov.has_endpoint), "secs": round(time.time() - started, 1),
+            "stopped": stopped, "spent_usd": rec["spent_usd"]}
+    rep = report.pilot(records, meta)
+    (work / "pilot.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
+    (work / "pilot.md").write_text(report.pilot_markdown(rep))
+    print(report.pilot_markdown(rep))
+    print(f"work: {work}")
+    return 0 if records and rec.get("daemon_exit") is not None and not rec.get("runtime_dir_left") else 1
+
+
 def config(a, prov, the_desk, endpoint):
     """The run's nonsecret configuration (module docs, "The run's record")."""
     out = {"provider": "scripted" if a.dry_run else a.provider, "base_url": getattr(prov, "base", None),
-           "model": getattr(prov, "model", None), "repeats": a.repeats, "python": platform.python_version(),
+           "model": getattr(prov, "model", None), "repeats": 1 if getattr(a, "pilot", False) else a.repeats,
+           "python": platform.python_version(),
            "platform": platform.platform(), "desk": {"handshake": the_desk.handshake}}
     if a.desk and not a.dry_run:
         exe = shlex.split(a.desk)[0]
         path = shutil.which(exe) or exe
         out["desk"]["executable"] = daemon.binary_digest(path) if os.path.isfile(path) else {"path": exe}
-    if not endpoint and not a.dry_run:
+    if getattr(a, "pilot", False):
+        out["pilot"] = "the coding tasks, blocks off, once: no counter"
+    elif not endpoint and not a.dry_run:
         out["proxy"] = a.proxy
         try:
             import tiktoken
@@ -252,11 +327,14 @@ def _block_tools(iso):
              "input_schema": json.loads((plugin / "crates/cards-spec/schema-blocks.json").read_text())}]
 
 
-def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=None, budget=None, dry=False, count_request=None):
-    """Every run of the plan, each record appended to `records` and to
-    `records.jsonl` as it finishes, a run the budget stopped included (it
-    raises on, its record kept): the definition control's count."""
-    order, _ = harness.plan(tasks, a.repeats)
+def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=None, budget=None, dry=False, count_request=None,
+            order=None):
+    """Every run of the plan (or of `order`, the pilot's), each record
+    appended to `records` and to `records.jsonl` as it finishes, a run the
+    budget stopped included (it raises on, its record kept): the
+    definition control's count."""
+    if order is None:
+        order, _ = harness.plan(tasks, a.repeats)
     if tap is not None:
         def take():
             return [{"t_sent": r["t_sent"], "t_done": r.get("t_done"), "request": r["request"]} for r in tap.take()]
