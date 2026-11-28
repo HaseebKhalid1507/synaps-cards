@@ -57,6 +57,10 @@ class Check(unittest.TestCase):
         self.assertEqual([b.isbn for b in c.search("subject:history")], [B2])
         self.assertEqual([b.isbn for b in c.search("subject:poetry subject:poesie")], [B1, B3])
         self.assertEqual(c.search("garden subject:history"), [])
+        # Several subject terms are OR (the prompt says so), and the other
+        # words rank the books kept.
+        self.assertEqual([b.isbn for b in c.search("quiet sea subject:poetry subject:poesie")], [B3, B1])
+        self.assertEqual([b.isbn for b in c.search("garden subject:history subject:poetry")], [B1])
 
     def test_the_store_keeps_subjects_and_old_files_load(self):
         lib = Loans(shelf(), [Member("m1", "Ada")])

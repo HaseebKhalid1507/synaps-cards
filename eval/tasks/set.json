@@ -366,7 +366,7 @@
       "seed": [],
       "turns": [
         {
-          "say": "Add subjects to books. `Book` gets a `subjects` list (default empty) that the store keeps; a file saved before this loads with none. `Catalog.by_subject(subject)` is the books with that subject, compared as search compares words (case and accents ignored), by title. In `Catalog.search`, a `subject:WORD` term in the query keeps only the books with that subject, and the other words rank as they do now; a query of only subject terms gives every book of those subjects, by title. Add a `subjects FILE` command to the CLI that prints each subject with how many books have it, `SUBJECT  N`, by subject. Add tests."
+          "say": "Add subjects to books. `Book` gets a `subjects` list (default empty) that the store keeps; a file saved before this loads with none. `Catalog.by_subject(subject)` is the books with that subject, compared as search compares words (case and accents ignored), by title. In `Catalog.search`, a `subject:WORD` term in the query keeps only the books with that subject; with several, a book is kept if it has any one of them (OR, not AND). The other words then rank the books kept as they do now, and a query of only subject terms gives every book kept, by title. Add a `subjects FILE` command to the CLI that prints each subject with how many books have it, `SUBJECT  N`, by subject. Add tests."
         }
       ],
       "check": {

@@ -112,6 +112,22 @@ class Checks(unittest.TestCase):
                 after = taskset.judge(t, d)
                 self.assertTrue(after["pass"], f"{t['id']}: the reference solution fails: {after['detail']}")
 
+    def test_shelf_subjects_states_the_rule_its_check_holds(self):
+        # Review #14 round 2, R2-7: the check takes several subject terms as
+        # OR; the prompt didn't say, and "keeps only" reads as AND. Now it
+        # says, and the check tells the two apart.
+        t = next(t for t in TASKS if t["id"] == "shelf-subjects")
+        self.assertIn("with several, a book is kept if it has any one of them (OR, not AND)", t["turns"][0]["say"])
+        with tempfile.TemporaryDirectory() as tmp:
+            d = taskset.prepare(t, Path(tmp) / "ws")
+            taskset.solve(t, d)
+            self.assertTrue(taskset.judge(t, d)["pass"])
+            cat = d / "shelf" / "catalog.py"
+            src = cat.read_text()
+            self.assertEqual(src.count("subjects & {fold(s) for s in b.subjects}"), 1)
+            cat.write_text(src.replace("subjects & {fold(s) for s in b.subjects}", "subjects <= {fold(s) for s in b.subjects}"))
+            self.assertFalse(taskset.judge(t, d)["pass"], "an AND reading fails the check")
+
     def test_every_expect_passes_its_reference_and_refuses_its_wrong_answers(self):
         # Shady's: `nt-names` and `nt-haiku` took "I refuse.", `nt-half-even`
         # a wrong explanation, `ledger-q-debit` every account kind.
