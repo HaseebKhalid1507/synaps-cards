@@ -24,7 +24,23 @@ carries the session's `history` as the daemon holds it
   answer carries nothing, and nothing rides an empty body (§3.5).
 - `{"op": "settle", "conversation", "history", "lost": [ticket, …]}`: a
   settled history (D6b's `Desires::settle`, `lost`). → `{"ok": true,
-  "feedback": […]}`.
+  "feedback": […]}`. After each turn the harness settles, and every message
+  it sent that turn that the history doesn't have is **lost**: its ticket
+  goes in `lost` (so the desk rides its notices again), and the record
+  marks it `lost`.
+
+**What reached the agent** (review #14 round 2, R2-1 and R2-3) is read
+from the session's history as the daemon holds it, the agent's received
+input, never from what the harness or the desk says it sent: a message
+reached the agent if a user message of the history is it, whole or as
+one of its text parts (`received_at`). A notice is **delivered** only if
+the message that carried it reached the agent with the notice in it, in
+D6b's form (`notices_in`), its id, state and version exactly the desk's,
+and its version above every earlier one for the id in the history (§3.5:
+per id, only a v<N> above all earlier ones counts). So a notice moves
+through: prepared (the desk accepted the click), sent (it rode a message
+the harness sent), delivered (as above), or refused (the desk wouldn't
+take the click) or lost (sent, never received).
 - `{"op": "hand_back", "conversation", "block": {"id": …}, "edit": {…},
   "say": "…", "history"}` (D8): take block `id` (the harness picks it: the
   agent's latest live block of the task's kind), edit it as `edit` says,
@@ -151,6 +167,46 @@ class StandIn(Desk):
             return {"text": f"{req['say']}\n[stand-in hand-back of block {req['block']['id']}: {json.dumps(req['edit'], ensure_ascii=False)}]",
                     "notices": []}
         return {"ok": False, "refused": f"the stand-in has no {op}"}
+
+
+def text_of(message):
+    """A history message's text: a string, or its text parts joined."""
+    c = message.get("content")
+    return c if isinstance(c, str) else "".join(p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text")
+
+
+def received_at(history, text):
+    """The index in `history` of the user message that is `text`, whole or
+    as one of its text parts (module docs, "What reached the agent"); None
+    if no message is."""
+    want = (text or "").strip()
+    if not want:
+        return None
+    for i, m in enumerate(history or []):
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        parts = [c] if isinstance(c, str) else [p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text"]
+        if want in {x.strip() for x in parts} or text_of(m).strip() == want:
+            return i
+    return None
+
+
+def received(history, text):
+    return received_at(history, text) is not None
+
+
+def notices_in(text):
+    """The notices `text` carries in D6b's form, one line each (§3.5):
+    `{(id, state): version}`."""
+    out = {}
+    for line in (text or "").split("\n"):
+        hit = NOTICE.match(line.strip())
+        if hit:
+            for x in hit.group(1).split(", "):
+                i, v = x.rsplit(" v", 1)
+                out[(i, hit.group(2))] = int(v)
+    return out
 
 
 def _highest(history):

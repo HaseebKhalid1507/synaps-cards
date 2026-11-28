@@ -278,16 +278,51 @@ class Dismissal(unittest.TestCase):
         d, steps = self.fire({"blocks": [{"id": "notes", "dismissed": False, "pending": False}]}, _Desk(refuse="no such block"))
         self.assertEqual((d.clicked, steps[0]["outcome"]), (["notes"], "refused"))
 
-    def test_a_probe_counts_once_its_notice_rode_a_message(self):
-        def rec(task, arm, steps, sent=()):
-            return {"task": task, "arm": arm, "steps": steps, "sent": [{"notices": n} for n in sent]}
+    def test_a_probe_is_delivered_only_when_the_agent_received_its_notice(self):
+        # Review #14 round 2, R2-3: what the harness sent is no evidence.
+        line = "Also: keep it short.\n[block notes v3 dismissed]"
+        def rec(steps, sent=(), history=None, arm="on"):
+            return {"task": "t", "arm": arm, "steps": steps, "history": history,
+                    "sent": [{"carry": "steer", "text": x, "notices": n, "ticket": 1} for x, n in sent]}
+        def user(*texts):
+            return [{"role": "user", "content": x} for x in texts]
         ok = [{"step": "dismiss", "id": "notes", "outcome": "accepted"}]
-        recs = [rec("t", "on", ok, [[["notes", "dismissed", 3]]]),
-                rec("t", "on", ok, [[]]),  # clicked, but nothing carried it yet
-                rec("t", "on", [{"step": "dismiss", "id": "notes", "outcome": "refused"}]),
-                rec("t", "off", [{"step": "dismiss", "outcome": "skipped", "skipped": "no live block"}])]
-        self.assertEqual(report.notice_probes(recs), {"t": {"runs": 3, "delivered": 1, "refused": 1, "skipped": 0}})
+        three = [["notes", "dismissed", 3]]
+        cases = {
+            "delivered": rec(ok, [(line, three)], user("Fix it.", line)),
+            # Shady's: the adapter returned the notice and a ticket, but the
+            # message never reached the agent.
+            "lost": rec(ok, [(line, three)], user("Fix it.")),
+            # A different version in the text than the desk's.
+            "other version": rec(ok, [(line.replace("v3", "v2"), three)], user("Fix it.", line.replace("v3", "v2"))),
+            # A stale one: the history gave notes v3 before this message.
+            "stale": rec(ok, [(line, three)], user("[block notes v3 dismissed]", line)),
+            # Received in a message's text part, as an engine may merge it.
+            "a part": rec(ok, [(line, three)], [{"role": "user", "content": [{"type": "tool_result", "content": "ok"},
+                                                                              {"type": "text", "text": line}]}]),
+            "never sent": rec(ok, [("Also: keep it short.", [])], user("Also: keep it short.")),
+            "refused": rec([{"step": "dismiss", "id": "notes", "outcome": "refused"}]),
+            "off": rec([{"step": "dismiss", "outcome": "skipped", "skipped": "no live block"}], arm="off"),
+        }
+        got = {k: report.notice_reached(r, r["steps"]) for k, r in cases.items() if k not in ("refused", "off")}
+        self.assertEqual(got, {"delivered": "delivered", "lost": "sent", "other version": "sent", "stale": "sent",
+                               "a part": "delivered", "never sent": "clicked"})
+        self.assertEqual(report.notice_probes(list(cases.values())),
+                         {"t": {"runs": 7, "clicked": 6, "sent": 5, "delivered": 2, "lost": 3, "refused": 1, "skipped": 0}})
 
+    def test_a_send_the_history_doesnt_have_is_settled_as_lost(self):
+        settled = []
+        d = _Desk()
+        d.settle = lambda conv, history, lost=(): settled.append(list(lost)) or {"ok": True}
+        d.send = lambda conv, carry, body, history: {"text": body + "\n[block plan v1 dismissed]", "notices": [["plan", "dismissed", 1]], "ticket": 7}
+        s = _Session([[{"ev": "turn_started", "trigger": "user", "user_text": "Q?"}, {"ev": "idle"}]])
+        rec = {"steps": [], "sent": []}
+        grace, harness.QUEUED_GRACE = harness.QUEUED_GRACE, 0
+        try:
+            harness.Runner(_Iso([]), "m", d, Path("/nonexistent")).turn(s, "j1", {"say": "Fix it."}, [], rec)
+        finally:
+            harness.QUEUED_GRACE = grace
+        self.assertEqual((settled, rec["sent"][0].get("lost")), ([[7]], True), "the history has only Q? and A.")
 
 
 class Seam(unittest.TestCase):
@@ -1039,6 +1074,17 @@ class Eligibility(unittest.TestCase):
         # Sent, but not in the agent's received input: no sign it got there.
         lost = self.change(self.records(), "answer", lambda r, task: dict(r, history=r["history"][:2]) if r["repeat"] == 3 else r)
         self.assertIn("ledger-card-negative r3: 1 answer message(s) not in the agent's history", self.build(lost)["not_eligible_because"][0])
+
+    def test_a_notice_the_agent_never_received_isnt_delivered(self):
+        # Shady's: the fixture had no notice reach the agent, yet each probe
+        # was delivered three times, from the sent list alone.
+        dismissing = sorted(t["id"] for t in TASKS if any("dismiss" in s for s in t["turns"]))
+        recs = [dict(r, history=[m for m in r["history"] if "dismissed]" not in m["content"]])
+                if r["task"] == dismissing[1] and r["arm"] == "on" and r["repeat"] > 1 else r for r in self.records()]
+        rep = self.build(recs)
+        self.assertEqual(rep["not_eligible_because"], [f"the notice probe didn't reach the agent in 2 of 3 on-runs: {dismissing[1]}"])
+        self.assertEqual(rep["also"]["notice_probes"][dismissing[1]], {"runs": 3, "clicked": 3, "sent": 3, "delivered": 1, "lost": 2,
+                                                                       "refused": 0, "skipped": 0})
 
     def test_a_dry_run_and_another_task_set_are_never_eligible(self):
         recs = self.records()

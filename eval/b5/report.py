@@ -92,10 +92,18 @@ before it not included).
   are held by the set's shape (an off-run plays `interactive` if its
   answer or hand-back was sent).
 - *Notice probes*: each task with a dismissal is its probe of the unseen
-  patches (§3.5). An on-run delivered it if the desk accepted the click and
-  a message the agent then got carried the notice. The desk refusing one is
-  a seam failure; a probe delivered in fewer than 2 of its task's 3 on-runs
-  wasn't exercised.
+  patches (§3.5). An on-run delivered it only on evidence that the notice
+  reached the agent (review #14 round 2, R2-3; desk.py's "What reached the
+  agent"): the desk accepted the click, a message the harness sent after
+  it carried the notice (the desk said so), that message's text has it in
+  D6b's form with the same id, state and version, the message is in the
+  session's history, and no earlier message there gave the id that
+  version or a later one. What the harness sent is no evidence by itself:
+  a probe sent and not received is `lost`. Each probe's on-runs are
+  counted by how far the notice got (`clicked`, `sent`, `delivered`,
+  `lost`, `refused`, `skipped`). The desk refusing one is a seam failure;
+  a probe delivered in fewer than 2 of its task's 3 on-runs wasn't
+  exercised.
 - `eligible_for_b6`: the run is the experiment §2.8 prescribes, so its rows
   can flip the default. Every condition is checked and each one missing is
   named (`not_eligible_because`): a real run (a dry run is never data); a
@@ -123,7 +131,8 @@ import collections
 import json
 import statistics
 
-from . import classify, count, taskset, turns
+from . import classify, count, desk, taskset, turns
+from .desk import received
 
 REPEATS = (1, 2, 3)  # §2.8: "three times each"
 
@@ -378,21 +387,6 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
     return out
 
 
-def received(history, text):
-    """Whether `text` reached the agent: a user message of `history` (the
-    session's, as the daemon holds it) is it, whole or as one of its text
-    parts."""
-    want = (text or "").strip()
-    for m in history or []:
-        if m.get("role") != "user":
-            continue
-        c = m.get("content")
-        parts = [c] if isinstance(c, str) else [p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text"]
-        if want and (want in {x.strip() for x in parts} or "".join(parts).strip() == want):
-            return True
-    return False
-
-
 def interactions(records, tasks=None):
     """Each on-run of a task with a card answer or a hand-back (module docs,
     "Interaction coverage"): how many of each the task has, how many
@@ -432,20 +426,50 @@ def interactions(records, tasks=None):
 
 def notice_probes(records):
     """Per task with a dismissal, its on-runs' probes (module docs): how many
-    on-runs, how many delivered the notice, refused or skipped it."""
+    on-runs, and how far each one's notice got."""
     out = {}
     for rec in records:
         steps = [s for s in rec.get("steps", []) if s.get("step") == "dismiss"]
         if rec["arm"] != "on" or not steps:
             continue
-        p = out.setdefault(rec["task"], {"runs": 0, "delivered": 0, "refused": 0, "skipped": 0})
+        p = out.setdefault(rec["task"], {"runs": 0, "clicked": 0, "sent": 0, "delivered": 0, "lost": 0, "refused": 0, "skipped": 0})
         p["runs"] += 1
         p["refused"] += sum(s.get("outcome") == "refused" for s in steps)
         p["skipped"] += sum(s.get("outcome") == "skipped" or "skipped" in s for s in steps)
-        ids = {s["id"] for s in steps if s.get("outcome") == "accepted"}
-        rode = {n[0] for m in rec.get("sent", []) for n in m.get("notices", []) if len(n) >= 2 and n[1] == "dismissed"}
-        p["delivered"] += bool(ids & rode)
+        got = notice_reached(rec, steps)
+        p["clicked"] += got != "none"
+        p["sent"] += got in ("sent", "delivered")
+        p["delivered"] += got == "delivered"
+        p["lost"] += got == "sent"
     return out
+
+
+def notice_reached(rec, steps):
+    """How far an on-run's dismissal notice got (module docs): `delivered`,
+    `sent` (it rode a message the agent has no sign of having received, or
+    received without it), `clicked` (accepted, never sent) or `none`."""
+    history, best = rec.get("history"), "none"
+    for s in steps:
+        if s.get("outcome") != "accepted":
+            continue
+        best = max(best, "clicked", key=_STAGES.index)
+        for m in rec.get("sent", []):
+            if m.get("carry") == "answer" or (s.get("at_event") is not None and (m.get("at_event") or 0) < s["at_event"]):
+                continue
+            for n in m.get("notices", []):
+                if len(n) < 3 or n[0] != s.get("id") or n[1] != "dismissed":
+                    continue
+                best = max(best, "sent", key=_STAGES.index)
+                at = desk.received_at(history, m.get("text"))
+                carried = desk.notices_in(m.get("text")).get((n[0], "dismissed")) == n[2]
+                earlier = [v for x in (history or [])[:at or 0] if x.get("role") == "user"
+                           for (i, _), v in desk.notices_in(desk.text_of(x)).items() if i == n[0]]
+                if at is not None and carried and all(v < n[2] for v in earlier):
+                    return "delivered"
+    return best
+
+
+_STAGES = ("none", "clicked", "sent", "delivered")
 
 
 def build(records, counter, definition, not_run, meta, plan=None):

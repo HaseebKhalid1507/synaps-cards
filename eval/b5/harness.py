@@ -19,7 +19,9 @@ the run's model. Then the task's user side, step by step (taskset.py):
   cards-spec's (`cards-eval answer`);
 - a turn ends at the session's `idle`; a steer the engine queued past the
   turn's end starts its own turn, and the harness follows it;
-- after each turn the desk settles on the session's history.
+- after each turn the desk settles on the session's history; a message
+  sent that turn that the history doesn't have is lost (desk.py's
+  `settle`): its ticket goes in `lost`, and its record says `lost`.
 
 **A dismissal** clicks the first block on the board as the desk draws it
 then: the session's history folded by cards-spec (`cards-eval fold`), its
@@ -50,7 +52,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import taskset, turns
+from . import desk, taskset, turns
 from .spend import OverBudget
 from .turns import BLOCK_TOOL
 
@@ -155,7 +157,7 @@ class Runner:
         """One turn (module docs): its unfired steers, when it ended first.
         It reads only the events after what it sends: an earlier turn's
         `idle` isn't this one's end."""
-        seen = len(s.events)
+        seen, sent_before = len(s.events), len(rec["sent"])
         if "say" in starter:
             self.send(s, conv, "submit", starter["say_off"] if self.arm == "off" and "say_off" in starter else starter["say"], rec)
         elif "answer" in starter:
@@ -224,7 +226,11 @@ class Runner:
                     rounds = 0
                     continue
                 break
-        self.desk.settle(conv, s.messages())
+        history = s.messages()
+        lost = [m for m in rec["sent"][sent_before:] if not desk.received(history, m["text"])]
+        for m in lost:
+            m["lost"] = True
+        self.desk.settle(conv, history, lost=[m["ticket"] for m in lost if m.get("ticket") is not None])
         left = [f for f in pending if "steer" in f]
         for f in pending:
             if "dismiss" in f:  # the turn ended first: the click still happens, and rides the next message
@@ -239,7 +245,7 @@ class Runner:
                 rec["steps"].append({"step": "dismiss", "round": rounds, "outcome": "skipped", "skipped": "no live block"})
                 return
             r = self.desk.dismiss(conv, block, history)
-            rec["steps"].append({"step": "dismiss", "round": rounds, "id": block, "desk": r,
+            rec["steps"].append({"step": "dismiss", "round": rounds, "id": block, "desk": r, "at_event": len(s.events),
                                  "outcome": "accepted" if r.get("ok") else "refused"})
         else:
             rec["steps"].append({"step": "steer", "round": rounds})
