@@ -24,8 +24,12 @@ exact rules are in its module's docs, and its tests pin them.
 cd eval && python3 -m unittest discover -s tests
 
 # The dry run: free. The scripted model (b5/scripted.py) plays every runnable
-# task in both arms; the stand-in desk sends the notices. Never data.
-python3 eval/run.py --dry-run --synaps PATH/TO/synaps --work DIR
+# task in both arms; the stand-in desk sends the notices (and, with
+# --d8-stand-in, the hand-backs, so those tasks run too). Never data.
+python3 eval/run.py --dry-run --synaps PATH/TO/synaps --work DIR [--d8-stand-in]
+
+# The mutation pass: every rule broken once, each caught by a named test.
+python3 eval/mutate.py --jobs 6
 
 # The spend estimate of a full run, per candidate model. No provider call.
 python3 eval/run.py --estimate
@@ -51,6 +55,8 @@ machine, whose files the agent may touch.
 - **synaps-desk's `b5-desk/1` adapter** (`b5/desk.py` documents the protocol):
   D6b's `Desires` for the dismiss notices, D8 for the hand-backs. A real run
   refuses any desk whose `impl` doesn't name D6b, and the stand-in always.
+  Without D8 the three hand-back tasks don't run, in either arm, and the
+  run isn't eligible for B6 (report.py's "The verdict").
 - **Haseeb's approval** of the model and the budget (`--approved`).
 - For a provider with no token-count endpoint: `tiktoken`, for the proxy.
 
