@@ -241,7 +241,7 @@ MUTATIONS = [
      '"calls": [{"name": c.get("name"), "input": c.get("input")} for c in content if c.get("type") == "tool_use"][:1],'),
     ("providers: Anthropic's thinking dropped (R3-1)", P, '"other": [c.get("type") for c in content if c.get("type") not in ("tool_use", "text")],',
      '"other": [],'),
-    ("providers: a chat response's text dropped (R3-1)", P, '"text": _text(m.get("content")) if m.get("content") else "",', '"text": "",'),
+    ("providers: a chat response's text dropped (R3-1)", P, '"text": _text(content) if content else "",', '"text": "",'),
     ("providers: a chat response's reasoning dropped (R3-1)", P, '    other = (["reasoning"] if m.get("reasoning_content")', '    other = ([] if m.get("reasoning_content")'),
     ("providers: a chat response cut off at the cap is by the call (R3-1)", P, 'get("finish_reason") in ("tool_calls", "stop")}',
      'get("finish_reason") in ("tool_calls", "stop", "length")}'),
@@ -322,6 +322,15 @@ MUTATIONS = [
     ("report: the tools offered, the on-arm's for both (R4-1)", R, 'for rec in records if rec["arm"] == arm for n in turns.offered(', 'for rec in records if rec["arm"] == "on" for n in turns.offered('),
     ("authority: a worker's usage is a round (R4-1)", A, "So a worker's usage is never a round.", "So a worker's usage is a round."),
     ("authority: delegation left on (R4-1)", A, "starts with the engine's delegation tools disabled, so none is offered", "starts as the engine starts"),
+    ("providers: reasoning_details unread (R4-2)", P, 'm.get("reasoning") or m.get("reasoning_details")', 'm.get("reasoning")'),
+    ("providers: an output count in the details unread (R4-2)", P,
+     '    other += [f"output for {k}" for k, v in sorted(details.items()) if k != "reasoning_tokens" and (_count(v) or 0) > 0]\n', "    other += []\n"),
+    ("providers: a zero count in the details is output (R4-2)", P, 'k != "reasoning_tokens" and (_count(v) or 0) > 0]', 'k != "reasoning_tokens" and _count(v) is not None]'),
+    ("providers: a content part that isn't text unread (R4-2)", P, '                  if not (isinstance(p, dict) and p.get("type") == "text")]', "                  if False]"),
+    ("providers: an unread message field taken for nothing (R4-2)", P,
+     '    other += [f"an unread part: {k}" for k in sorted(m) if k not in CHAT_READ and m[k] not in (None, "", [], {})]\n', "    other += []\n"),
+    ("providers: an empty field is an unread part (R4-2)", P, 'k not in CHAT_READ and m[k] not in (None, "", [], {})]', "k not in CHAT_READ and m[k] is not None]"),
+    ("providers: audio read as nothing (R4-2)", P, '"reasoning_details", "refusal")  # chat_shape', '"reasoning_details", "refusal", "audio")  # chat_shape'),
 ]
 
 

@@ -27,7 +27,17 @@ reasoning, a refusal, another choice); `"stop"`: why it stopped, and
 `"by_call"`: whether that was the call (Anthropic's `tool_use`, an
 OpenAI-compatible provider's `tool_calls` or `stop`)`}`. Whether it is
 one call and nothing else is the method's to say (calibrate.py's
-`alone`), not the adapter's. Each is paid, with an endpoint too,
+`alone`), not the adapter's. So the adapter reads everything: **a part it
+doesn't read is named in `other`, never taken for nothing** (review #14
+round 4, R4-2). A chat message's reasoning is `reasoning_content`,
+`reasoning` or a non-empty `reasoning_details` (a gateway's typed blocks,
+text, summary or encrypted, with no readable string: OpenRouter's
+"preserving reasoning blocks"), or a reasoning-token count; any other
+non-zero `completion_tokens_details` count is output too; a content part
+that isn't text is named by its type; and any other message field that
+isn't empty (`None`, `""`, `[]`, `{}`) is an unread part. An Anthropic
+response's content is read the same way: every block that isn't
+`tool_use` or `text` is named. Each is paid, with an endpoint too,
 whatever it carried: its usage goes to `on_usage` before it returns.
 
 **The tap** (`Tap`) sits between the daemon and its provider: the daemon's
@@ -57,7 +67,7 @@ FORCE_MAX_TOKENS = 4096  # a forced call's cap: the output control's calls are a
 def _text(content):
     if isinstance(content, str):
         return content
-    return "".join(p.get("text", "") for p in content or [] if p.get("type") == "text")
+    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict) and p.get("type") == "text")
 
 
 def to_chat(body, model):
@@ -253,11 +263,22 @@ def chat_shape(r):
         except json.JSONDecodeError:
             inp = None
         calls.append({"name": f.get("name"), "input": inp})
-    other = (["reasoning"] if m.get("reasoning_content") or m.get("reasoning")
-             or ((u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0) > 0 else [])
-    other += (["refusal"] if m.get("refusal") else []) + ["another choice"] * (len(choices) - 1)
-    return {"output": _count(u.get("completion_tokens")), "calls": calls, "text": _text(m.get("content")) if m.get("content") else "",
+    details = u.get("completion_tokens_details") or {}
+    other = (["reasoning"] if m.get("reasoning_content") or m.get("reasoning") or m.get("reasoning_details")
+             or (details.get("reasoning_tokens") or 0) > 0 else [])
+    other += ["refusal"] if m.get("refusal") else []
+    other += [f"output for {k}" for k, v in sorted(details.items()) if k != "reasoning_tokens" and (_count(v) or 0) > 0]
+    content = m.get("content")
+    if isinstance(content, list):
+        other += [f"content of type {p.get('type') if isinstance(p, dict) else type(p).__name__}" for p in content
+                  if not (isinstance(p, dict) and p.get("type") == "text")]
+    other += [f"an unread part: {k}" for k in sorted(m) if k not in CHAT_READ and m[k] not in (None, "", [], {})]
+    other += ["another choice"] * (len(choices) - 1)
+    return {"output": _count(u.get("completion_tokens")), "calls": calls, "text": _text(content) if content else "",
             "other": other, "stop": choices[0].get("finish_reason"), "by_call": choices[0].get("finish_reason") in ("tool_calls", "stop")}
+
+
+CHAT_READ = ("role", "content", "tool_calls", "reasoning_content", "reasoning", "reasoning_details", "refusal")  # chat_shape's
 
 
 # ── The tap ────────────────────────────────────────────────────────────────

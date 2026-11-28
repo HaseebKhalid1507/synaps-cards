@@ -346,17 +346,19 @@ def anthropic(*inputs, text=None, thinking=False, stop="tool_use", usage=True, n
     return answer
 
 
-def chat(*inputs, text=None, reasoning=None, finish="tool_calls", raw=None):
+def chat(*inputs, text=None, reasoning=None, finish="tool_calls", raw=None, fields=None, details=None, extra=0):
     """The same as an OpenAI-compatible chat completion (`raw`: the
-    arguments as sent, instead of each input's JSON)."""
+    arguments as sent, instead of each input's JSON; `fields`: more of the
+    message's fields, as a gateway sends them; `details`: the usage's
+    `completion_tokens_details`; `extra`: the output tokens they cost)."""
     def answer(req):
         ins = uses(asked(req), inputs)
         calls = [{"id": f"call_{k}", "type": "function", "function": {"name": "cards_block", "arguments": raw or compact(x)}}
                  for k, x in enumerate(ins)]
-        msg = {"role": "assistant", "content": text, "tool_calls": calls} | ({"reasoning_content": reasoning} if reasoning else {})
-        out = sum(len(compact(x)) + 7 for x in ins) + len(text or "") + len(reasoning or "")
+        msg = {"role": "assistant", "content": text, "tool_calls": calls} | ({"reasoning_content": reasoning} if reasoning else {}) | (fields or {})
+        out = sum(len(compact(x)) + 7 for x in ins) + len(text or "") + len(reasoning or "") + extra
         return {"model": "stub", "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
-                "usage": {"prompt_tokens": 100, "completion_tokens": out}}
+                "usage": {"prompt_tokens": 100, "completion_tokens": out} | ({"completion_tokens_details": details} if details is not None else {})}
     return answer
 
 
@@ -468,6 +470,57 @@ class OneCallAlone(unittest.TestCase):
                 e, _, _ = self.measure(answer, provider)
                 self.assertFalse(e.can_flip_default)
                 self.assertIn(f"({reason}: 16)", e.describe()["why_not"])
+
+    def measure_proxy(self, answer):
+        """A fitted proxy whose output control ran through the
+        OpenAI-compatible adapter against a stub answering `answer`: the
+        counter and what was paid. Shady's fit (review #14 round 4, R4-2):
+        a ratio of 1 and a pair allowance of 60, so a contaminated framing
+        still sits inside every bound."""
+        f, paid, stub = fitted(ratio=1.0, intercept=60 + chars(RECEIPT)), [], Stub(answer)
+        try:
+            p = providers.OpenAICompatible("stub", stub.url, on_usage=paid.append)
+            out = calibrate.output_control(CALLS, TOOLS, p.force, lambda s: f.ratio * chars(s))
+        finally:
+            stub.close()
+        return Calibrated(f, chars, out), paid
+
+    def test_shadys_reasoning_details_are_excluded_never_framing(self):
+        # Shady's R4-2 repro: the call asked for, plus encrypted
+        # reasoning_details and the 41 output tokens they cost, with no
+        # reasoning_content and no reasoning-token count. At f5a0027 all 16
+        # were samples, a call's framing measured 48, and it qualified.
+        honest, paid = self.measure_proxy(chat(ASKED))
+        self.assertEqual((honest.output["samples"], honest.output["excluded"], honest.call_framing, honest.can_flip_default), (16, 0, 7, True))
+        for form in ({"type": "reasoning.encrypted", "data": "stub-reasoning"}, {"type": "reasoning.text", "text": "Let me think."},
+                     {"type": "reasoning.summary", "summary": "Thought about it."}):
+            with self.subTest(form["type"]):
+                e, paid = self.measure_proxy(chat(ASKED, fields={"reasoning_details": [form]}, extra=41))
+                self.assertFalse(e.can_flip_default, f"a call's framing measured {e.call_framing}")
+                self.assertEqual((e.output["samples"], e.output["excluded"], e.output["framing"]), (0, 16, None), "never 48")
+                self.assertIn("16 of the output control's 16 requests: not one call and nothing else (reasoning: 16)", e.describe()["why_not"])
+                self.assertEqual(len(paid), 16, "every request is paid, excluded or not")
+
+    def test_any_part_the_chat_adapter_doesnt_read_is_named_and_excluded(self):
+        for fields, details, reason in [
+            ({"audio": {"id": "a1", "data": "UklGR"}}, None, "an unread part: audio"),
+            ({"thoughts": [{"type": "thought", "text": "Hm."}]}, None, "an unread part: thoughts"),
+            ({}, {"rejected_prediction_tokens": 12}, "output for rejected_prediction_tokens"),
+            ({"content": [{"type": "text", "text": ""}, {"type": "output_audio"}]}, None, "content of type output_audio"),
+            ({"content": ["Sure."]}, None, "content of type str"),
+        ]:
+            with self.subTest(reason):
+                e, paid = self.measure_proxy(chat(ASKED, fields=fields, details=details, extra=9))
+                self.assertFalse(e.can_flip_default)
+                self.assertIn(f"({reason}: 16)", e.describe()["why_not"])
+                self.assertEqual(len(paid), 16)
+        # What an OpenAI-compatible response carries beside one call and
+        # nothing else, all empty, is still a sample.
+        e, _ = self.measure_proxy(chat(ASKED, fields={"refusal": None, "annotations": [], "audio": None, "function_call": None,
+                                                      "reasoning_details": [], "reasoning": ""},
+                                       details={"reasoning_tokens": 0, "audio_tokens": 0, "accepted_prediction_tokens": 0,
+                                                "rejected_prediction_tokens": 0}))
+        self.assertEqual((e.output["excluded"], e.call_framing, e.can_flip_default), (0, 7, True), e.describe().get("why_not"))
 
     def test_the_request_asks_for_one_call_and_a_changed_input_counts_as_written(self):
         e, _, seen = self.measure(anthropic(ASKED))
