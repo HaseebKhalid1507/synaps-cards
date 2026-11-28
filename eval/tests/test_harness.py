@@ -340,6 +340,25 @@ class Dismissal(unittest.TestCase):
         self.assertEqual((settled, rec["sent"][0].get("lost")), ([[7]], True), "the history has only Q? and A.")
 
 
+class Received(unittest.TestCase):
+    """What reached the agent (desk.py's docs): a user message of the
+    history that is the text, whole or as one of its text parts."""
+
+    def test_a_message_or_one_of_its_text_parts(self):
+        notice = "[cards: b1 v2 dismissed]"
+        history = [{"role": "user", "content": "Start."}, {"role": "assistant", "content": "Go on."},
+                   {"role": "user", "content": [{"type": "text", "text": notice}, {"type": "text", "text": " Go on. "},
+                                                {"type": "image", "source": {}}]},
+                   {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Keep going."}]}]
+        self.assertEqual(desk.received_at(history, "Start."), 0)
+        self.assertEqual(desk.received_at(history, "Go on."), 2, "one text part of a message of several")
+        self.assertEqual(desk.received_at(history, notice + " Go on."), 2, "the message whole")
+        self.assertIsNone(desk.received_at(history, "Go on"), "a part's prefix is no part")
+        self.assertIsNone(desk.received_at(history, "Keep going."), "a tool result is no user message")
+        self.assertIsNone(desk.received_at(history, "   "))
+        self.assertFalse(desk.received(history[:2], "Go on."), "an assistant's text never reached the agent from the user")
+
+
 class Seam(unittest.TestCase):
     def test_the_stand_in_rides_notices_as_d6b_sends_them(self):
         d = desk.StandIn()
@@ -1273,6 +1292,8 @@ class Eligibility(unittest.TestCase):
         self.assertTrue(rep["rows_pass"])
         self.assertEqual(rep["verdict"], "not eligible")
         self.assertIn("15 on-run card answers or hand-backs didn't happen", rep["not_eligible_because"][0])
+        self.assertIn("ledger-card-negative r1: card answer skipped (no option labelled A)", rep["not_eligible_because"][0],
+                      "the skip is the reason named, not only what it left unsent")
         self.assertEqual(len(rep["also"]["interaction_failures"]), 15)
         # Sent, but not in the agent's received input: no sign it got there.
         lost = self.change(self.records(), "answer", lambda r, task: dict(r, history=r["history"][:2]) if r["repeat"] == 3 else r)
