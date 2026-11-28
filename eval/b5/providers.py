@@ -18,8 +18,9 @@ converted to it (`from_chat`) and back (`to_chat`).
 base URL points at it (`SYNAPS_ANTHROPIC_BASE_URL`, or the local
 provider's `LOCAL_ENDPOINT`), and it passes every request through
 unchanged, recording each request's body, when it went and when its last
-byte came back. The definition control reads the first request of a run;
-latency per round is the tap's.
+byte came back. The definition control reads the first request of a run.
+Its timings are the report's request latency (report.py's "Latency"),
+one of the two intervals it names.
 """
 
 import json

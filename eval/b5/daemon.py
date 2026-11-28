@@ -19,6 +19,7 @@ helper, `cards-eval`, is built in the same clone. Blocks go on and off as
 `synaps daemon reload-extension cards`.
 """
 
+import hashlib
 import json
 import os
 import queue
@@ -50,6 +51,19 @@ def lines_of(stream):
     return q
 
 
+
+def binary_digest(path):
+    """A file's identity for the run's record: its path and the SHA-256 of
+    its bytes."""
+    return {"path": str(path), "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+
+
+def binary(path):
+    """A binary's identity for the run's record: its path, `--version` and
+    the SHA-256 of its bytes (a version names a release, not a build)."""
+    v = subprocess.run([str(path), "--version"], capture_output=True, text=True)
+    return {**binary_digest(path), "version": v.stdout.strip()}
+
 class Isolated:
     """The daemon (module docs). `env` adds the provider's variables."""
 
@@ -67,8 +81,8 @@ class Isolated:
         for d in (self.base, self.cwd):
             d.mkdir(parents=True, exist_ok=True)
         self.run_dir = Path(tempfile.mkdtemp(prefix="b5-", dir="/tmp"))  # the socket path must stay short
-        v = subprocess.run([self.synaps, "--version"], capture_output=True, text=True)
-        self.record["synaps_version"] = v.stdout.strip()
+        ident = binary(self.synaps)
+        self.record["synaps_version"], self.record["synaps_sha256"] = ident["version"], ident["sha256"]
         self.version = self.record["synaps_version"].split()[-1] if self.record["synaps_version"] else "?"
         plugin = self.base / "plugins" / "cards"
         head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
@@ -76,6 +90,8 @@ class Isolated:
             subprocess.run(["git", "clone", "-q", str(ROOT), str(plugin)], check=True)
         subprocess.run(["git", "-C", str(plugin), "checkout", "-q", head], check=True)
         self.record["head"] = head
+        self.record["head_dirty"] = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"], capture_output=True,
+                                                        text=True, check=True).stdout.strip())
         setup = subprocess.run(["bash", "scripts/setup.sh"], cwd=plugin, capture_output=True, text=True)
         if setup.returncode != 0:
             raise RuntimeError(f"scripts/setup.sh failed: {(setup.stdout + setup.stderr)[-1500:]}")

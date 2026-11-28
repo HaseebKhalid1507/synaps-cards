@@ -35,6 +35,14 @@ never eligible (report.py).
 **The estimate** (`--estimate`) prints the spend of a full run per
 candidate model (b5/spend.py), from the set's own shape: no provider call.
 
+**The run's record** (`report.json`'s `meta`) is what B5b needs to say it ran
+the same harness: the head and whether its tree was clean, the task set's
+digest, the synaps binary's path, version and SHA-256, the desk adapter's
+handshake (its `impl` and `commit`) and executable, and the nonsecret
+configuration (`config`: provider, upstream base URL, model, the proxy
+and its tokenizer's version when there is no endpoint, Python, the
+platform). Credentials are never in it.
+
 Everything a run makes is under `--work`: `records.jsonl`, `report.json`,
 `report.md`, `calibration.json`, `paid.jsonl` (a real run's), the daemon's
 log and each run's workspace.
@@ -43,6 +51,9 @@ log and each run's workspace.
 import argparse
 import json
 import os
+import platform
+import shlex
+import shutil
 import sys
 import tempfile
 import time
@@ -129,7 +140,8 @@ def dry(a, tasks, frozen):
     finally:
         rec = iso.stop()
         model.close()
-    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "dry", "local/stub (scripted)")
+    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "dry", "local/stub (scripted)",
+                  config(a, prov, d, endpoint=False))
 
 
 def real(a, tasks, frozen):
@@ -198,7 +210,27 @@ def real(a, tasks, frozen):
         tap.close()
         the_desk.close()
     rec["spent_usd"], rec["stopped"] = round(budget.spent, 4), stopped
-    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "real", a.model)
+    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "real", a.model,
+                  config(a, prov, the_desk, endpoint=prov.has_endpoint))
+
+
+def config(a, prov, the_desk, endpoint):
+    """The run's nonsecret configuration (module docs, "The run's record")."""
+    out = {"provider": "scripted" if a.dry_run else a.provider, "base_url": getattr(prov, "base", None),
+           "model": getattr(prov, "model", None), "repeats": a.repeats, "python": platform.python_version(),
+           "platform": platform.platform(), "desk": {"handshake": the_desk.handshake}}
+    if a.desk and not a.dry_run:
+        exe = shlex.split(a.desk)[0]
+        path = shutil.which(exe) or exe
+        out["desk"]["executable"] = daemon.binary_digest(path) if os.path.isfile(path) else {"path": exe}
+    if not endpoint and not a.dry_run:
+        out["proxy"] = a.proxy
+        try:
+            import tiktoken
+            out["tiktoken"] = tiktoken.__version__
+        except ImportError:
+            out["tiktoken"] = None
+    return out
 
 
 def _block_tools(iso):
@@ -267,12 +299,13 @@ def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=No
     return definition
 
 
-def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, mode, model):
+def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, mode, model, cfg=None):
     # Eligibility checks the runs against the prescribed plan: three repeats, whatever --repeats was.
     order, not_run = harness.plan(tasks, len(report.REPEATS))
     meta = {"mode": mode, "model": model, "head": daemon_rec.get("head"), "taskset": frozen, "repeats": a.repeats,
-            "synaps": daemon_rec.get("synaps_version"), "daemon": daemon_rec, "secs": round(time.time() - started, 1),
-            "stopped": daemon_rec.get("stopped")}
+            "synaps": daemon_rec.get("synaps_version"), "synaps_sha256": daemon_rec.get("synaps_sha256"),
+            "head_dirty": daemon_rec.get("head_dirty"), "daemon": daemon_rec, "config": cfg or {},
+            "secs": round(time.time() - started, 1), "stopped": daemon_rec.get("stopped")}
     rep = report.build(records, counter, definition, not_run, meta, plan=[(t["id"], arm, r + 1) for r, t, arm in order])
     (work / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False))
     (work / "report.md").write_text(report.markdown(rep))

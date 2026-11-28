@@ -38,8 +38,12 @@ ANTHROPIC_API_KEY=â€¦ python3 eval/run.py --provider anthropic --model claude-â€
 The run installs this checkout as a user installs the plugin (a clone at
 HEAD, then `scripts/setup.sh`) into a throwaway Synaps home with its own
 runtime directory and daemon, and builds `cards-eval` (the fold report, the
-receipts and card answers, all cards-spec's own) in the same clone. Nothing
-of the user's home, plugins or daemons is read or touched.
+receipts and card answers, all cards-spec's own) in the same clone. The
+daemon and its sessions use that home, never the user's Synaps home,
+plugins or daemons. It is the daemon's isolation, not an OS sandbox: the
+agent's shell commands run as the user, and the install's build and the
+desk adapter inherit the harness's environment. Run it as a user, or on a
+machine, whose files the agent may touch.
 
 ## What a real run still needs
 

@@ -65,6 +65,14 @@ reported apart, each with its off-runs' rounds by repeat
 bucket (the long tasks, coding under 6 rounds, short, no tool,
 interactive), reported with no gate.
 
+**Latency** (reported, no gate) is two intervals, each named for what it
+measures: `request_latency_per_round`, the tap's, from a request's send to
+its response's last byte (what the provider took, the wait for the first
+token included; a real run's, since the dry run has no tap), and
+`wire_interval_per_round`, the session wire's, from a round's
+`response_start` to its `usage` (the stream as the daemon saw it, the wait
+before it not included).
+
 **The verdict** keeps what the rows say apart from what they license:
 - `rows_pass`: every gate row passes (pooled and 2 of 3). Descriptive.
 - *Notice probes*: each task with a dismissal is its probe of the unseen
@@ -377,8 +385,9 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "notice_probes": notice_probes(records),
         "interaction_failures": [{"task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "why": s["skipped"]}
                                  for rec in records for s in rec.get("steps", []) if s.get("interaction")],
-        "latency_per_round": {arm: {"median": median(lat), "p90": p90(lat), "rounds": len(lat)}
-                              for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
+        "wire_interval_per_round": {arm: {"median": median(lat), "p90": p90(lat), "rounds": len(lat)}
+                                    for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
+        "request_latency_per_round": request_latency(records),
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
     }
     shape = set_shape(records, turn_rows)
@@ -396,6 +405,17 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "outcomes": judged,
         "turn_rows": turn_rows,
     }
+
+
+def request_latency(records):
+    """The tap's send-to-last-byte per provider request, per arm (module
+    docs, "Latency")."""
+    out = {}
+    for arm in ("on", "off"):
+        lat = [round(q["t_done"] - q["t_sent"], 3) for rec in records if rec["arm"] == arm for q in rec.get("requests") or []
+               if q.get("t_sent") is not None and q.get("t_done") is not None]
+        out[arm] = {"median": median(lat), "p90": p90(lat), "requests": len(lat)}
+    return out
 
 
 BUCKETS = ("long", "coding_under_6", "short", "no_tool", "interactive")

@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import run
-from b5 import calibrate, count, desk, estimate, harness, providers, report, spend, taskset
+from b5 import calibrate, count, daemon, desk, estimate, harness, providers, report, spend, taskset
 from b5.calibrate import compact
 from wire import BLOCK, PUT, Wire
 
@@ -148,6 +148,58 @@ class HandBack(unittest.TestCase):
     def test_the_stand_in_hands_back_for_the_dry_run(self):
         out = desk.StandIn().hand_back("c1", {"block": {"id": "plan"}, "edit": {"keep": "all"}, "say": "Apply it."}, [])
         self.assertTrue(out["text"].startswith("Apply it.\n[stand-in hand-back of block plan: "))
+
+
+class Record(unittest.TestCase):
+    """Review #14, P3 13: the run's record names the harness, the binary,
+    the adapter and the configuration; latency is two named intervals."""
+
+    def test_the_desk_s_handshake_is_kept(self):
+        class Adapter(desk.Desk):
+            def request(self, req):
+                return {"ok": True, "protocol": desk.PROTOCOL, "impl": "synaps-desk D6b", "commit": "0123abc"}
+
+        d = desk.for_real_run(Adapter())
+        self.assertEqual(d.handshake, {"ok": True, "protocol": desk.PROTOCOL, "impl": "synaps-desk D6b", "commit": "0123abc"})
+
+    def test_a_binary_is_named_by_its_bytes_not_only_its_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "synaps"
+            exe.write_text("#!/bin/sh\necho synaps 0.12.0\n")
+            exe.chmod(0o755)
+            one = daemon.binary(exe)
+            exe.write_text("#!/bin/sh\necho synaps 0.12.0 \n")
+            two = daemon.binary(exe)
+        self.assertEqual((one["version"], two["version"]), ("synaps 0.12.0", "synaps 0.12.0"))
+        self.assertNotEqual(one["sha256"], two["sha256"])
+
+    def test_the_config_is_recorded_without_credentials(self):
+        a = argparse.Namespace(dry_run=False, provider="openai_compatible", repeats=3, desk="/bin/true --x", proxy="o200k")
+        prov = providers.OpenAICompatible("m/qwen", "http://gw:8000/v1", "sk-secret")
+        d = desk.StandIn()
+        d.hello()
+        c = run.config(a, prov, d, endpoint=False)
+        self.assertEqual((c["provider"], c["base_url"], c["model"], c["proxy"]), ("openai_compatible", "http://gw:8000/v1", "qwen", "o200k"))
+        self.assertEqual(c["desk"]["handshake"]["impl"], desk.STAND_IN)
+        self.assertEqual(c["desk"]["executable"]["path"], "/bin/true")
+        self.assertIn("tiktoken", c)
+        self.assertNotIn("sk-secret", json.dumps(c))
+
+    def test_latency_is_the_tap_s_request_time_and_the_wire_s_interval_named_apart(self):
+        recs = [{"task": "a", "arm": "on", "repeat": 1, "fold": {"lines": []}, "judge": {"pass": True},
+                 "requests": [{"t_sent": 10.0, "t_done": 12.5}, {"t_sent": 20.0, "t_done": 21.0}, {"request": {}}]},
+                {"task": "a", "arm": "off", "repeat": 1, "fold": {"lines": []}, "judge": {"pass": True}, "requests": []}]
+        rows = {("a", "on"): [row("a", "on", 1)], ("a", "off"): [row("a", "off", 1)]}
+        orig = report.per_turn
+        report.per_turn = lambda rec, counter: (rows[(rec["task"], rec["arm"])], [])
+        try:
+            also = report.build(recs, _Counter(), 900, [], {"mode": "test"})["also"]
+        finally:
+            report.per_turn = orig
+        self.assertNotIn("latency_per_round", also)
+        self.assertEqual(also["request_latency_per_round"]["on"], {"median": 1.75, "p90": 2.5, "requests": 2})
+        self.assertEqual(also["request_latency_per_round"]["off"]["requests"], 0)
+        self.assertEqual(also["wire_interval_per_round"]["on"]["rounds"], 1)
 
 
 class _Desk(desk.StandIn):

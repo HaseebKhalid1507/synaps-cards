@@ -55,6 +55,7 @@ NOTICE = re.compile(r"^\[block ((?:[a-z][a-z0-9_-]{0,23} v[1-9][0-9]{0,8})(?:, [
 
 class Desk:
     impl = "?"
+    handshake = None  # the adapter's `hello` reply, kept for the run's record (impl, commit, protocol)
 
     def request(self, req):
         raise NotImplementedError
@@ -64,6 +65,7 @@ class Desk:
         if r.get("protocol") != PROTOCOL:
             raise RuntimeError(f"the desk speaks {r.get('protocol')!r}, not {PROTOCOL}")
         self.impl = r.get("impl", "?")
+        self.handshake = r
         return r
 
     def dismiss(self, conversation, block, history):
