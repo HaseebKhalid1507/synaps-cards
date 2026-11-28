@@ -195,11 +195,11 @@ class Classifier(unittest.TestCase):
         w = Wire().start()
         w.results(w.round([("read", {})]))
         w.results(w.round([("cards_block", BLOCK)]))
-        w.results(w.round([("bash", {"command": "true"})]))
+        w.results(w.round([("bash", {"command": "true"}), ("cards_block", BLOCK)]))
         w.round(text="Fixed.")
         t = one(w.done())
         self.assertEqual(closing(t).closing_rounds, 0)
-        self.assertEqual([r.block_only for r in t.rounds], [False, True, False, False])
+        self.assertEqual([r.block_only for r in t.rounds], [False, True, False, False], "a block call riding bash isn't block-only")
 
     def test_a_card_is_the_turns_work(self):
         w = Wire().start()

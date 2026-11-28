@@ -203,6 +203,15 @@ class Record(unittest.TestCase):
 
 
 class BlockOnly(unittest.TestCase):
+    def test_a_turn_row_counts_its_block_only_rounds(self):
+        w = Wire().start()
+        w.results(w.round([("read", {})]))
+        w.results(w.round([("cards_block", BLOCK)]))
+        w.results(w.round([("bash", {}), ("cards_block", BLOCK)]))
+        w.round(text="Fixed.")
+        (r,), _ = report.per_turn({"task": "t", "arm": "on", "repeat": 1, "events": w.done().events, "fold": {"lines": []}}, Chars())
+        self.assertEqual((r["block_only_rounds"], r["closing"]["rounds"]), (1, 0))
+
     def test_every_block_only_round_is_reported_beside_the_closing_ones(self):
         rows = [dict(row("a", "on", 1, closing=1), block_only_rounds=3), dict(row("b", "on", 1), block_only_rounds=0), row("a", "off", 1)]
         recs = [{"task": t, "arm": a, "repeat": 1, "fold": {"lines": []}, "judge": {"pass": True}} for t, a in (("a", "on"), ("b", "on"), ("a", "off"))]

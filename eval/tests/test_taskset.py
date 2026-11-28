@@ -77,6 +77,8 @@ class Shape(unittest.TestCase):
             (root / one_line["check"]["tests"]).write_text("")
             (root / "solutions/one-line.json").write_text('[{"path": "a.py", "old": "x - 1", "new": "x"}]')
             self.assertTrue(any("1 line(s)" in p for p in taskset.problems([one_line], root)))
+        fewer = [t for t in TASKS if t["id"] != coding[0]["id"]]
+        self.assertTrue(any("the set keeps 2 spares" in p for p in taskset.problems(fewer)), "21 long tasks: a spare short")
         multi = sum(len({e["path"] for e in json.loads((taskset.TASKS / t["solution"]).read_text())}) >= 3 for t in coding)
         self.assertGreaterEqual(multi, 10, "the new long tasks touch 3 files or more")
 
