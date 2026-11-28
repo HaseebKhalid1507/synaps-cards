@@ -860,6 +860,42 @@ class BudgetStop(unittest.TestCase):
         self.assertEqual([x["usd"] for x in paid], [0.2, 0.5])
         self.assertEqual((rec["stopped"], rec["drained"], rec.get("in_flight_unknown")), ("over budget", True, None))
 
+    def test_a_stopped_run_drains_what_comes_after_the_history_too(self):
+        # The daemon may answer the history query before the in-flight
+        # response's usage arrives: only the drain to the idle sees it.
+        class AnsweredFirst(_Session):
+            def cancel(self):
+                self.queue = [{"ev": "stream", "event": {"kind": "session", "session": "usage", "input_tokens": 0,
+                                                         "output_tokens": 100_000}}, {"ev": "idle"}]
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        with tempfile.TemporaryDirectory() as tmp:
+            b = spend.Budget(0.1, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+            r = harness.Runner(_Iso([40_000]), "claude-haiku-4-5", desk.StandIn(), Path(tmp), budget=b)
+            made = r.iso.session
+            r.iso.session = lambda *a: _as(AnsweredFirst, made(*a))
+            with self.assertRaises(spend.OverBudget) as e:
+                r.run(0, 0, task, "off")
+        self.assertAlmostEqual(b.spent, 0.70, places=9)
+        self.assertTrue(e.exception.record["drained"])
+
+    def test_the_session_charges_each_usage_once_as_it_records_it(self):
+        # daemon.Session itself (the stand-ins mirror it): the hook sees
+        # every usage frame of this session once, whatever reads it.
+        import queue
+        s = daemon.Session.__new__(daemon.Session)
+        s.q, s.frames, s.events, s.prompts, s.t0, s.id = queue.Queue(), [], [], [], 0.0, "s1"
+        usage = {"kind": "session", "session": "usage", "input_tokens": 1, "output_tokens": 2}
+        for f in ({"type": "event", "session_id": "s1", "event": {"ev": "stream", "event": usage}},
+                  {"type": "event", "session_id": "other", "event": {"ev": "stream", "event": usage}},
+                  {"type": "event", "session_id": "s1", "event": {"ev": "stream", "event": {"kind": "llm", "llm": "text", "text": "x"}}},
+                  {"type": "event", "session_id": "s1", "event": {"ev": "stream", "event": usage}}):
+            s.q.put(json.dumps(f))
+        got = []
+        s.on_usage = got.append
+        for _ in range(4):
+            s.next(0)
+        self.assertEqual(got, [usage, usage], "this session's two, once each")
+
     def test_a_stopped_run_whose_session_never_idles_says_so(self):
         s = _Session([])
         s.events = [(0.0, {"ev": "turn_started", "trigger": "user"})]
