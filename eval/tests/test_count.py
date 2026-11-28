@@ -144,7 +144,7 @@ class Counting(unittest.TestCase):
         u = Uncalibrated(chars, "chars")
         self.assertEqual(u.call(BLOCK), 8 + len(compact(BLOCK)))
         self.assertEqual((u.describe()["kind"], u.can_flip_default), ("uncalibrated", False))
-        self.assertTrue(Calibrated(fitted(intercept=9.0 + len(RECEIPT)), chars).can_flip_default)
+        self.assertTrue(Calibrated(fitted(intercept=9.0 + len(RECEIPT)), chars, control(6)).can_flip_default)
 
 
 def endpoint_count(wobble=lambda args: 0, drift=None):
@@ -173,6 +173,30 @@ def endpoint_count(wobble=lambda args: 0, drift=None):
 CALLS = [{"ops": [{"op": "remove", "id": "x" * (1 + k % 23)}] * (1 + k % 16)} for k in range(210)]
 
 
+def forced_model(framing=7, wobble=lambda args: 0, no_call=()):
+    """A provider's forced call (calibrate.py's output control): it calls
+    the tool with the input asked for, and reports its output as the
+    arguments' characters plus `framing` (plus `wobble`). `no_call`: the
+    request numbers that make no call."""
+    seen = []
+
+    def force(body):
+        seen.append(body)
+        got = json.loads(body["messages"][0]["content"][0]["text"][len(calibrate.FORCE):])
+        if len(seen) - 1 in no_call:
+            return 3, None
+        a = compact(got)
+        return len(a) + framing + wobble(a), got
+    force.seen = seen
+    return force
+
+
+def control(framing, spread=0):
+    """An output control's summary, as calibrate.output_control gives it."""
+    return {"framing": framing, "requests": 16, "framing_quartiles": [framing - spread, framing, framing + spread],
+            "framing_range": [framing - spread, framing + spread], "no_call": 0, "exact": 16}
+
+
 class EndpointCounting(unittest.TestCase):
     """With an endpoint (§2.8, "Framing"): a call is its arguments' count
     plus one allowance, calibrated once over the set and applied to every
@@ -199,7 +223,7 @@ class EndpointCounting(unittest.TestCase):
         self.assertEqual((p["diff"] - p["args"] - raw["receipt"], p["framing"]), (9, 9))
         self.assertEqual(raw["requests"], 2 * 210 + 3 + 2, "a with and an args count per call, 3 baselines, the receipt and its base")
         self.assertEqual(raw["baselines"], [raw["baselines"][0]] * 3)
-        self.assertTrue(Endpoint(endpoint_count(), TOOLS, framing, raw).can_flip_default)
+        self.assertTrue(Endpoint(endpoint_count(), TOOLS, framing, raw, output=control(6)).can_flip_default)
 
     def test_a_spread_framing_or_a_moving_baseline_cant_flip_the_default(self):
         count = endpoint_count(wobble=lambda a: len(a) % 20)
@@ -210,6 +234,73 @@ class EndpointCounting(unittest.TestCase):
         framing, raw = calibrate.endpoint(CALLS, TOOLS, endpoint_count(drift=[]))
         self.assertIn("the baseline moved", Endpoint(None, TOOLS, framing, raw).describe()["why_not"])
         self.assertFalse(Endpoint(None, TOOLS, 9).can_flip_default, "an allowance with no calibration behind it")
+
+
+class OutputControl(unittest.TestCase):
+    """The two framings (review #14 round 2, R2-4; count.py's "The two
+    framings"): the pair's allowance is a call's wrapper and its result's;
+    block-call output takes only the call's, measured on output."""
+
+    def test_the_calls_framing_is_measured_on_output_and_the_results_is_input(self):
+        # endpoint_count: a call's wrapper is 7 as input, its result's 4.
+        # The model writes a call's wrapper in 7 output tokens.
+        count = endpoint_count()
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, count)
+        self.assertEqual(framing, 9, "the pair's allowance: both wrappers, less the text probes' newlines")
+        e = Endpoint(count, TOOLS, framing, raw)
+        force = forced_model(framing=7)
+        e.output = calibrate.output_control(CALLS, TOOLS, force, e.text)
+        self.assertEqual(e.output["requests"], 16)
+        self.assertTrue(all(b["tool_choice"] == {"type": "tool", "name": "cards_block"} for b in force.seen))
+        self.assertEqual((e.call_framing, e.result_framing), (6, 3))
+        self.assertTrue(e.can_flip_default, e.describe().get("why_not"))
+        # A call is what the model wrote for it: its arguments and its own
+        # wrapper. Its result's wrapper isn't block-call output.
+        self.assertEqual(e.call(BLOCK), len(compact(BLOCK)) + 7)
+        d = e.describe()
+        self.assertEqual((d["framing"], d["call_framing"], d["result_framing"]), (9, 6, 3))
+
+    def test_the_results_framing_is_input_once_per_round_after_it_never_block_output(self):
+        e = Endpoint(endpoint_count(), TOOLS, 9, None, output=control(6))
+        t = Counting().turn()
+        a = attribute(t, e)
+        self.assertEqual(a["block_output"], (len(compact(PUT)) + 1 + 6) + (len(compact(BLOCK)) + 1 + 6))
+        self.assertEqual(a["result_framing_input"], 3 * 3 + 3 * 1, "2 block results: 3 rounds after the first, 1 after the second")
+        self.assertEqual(a["result_input"], (len("ok") + 1) * 3 + (len("ok 1 ops (blocks/1 #abc)") + 1) * 1)
+
+    def test_with_no_output_control_the_allowance_is_output_and_cant_flip_the_default(self):
+        framing, raw = calibrate.endpoint(CALLS, TOOLS, endpoint_count())
+        e = Endpoint(endpoint_count(), TOOLS, framing, raw)
+        self.assertEqual((e.call_framing, e.result_framing), (9, 0), "the conservative reading")
+        self.assertFalse(e.can_flip_default)
+        self.assertIn("no output control", e.describe()["why_not"])
+        c = Calibrated(fitted(intercept=9.0 + len(RECEIPT)), chars)
+        self.assertEqual((c.call_framing, c.can_flip_default), (9.0, False))
+        self.assertIn("no output control", c.describe()["why_not"])
+
+    def test_an_unsound_output_control_cant_flip_the_default(self):
+        allowance = 9
+        self.assertEqual(calibrate.output_problems(control(6), allowance), [])
+        self.assertIn("interquartile", calibrate.output_problems(control(6, spread=3), allowance)[0])
+        self.assertIn("output framing 70.00 outside", calibrate.output_problems(control(70), allowance)[0])
+        self.assertIn("the result's framing -6.00", calibrate.output_problems(control(15), allowance)[0])
+        out = calibrate.output_control(CALLS, TOOLS, forced_model(no_call=(0, 5)), lambda s: len(s))
+        self.assertEqual((out["no_call"], out["requests"]), (2, 16))
+        self.assertIn("2 of the output control's 16 requests made no call", calibrate.output_problems(out, allowance)[0])
+        # The proxy's counter, the same way.
+        f = fitted(intercept=9.0 + len(RECEIPT))
+        c = Calibrated(f, chars, calibrate.output_control(CALLS, TOOLS, forced_model(framing=6), lambda s: f.ratio * chars(s)))
+        self.assertEqual((c.call_framing, c.result_framing, c.can_flip_default), (6.0, 3.0, True))
+        self.assertEqual(c.call(BLOCK), 6 + len(compact(BLOCK)))
+
+    def test_its_calls_spread_over_the_sets_sizes(self):
+        calls, _ = calibrate.load()
+        picked = calibrate.output_calls(calls)
+        sizes = [len(compact(c).encode()) for c in picked]
+        self.assertEqual(len(picked), calibrate.OUTPUT_CALLS)
+        self.assertEqual(sizes, sorted(sizes))
+        self.assertLessEqual(sizes[-1], calibrate.OUTPUT_MAX_BYTES)
+        self.assertLess(sizes[0] * 10, sizes[-1], "short and long calls both")
 
 
 class Qualifying(unittest.TestCase):

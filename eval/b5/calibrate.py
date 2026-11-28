@@ -32,28 +32,50 @@ pair's difference d(c) is fitted by least squares to
     d(c) = intercept + ratio × proxy(compact(c))
 
 The **ratio** turns proxy counts into the provider's tokens. The
-**framing allowance** is the intercept less the receipt's own content,
+**pair's allowance** is the intercept less the receipt's own content,
 `intercept − ratio × proxy(RECEIPT)`: the name, id and wrapper of a call
-and of its result, one fixed allowance per call (§2.8, "Framing"). The fit
+and of its result, one fixed allowance per call (§2.8, "Framing"; how it
+splits between output and input is the output control's, below). The fit
 reports its spread: r², the residuals' standard deviation and largest
 size, and the ratio and intercept with each call left out in turn.
 
 **With an endpoint** (`endpoint`), no fit is needed. The arguments are
-counted by the endpoint, as text (`text_probe`), and the framing
+counted by the endpoint, as text (`text_probe`), and the pair's
 allowance is calibrated once: the median over the calibration set of
 d(c) − text(compact(c)) − text(RECEIPT) (§2.8: "a probe message with one
 block call, minus the same message without it, minus the arguments' own
-count"). Every call is then its arguments' count plus that one allowance
-(count.py), never its own pair: the allowance is the method's, frozen for
-the run, and the raw differences it came from are kept.
+count"). Every call is then its arguments' count plus one framing, the
+same for every call (count.py), never its own pair's: the method's,
+frozen for the run, and the raw differences it came from are kept.
 
-**The result's wrapper is in the allowance** with either counter: a call
-can't be sent without its result (the pair must be a valid conversation),
-so no probe separates the two wrappers, and §2.8's own probe ("a probe
-message with one block call") includes it. It is input, not output: a few
-tokens a call on the pessimistic side. eval/README.md and the PR say this
-is a reading of §2.8 for Haseeb to ratify, or to change by a probe that
-can tell them apart.
+**The pair's allowance holds two wrappers**, the call's and its result's:
+a call can't be sent without its result (the pair must be a valid
+conversation), so no input probe tells them apart. §2.8 (as ratified in
+review #14 round 2, R2-4) puts them on different sides: the call's
+framing is block-call output, the result's wrapper is input overhead,
+reported on its own line and never attributed to block-call output. So
+the call's framing is measured where it is paid, on output:
+
+**The output control** (`output_control`): `OUTPUT_CALLS` calls of the
+calibration set, spread over its sizes up to `OUTPUT_MAX_BYTES` (a call's
+framing doesn't grow with its length, and a long one costs output), each
+sent as a request that makes the model call `cards_block` with exactly
+that input and nothing else (`forced`: the provider's forced tool choice,
+Anthropic's `tool_choice` `tool` and an OpenAI-compatible one's
+`function`). A request's reported output, less the counter's count of the
+arguments the model actually generated (as the run counts every call:
+their compact JSON), is that call's **framing on output**; the control's
+is the median. The run's counter then counts a call as its arguments plus
+that framing, and **the result's framing** is the pair's allowance less
+it: what the call and its result cost as input beyond the call's own
+output. Each request is paid (output tokens), with an endpoint too: it
+goes to the budget's ledger as a probe. The control qualifies if its
+framing is within the framing bounds, its framings' interquartile range
+within `endpoint_framing_iqr`, every request made a call, and the
+result's framing within −`endpoint_framing_iqr` to the framing bound (a
+call's input framing can sit a token under its output's, never far).
+Without the control a counter attributes the pair's whole allowance to
+output (the conservative reading), and can't flip the default.
 
 **Qualifying** (`problems`, `endpoint_problems`): a counter can flip the
 default only if its calibration is sound by these bounds, fixed before any
@@ -84,6 +106,10 @@ SAID = "Working."
 NEXT = "Continue."
 RECEIPT = "ok 1 ops (blocks/1 #0000000000000000)"
 PROBE_ID = "toolu_b5probe0001"
+FORCE_SYSTEM = "You are a probe of tool-call framing. Call the tool exactly as asked, and nothing else."
+FORCE = "Call cards_block once, with exactly this input:\n"
+OUTPUT_CALLS = 16
+OUTPUT_MAX_BYTES = 2048
 CALIBRATION_MIN = 200
 EVAL = Path(__file__).resolve().parent.parent
 CALIBRATION = EVAL / "calibration.jsonl"
@@ -240,6 +266,64 @@ def endpoint(calls, tools, count):
     raw = {"receipt": receipt, "text_base": text_base, "baselines": bases, "requests": 2 * len(calls) + len(bases) + 2,
            "framing_quartiles": q, "framing_range": [fr[0], fr[-1]], "pairs": rows}
     return statistics.median(fr), raw
+
+
+def forced(call_input, tools):
+    """The output control's request for one call (module docs): the model
+    made to call `cards_block` with `call_input`, and nothing else. Neutral
+    form, Anthropic's `tool_choice` (providers.py converts it)."""
+    return {"system": FORCE_SYSTEM, "tools": tools, "tool_choice": {"type": "tool", "name": "cards_block"},
+            "messages": [{"role": "user", "content": [{"type": "text", "text": FORCE + compact(call_input)}]}]}
+
+
+def output_calls(calls, n=OUTPUT_CALLS):
+    """The output control's calls (module docs): `n` of the calibration
+    set's up to `OUTPUT_MAX_BYTES`, evenly spread over their sizes."""
+    small = sorted((c for c in calls if len(compact(c).encode()) <= OUTPUT_MAX_BYTES), key=lambda c: len(compact(c).encode()))
+    if len(small) <= n:
+        return small
+    return [small[round(i * (len(small) - 1) / (n - 1))] for i in range(n)]
+
+
+def output_control(calls, tools, force, text):
+    """The call's framing on output (module docs). `force(body)` sends a
+    forced call: `(its reported output tokens, the input the model gave
+    the call, or None if it made none)`; `text(s)` is the run's counter's
+    count of a text. A dict: the median `framing`, its spread, and every
+    request as it went."""
+    rows = []
+    for c in output_calls(calls):
+        out, got = force(forced(c, tools))
+        args = None if got is None else text(compact(got))
+        rows.append({"bytes": len(compact(c).encode()), "output": out, "args": args,
+                     "framing": None if args is None else out - args, "exact": got == c})
+    fr = sorted(r["framing"] for r in rows if r["framing"] is not None)
+    return {"framing": statistics.median(fr) if fr else None, "requests": len(rows),
+            "framing_quartiles": (statistics.quantiles(fr, n=4) if len(fr) >= 2 else fr * 3) or None,
+            "framing_range": [fr[0], fr[-1]] if fr else None, "no_call": sum(r["framing"] is None for r in rows),
+            "exact": sum(r["exact"] for r in rows), "calls": rows}
+
+
+def output_problems(out, allowance):
+    """Why an output control can't back a counter that flips the default
+    (module docs, "The output control"): empty when it can."""
+    q = QUALIFY
+    if not out or out.get("framing") is None:
+        return ["no output control: the call's framing on output wasn't measured"]
+    found = []
+    if out["no_call"]:
+        found.append(f"{out['no_call']} of the output control's {out['requests']} requests made no call")
+    f, iqr = out["framing"], q["endpoint_framing_iqr"]
+    if not q["framing"][0] <= f <= q["framing"][1]:
+        found.append(f"the call's output framing {f:.2f} outside {q['framing'][0]:g}–{q['framing'][1]:g} tokens")
+    lo, _, hi = out["framing_quartiles"]
+    if hi - lo > iqr:
+        found.append(f"the output control's framings span an interquartile {lo:g}–{hi:g}, over {iqr:g} tokens")
+    r = allowance - f
+    if not -iqr <= r <= q["framing"][1]:
+        found.append(f"the result's framing {r:.2f} (the pair's allowance {allowance:.2f} less the call's {f:.2f}) "
+                     f"outside {-iqr:g}–{q['framing'][1]:g} tokens")
+    return found
 
 
 def endpoint_problems(allowance, raw, models=()):

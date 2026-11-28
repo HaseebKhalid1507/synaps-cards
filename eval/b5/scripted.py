@@ -25,7 +25,9 @@ messages and tools (input), of what it streams (output, plus 4 per call),
 and its cache: the bytes this request shares as a prefix with the last one
 of the run. A one-token completion (`max_tokens: 1`, not streamed) is a
 probe: it answers with its usage only, so the calibration can run against
-it.
+it. A request that forces a tool (`tool_choice`, not streamed: the
+calibration's output control) gets that call with the input it asks for,
+its output priced as any call's.
 """
 
 import json
@@ -151,6 +153,15 @@ class Scripted:
                 req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 with model.lock:
                     model.requests.append(req)
+                if req.get("tool_choice") and not req.get("stream"):
+                    args = model.forced(req)
+                    self._json({"id": "forced", "object": "chat.completion", "model": "stub", "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": None, "tool_calls": [
+                            {"id": "call_forced", "type": "function", "function": {"name": req["tool_choice"]["function"]["name"],
+                                                                                   "arguments": args}}]},
+                         "finish_reason": "tool_calls"}],
+                        "usage": {"prompt_tokens": model.input_tokens(req), "completion_tokens": tokens(args) + 4}})
+                    return
                 if req.get("max_tokens") == 1 and not req.get("stream"):
                     self._json({"id": "probe", "object": "chat.completion", "choices": [
                         {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "length"}],
@@ -186,6 +197,13 @@ class Scripted:
     @staticmethod
     def _body(req):
         return json.dumps(req.get("messages", []), ensure_ascii=False) + json.dumps(req.get("tools", []), ensure_ascii=False)
+
+    @staticmethod
+    def forced(req):
+        """The arguments a forced call asks for (calibrate.py's `forced`): the
+        last user message's text after its first line."""
+        last = next(m for m in reversed(req["messages"]) if m.get("role") == "user")
+        return json.dumps(json.loads(_text(last.get("content")).split("\n", 1)[1]), ensure_ascii=False)
 
     def input_tokens(self, req):
         return tokens(self._body(req))

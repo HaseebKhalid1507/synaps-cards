@@ -499,6 +499,8 @@ def build(records, counter, definition, not_run, meta, plan=None):
                               "closing": sum(r["closing"]["rounds"] for r in on if r["closing"]["complete"]),
                               "turns_with": sum(1 for r in on if r.get("block_only_rounds")), "turns": len(on)},
         "result_input": sum(r["attributed"]["result_input"] for r in on if r["attributed"]),
+        # The result's wrapper: input overhead, never block-call output (count.py's "The two framings").
+        "result_framing_input": sum(r["attributed"].get("result_framing_input", 0) for r in on if r["attributed"]),
         "unseen_ops": sum(r["attributed"]["unseen_ops"] for r in on if r["attributed"]),
         "unseen_tokens": sum(r["attributed"]["unseen_tokens"] for r in on if r["attributed"]),
         "refusals": sum(r["refusals"] for r in on),

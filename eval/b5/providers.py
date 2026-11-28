@@ -14,6 +14,13 @@ converted to it (`from_chat`) and back (`to_chat`).
   Its counts calibrate the proxy. Each is paid: its usage goes to
   `on_usage` (spend.py's `Budget.paid`) before the count is returned.
 
+**A forced call** (`Provider.force`, calibrate.py's output control): a
+completion that must call the tool named by the body's `tool_choice`
+(Anthropic's `tool`, an OpenAI-compatible provider's `function`), not
+streamed. It returns the reported output tokens and the input the model
+gave the call. Each is paid, with an endpoint too: its usage goes to
+`on_usage` before it returns.
+
 **The tap** (`Tap`) sits between the daemon and its provider: the daemon's
 base URL points at it (`SYNAPS_ANTHROPIC_BASE_URL`, or the local
 provider's `LOCAL_ENDPOINT`), and it passes every request through
@@ -32,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ANTHROPIC = "https://api.anthropic.com"
 ANTHROPIC_VERSION = "2023-06-01"
+FORCE_MAX_TOKENS = 4096  # a forced call's cap: the output control's calls are at most 2 KiB
 
 
 # ── The neutral form and OpenAI's chat ─────────────────────────────────────
@@ -69,6 +77,8 @@ def to_chat(body, model):
     out = {"model": model, "messages": msgs}
     if tools:
         out["tools"] = tools
+    if (body.get("tool_choice") or {}).get("type") == "tool":
+        out["tool_choice"] = {"type": "function", "function": {"name": body["tool_choice"]["name"]}}
     return out
 
 
@@ -130,9 +140,10 @@ class Anthropic:
     name = "anthropic"
     has_endpoint = True
 
-    def __init__(self, model, api_key, base=ANTHROPIC):
+    def __init__(self, model, api_key, base=ANTHROPIC, on_usage=None):
         self.model, self.key, self.base = model.split("/", 1)[-1], api_key, base.rstrip("/")
         self.count_url, self.models = f"{self.base}/v1/messages/count_tokens", set()
+        self.on_usage = on_usage
 
     def headers(self):
         return {"x-api-key": self.key, "anthropic-version": ANTHROPIC_VERSION}
@@ -145,6 +156,22 @@ class Anthropic:
         if body.get("tools"):
             b["tools"] = body["tools"]
         return post(self.count_url, b, self.headers())["input_tokens"]
+
+    def force(self, body):
+        """A forced call (module docs): `(output tokens, the call's input or
+        None)`. Paid: its usage goes to `on_usage` first."""
+        b = {"model": self.model, "max_tokens": FORCE_MAX_TOKENS, "messages": body["messages"], "tools": body["tools"],
+             "tool_choice": body["tool_choice"]}
+        if body.get("system"):
+            b["system"] = body["system"]
+        r = post(f"{self.base}/v1/messages", b, self.headers(), timeout=300)
+        u = r.get("usage") or {}
+        if r.get("model"):
+            self.models.add(r["model"])
+        if self.on_usage is not None:
+            self.on_usage({k: u.get(k) or 0 for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")})
+        use = next((c for c in r.get("content") or [] if c.get("type") == "tool_use" and c.get("name") == body["tool_choice"]["name"]), None)
+        return u.get("output_tokens", 0), (use["input"] if use else None)
 
 
 class OpenAICompatible:
@@ -171,6 +198,27 @@ class OpenAICompatible:
             self.on_usage({"input_tokens": u["prompt_tokens"] - cached, "cache_read_input_tokens": cached,
                            "output_tokens": u.get("completion_tokens", 0)})
         return u["prompt_tokens"]
+
+    def force(self, body):
+        """A forced call (module docs): `(output tokens, the call's input or
+        None)`. Paid: its usage goes to `on_usage` first."""
+        req = to_chat(body, self.model) | {"max_tokens": FORCE_MAX_TOKENS, "stream": False}
+        headers = {"authorization": f"Bearer {self.key}"} if self.key else {}
+        r = post(self.count_url, req, headers, timeout=300)
+        u = r.get("usage") or {}
+        if r.get("model"):
+            self.models.add(r["model"])
+        if self.on_usage is not None:
+            cached = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+            self.on_usage({"input_tokens": u.get("prompt_tokens", 0) - cached, "cache_read_input_tokens": cached,
+                           "output_tokens": u.get("completion_tokens", 0)})
+        name = req["tool_choice"]["function"]["name"]
+        call = next((c for c in ((r.get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
+                     if (c.get("function") or {}).get("name") == name), None)
+        try:
+            return u.get("completion_tokens", 0), (json.loads(call["function"]["arguments"]) if call else None)
+        except (json.JSONDecodeError, TypeError):
+            return u.get("completion_tokens", 0), None
 
 
 # ── The tap ────────────────────────────────────────────────────────────────

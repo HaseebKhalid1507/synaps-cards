@@ -494,6 +494,62 @@ class Spend(unittest.TestCase):
         self.assertAlmostEqual(b.spent, 5 * (0.2 + 0.005 + 0.000005), places=9)
         self.assertEqual(sent[0]["max_tokens"], 1)
 
+    def test_a_forced_call_is_read_and_paid_on_both_providers_and_the_scripted_model(self):
+        # The output control's requests (calibrate.py): paid, with an
+        # endpoint too, so each goes to the ledger before it returns.
+        sent = []
+
+        class Up(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                req = json.loads(self.rfile.read(int(self.headers["content-length"])))
+                sent.append((self.path, req))
+                if self.path == "/v1/messages":
+                    body = {"model": "claude-haiku-4-5-20261001", "content": [{"type": "tool_use", "id": "t", "name": "cards_block",
+                                                                              "input": {"ops": []}}],
+                            "usage": {"input_tokens": 200_000, "output_tokens": 40}}
+                else:
+                    body = {"model": "m", "choices": [{"message": {"tool_calls": [{"function": {"name": "cards_block", "arguments": '{"ops":[]}'}}]}}],
+                            "usage": {"prompt_tokens": 200_000, "completion_tokens": 40}}
+                raw = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("content-length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        up = ThreadingHTTPServer(("127.0.0.1", 0), Up)
+        threading.Thread(target=up.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{up.server_address[1]}"
+        body = calibrate.forced({"ops": []}, [{"name": "cards_block", "description": "", "input_schema": {}}])
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                b = spend.Budget(1.0, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
+                a = providers.Anthropic("claude-haiku-4-5", "k", base=base, on_usage=b.paid("probe"))
+                o = providers.OpenAICompatible("claude-haiku-4-5", base, on_usage=b.paid("probe"))
+                self.assertEqual(a.force(body), (40, {"ops": []}))
+                self.assertEqual(o.force(body), (40, {"ops": []}))
+                paid = [json.loads(x) for x in Path(tmp, "paid.jsonl").read_text().splitlines()]
+        finally:
+            up.shutdown()
+            up.server_close()
+        self.assertEqual([x["what"] for x in paid], ["probe", "probe"])
+        self.assertAlmostEqual(b.spent, 2 * (0.2 + 40 * 5e-6), places=9)
+        (pa, ra), (po, ro) = sent
+        self.assertEqual((pa, ra["tool_choice"], ra["max_tokens"]), ("/v1/messages", {"type": "tool", "name": "cards_block"}, 4096))
+        self.assertEqual((po, ro["tool_choice"], ro["stream"]), ("/chat/completions", {"type": "function", "function": {"name": "cards_block"}}, False))
+        self.assertEqual(a.models, {"claude-haiku-4-5-20261001"})
+        # The dry run's scripted model calls it as asked, its output priced as any call's.
+        from b5 import scripted
+        m = scripted.Scripted()
+        try:
+            c = {"ops": [{"op": "patch", "id": "plan", "state": {"fix": "done"}}]}
+            out, got = providers.OpenAICompatible("stub", m.url).force(calibrate.forced(c, []))
+        finally:
+            m.close()
+        self.assertEqual((got, out), (c, scripted.tokens(json.dumps(c, ensure_ascii=False)) + 4))
+
     def test_the_estimate_counts_the_runnable_set(self):
         t = estimate.table(TASKS)
         e = t["rows"]["expected_warm"]
@@ -557,6 +613,7 @@ def row(task, arm, repeat, out=100, block=0, per_round=(), closing=0, calls=1, o
 class Chars:
     """A counter for the tests: a token per character, no framing."""
     kind = "chars"
+    result_framing = 0
 
     def call(self, x):
         return len(compact(x))
@@ -902,10 +959,19 @@ def thirds(s):
 
 def qualifying():
     """A fitted proxy (count.Calibrated): a counter that can flip the default.
-    0.9 provider tokens a proxy token, a framing of 9."""
+    0.9 provider tokens a proxy token, a pair allowance of 9, of which the
+    output control finds 6 a call's own framing on output."""
     receipt = thirds(calibrate.RECEIPT)
     pts = [(x, 9.0 + 0.9 * (receipt + x)) for x in range(10, 10 + 3 * calibrate.CALIBRATION_MIN, 3)]
-    return count.Calibrated(calibrate.fit(pts, "thirds", receipt), thirds)
+    f = calibrate.fit(pts, "thirds", receipt)
+    out = calibrate.output_control(calibrate.load()[0], [], lambda body: (6 + 0.9 * thirds(compact(_forced_input(body))), _forced_input(body)),
+                                   lambda s: f.ratio * thirds(s))
+    return count.Calibrated(f, thirds, out)
+
+
+def _forced_input(body):
+    """The input an output-control request asks the model for."""
+    return json.loads(body["messages"][0]["content"][0]["text"][len(calibrate.FORCE):])
 
 
 def frozen_meta(**kw):

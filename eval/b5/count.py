@@ -4,14 +4,26 @@ labelled with the counter that made them (`Counter.kind`):
 
 - `endpoint`: the provider's token-count endpoint. A call's output is its
   arguments' count (the compact JSON of its input, counted as text) plus
-  the one framing allowance calibrated for the run (calibrate.py's
-  `endpoint`); a text's count is the user message with it less without it.
+  the call's framing on output (`call_framing`, calibrate.py's output
+  control); a text's count is the user message with it less without it.
 - `calibrated`: the proxy tokenizer, fitted to the provider's reported
-  usage over the calibration set: a call is `framing + ratio ×
+  usage over the calibration set: a call is `call_framing + ratio ×
   proxy(compact(input))`, a text `ratio × proxy(text)`.
 
+**The two framings** (§2.8, "Framing"; review #14 round 2, R2-4): the
+probe pair's allowance is a call's wrapper and its result's together, as
+input. A call's framing on output (`call_framing`) is the output
+control's; **the result's framing** (`result_framing`) is the allowance
+less it, and it is input overhead: every round after the result re-reads
+it, like the result's text, so it is charged per round after
+(`result_framing_input`), reported on its own line, and never in
+block-call output. A counter with no output control attributes the
+allowance whole to output (the conservative reading, as before), and
+can't flip the default.
+
 Either can flip the default only if its calibration qualifies
-(calibrate.py's "Qualifying"); `describe` says why not when it doesn't.
+(calibrate.py's "Qualifying" and "The output control"); `describe` says
+why not when it doesn't.
 - `uncalibrated`: the proxy with ratio 1 and §2.7's ~8-token framing, for a
   provider that can't be probed. Its runs can't flip the default (B6).
 - `scripted`: the dry run's, against the scripted model. Never data.
@@ -22,7 +34,8 @@ Per turn (`attribute`):
   round that carries a call, its calls' sum (one call per message, by the
   description; §2.7's ~455 over 7 calls is the gate's 65).
 - **Result input**: each `cards_block` result's text, counted, times the
-  rounds after it in the turn (each re-read it).
+  rounds after it in the turn (each re-read it). **Result framing input**:
+  the result's framing, the same way; reported apart.
 - **Ops on dismissed blocks** (from the fold report, `cards-eval fold`): the
   agent's ops whose block was dismissed when they landed, by count and by
   each op's own compact JSON, counted (no framing: that is the call's).
@@ -55,6 +68,7 @@ UNCALIBRATED_FRAMING = 8  # §2.7: "7 calls × ~8 (name, id, wrapper)"
 class Counter:
     kind = "?"
     can_flip_default = False
+    result_framing = 0.0  # input overhead per block result (module docs, "The two framings")
 
     def call(self, call_input):
         raise NotImplementedError
@@ -66,25 +80,50 @@ class Counter:
         return {"kind": self.kind, "can_flip_default": self.can_flip_default}
 
 
-class Calibrated(Counter):
+class Framings:
+    """The two framings of a counter with a pair allowance `allowance` and
+    an `output` control (module docs)."""
+
+    @property
+    def call_framing(self):
+        out = self.output or {}
+        return out["framing"] if out.get("framing") is not None else self.allowance
+
+    @property
+    def result_framing(self):
+        return self.allowance - self.call_framing
+
+    def framings(self):
+        return {"call_framing": self.call_framing, "result_framing": self.result_framing,
+                "output_control": {k: v for k, v in (self.output or {}).items() if k != "calls"} or None}
+
+
+class Calibrated(Framings, Counter):
     kind = "calibrated"
 
-    def __init__(self, fit, proxy):
-        self.fit, self.proxy = fit, proxy
+    def __init__(self, fit, proxy, output=None):
+        self.fit, self.proxy, self.output = fit, proxy, output
+
+    @property
+    def allowance(self):
+        return self.fit.framing
+
+    def why_not(self):
+        return calibrate.problems(self.fit) + calibrate.output_problems(self.output, self.allowance)
 
     @property
     def can_flip_default(self):
-        return not calibrate.problems(self.fit)
+        return not self.why_not()
 
     def call(self, call_input):
-        return self.fit.framing + self.fit.ratio * self.proxy(compact(call_input))
+        return self.call_framing + self.fit.ratio * self.proxy(compact(call_input))
 
     def text(self, text):
         return self.fit.ratio * self.proxy(text)
 
     def describe(self):
-        why = calibrate.problems(self.fit)
-        return super().describe() | {"fit": self.fit.summary()} | ({"why_not": "; ".join(why)} if why else {})
+        why = self.why_not()
+        return super().describe() | {"fit": self.fit.summary()} | self.framings() | ({"why_not": "; ".join(why)} if why else {})
 
 
 class Scripted(Calibrated):
@@ -128,22 +167,33 @@ class NoCounter(Counter):
         return super().describe() | {"why_not": self.why}
 
 
-class Endpoint(Counter):
+class Endpoint(Framings, Counter):
     """`count(body)` is the provider's token-count endpoint over a neutral
     request (calibrate.py); `tools` are the definitions every probe
-    carries; `framing` is the allowance calibrate.endpoint measured, `raw`
-    what it came from. Counts are kept by text, so a text counted once
+    carries; `framing` is the pair's allowance calibrate.endpoint measured,
+    `raw` what it came from; `output` the output control (module docs,
+    "The two framings"). Counts are kept by text, so a text counted once
     costs nothing the second time."""
 
     kind = "endpoint"
 
-    def __init__(self, count, tools, framing, raw=None, models=()):
+    def __init__(self, count, tools, framing, raw=None, models=(), output=None):
         self.count, self.tools, self.framing, self.raw, self.models = count, tools, framing, raw, tuple(models)
+        self.output = output
         self.memo, self.base = {}, None
 
     @property
+    def allowance(self):
+        return self.framing
+
+    def why_not(self):
+        if self.raw is None:
+            return ["no calibration"]
+        return calibrate.endpoint_problems(self.framing, self.raw, self.models) + calibrate.output_problems(self.output, self.framing)
+
+    @property
     def can_flip_default(self):
-        return self.raw is not None and not calibrate.endpoint_problems(self.framing, self.raw, self.models)
+        return not self.why_not()
 
     def text(self, text):
         if text not in self.memo:
@@ -154,11 +204,11 @@ class Endpoint(Counter):
         return self.memo[text]
 
     def call(self, call_input):
-        return self.text(compact(call_input)) + self.framing
+        return self.text(compact(call_input)) + self.call_framing
 
     def describe(self):
-        why = ["no calibration"] if self.raw is None else calibrate.endpoint_problems(self.framing, self.raw, self.models)
-        return super().describe() | {"framing": self.framing} | ({"why_not": "; ".join(why)} if why else {})
+        why = self.why_not()
+        return super().describe() | {"framing": self.framing} | self.framings() | ({"why_not": "; ".join(why)} if why else {})
 
 
 def ops(fold_lines, tool_ids):
@@ -195,12 +245,13 @@ def attribute(turn, counter, fold_lines=(), block_tool=BLOCK_TOOL):
     """The attributed numbers of one turn (module docs)."""
     per_call = {c.tool_id: counter.call(c.input) for c in turn.block_calls()}
     per_round = [sum(per_call[c.tool_id] for c in r.block_calls()) for r in turn.rounds if r.block_calls()]
-    result_input, rounds_after = 0.0, 0
+    result_input, result_framing_input, rounds_after = 0.0, 0.0, 0
     for item in reversed(turn.timeline):
         if item[0] == "round":
             rounds_after += 1
         elif item[0] == "result" and item[1].name == block_tool:
             result_input += counter.text(item[1].text) * rounds_after
+            result_framing_input += counter.result_framing * rounds_after
     inputs = {c.tool_id: c.input for c in turn.block_calls()}
     unseen = [o for o in ops(fold_lines, set(inputs)) if o["dismissed_before"]]
     unseen_tokens = 0.0
@@ -213,6 +264,7 @@ def attribute(turn, counter, fold_lines=(), block_tool=BLOCK_TOOL):
         "block_output": sum(per_call.values()),
         "block_output_per_round": per_round,
         "result_input": result_input,
+        "result_framing_input": result_framing_input,
         "unseen_ops": len(unseen),
         "unseen_tokens": unseen_tokens,
         "counter": counter.kind,

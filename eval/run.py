@@ -129,10 +129,11 @@ def dry(a, tasks, frozen):
         tools = _block_tools(iso)
         prov = providers.OpenAICompatible("stub", model.url)
         fit, pairs = calibrate.calibrate(calls, tools, lambda b: prov.count(b), proxy.bytes4, "bytes4")
+        out = calibrate.output_control(calls, tools, prov.force, lambda s: fit.ratio * proxy.bytes4(s))
         fit.models = tuple(sorted(prov.models))
-        counter = count.Scripted(fit, proxy.bytes4)
+        counter = count.Scripted(fit, proxy.bytes4, out)
         (work / "calibration.json").write_text(json.dumps({"config": calibrate.config(prov, tools), "counter": counter.describe(),
-                                                           "fit": fit.summary(), **pairs}, indent=1))
+                                                           "fit": fit.summary(), **pairs, "output_control": out}, indent=1))
         model.requests.clear()
         records = []
         definition = run_all(a, tasks, iso, "local/stub", d, work, records, model=model, dry=True,
@@ -167,7 +168,7 @@ def real(a, tasks, frozen):
         key = os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise SystemExit("ANTHROPIC_API_KEY isn't set")
-        prov = providers.Anthropic(a.model, key)
+        prov = providers.Anthropic(a.model, key, on_usage=budget.paid("probe"))
         tap = providers.Tap(providers.ANTHROPIC)
         env = {"ANTHROPIC_API_KEY": key, "SYNAPS_ANTHROPIC_BASE_URL": tap.url}
         model_id = a.model
@@ -187,16 +188,21 @@ def real(a, tasks, frozen):
         iso.start()
         tools = _block_tools(iso)
         calls, _ = calibrate.load()
+        # The output control (calibrate.py): a call's framing on output; paid
+        # with an endpoint too, so each request is charged as a probe.
         if prov.has_endpoint:
             framing, raw = calibrate.endpoint(calls, tools, prov.count)
-            counter = count.Endpoint(prov.count, tools, framing, raw, sorted(prov.models))
-            body = {"framing": framing, **raw}
+            counter = count.Endpoint(prov.count, tools, framing, raw)
+            counter.output = calibrate.output_control(calls, tools, prov.force, counter.text)
+            counter.models = tuple(sorted(prov.models))
+            body = {"framing": framing, **raw, "output_control": counter.output}
         else:
             px = proxy.get(a.proxy)
             fit, raw = calibrate.calibrate(calls, tools, prov.count, px, a.proxy)
+            out = calibrate.output_control(calls, tools, prov.force, lambda s: fit.ratio * px(s))
             fit.models = tuple(sorted(prov.models))
-            counter = count.Calibrated(fit, px)
-            body = {"fit": fit.summary(), **raw}
+            counter = count.Calibrated(fit, px, out)
+            body = {"fit": fit.summary(), **raw, "output_control": out}
         (work / "calibration.json").write_text(json.dumps({"config": calibrate.config(prov, tools), "counter": counter.describe(),
                                                            **body}, indent=1))
         tap.take()

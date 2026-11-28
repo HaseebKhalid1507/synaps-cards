@@ -513,13 +513,17 @@ The turn: a bug fix in 8 rounds (read → plan → three edits → test → fix 
 - **Runs.** Each task runs with blocks on and with blocks off, on the same model and prompt, three times each, interleaved. A gate row passes only if it passes on the pooled runs **and** in at least 2 of the 3 repeats, so one lucky run isn't a licence.
 
 **How the attributed numbers are counted:**
-- **Block-call output:** the compact JSON of each `cards_block` call's input, as sent. It is counted with the provider's token-count endpoint where there is one. Otherwise a proxy tokenizer is used, **calibrated against the provider's own reported usage, never against itself:** a fixed calibration set of ≥ 200 recorded calls of varied length, each sent as a probe pair that differs only by that call. Fitting each pair's difference in reported input tokens to `framing + ratio × proxy count` gives the ratio, and the framing allowance below as the intercept. The PR reports the fit and its spread. A provider that can't be probed this way gets an uncalibrated estimate, labelled so, and its runs can't flip the default (B6).
-- **Framing:** one fixed allowance per call, for the name, id and wrapper. It is calibrated once. With an endpoint, it's a probe message with one block call, minus the same message without it, minus the arguments' own count. Without one, it's the fit's intercept above.
-- **Result input:** each result's tokens, counted the same way, times the rounds left in the turn that re-read it.
+- **Block-call output:** the compact JSON of each `cards_block` call's input, as sent. It is counted with the provider's token-count endpoint where there is one. Otherwise a proxy tokenizer is used, **calibrated against the provider's own reported usage, never against itself:** a fixed calibration set of ≥ 200 recorded calls of varied length, each sent as a probe pair that differs only by that call. Fitting each pair's difference in reported input tokens to `framing + ratio × proxy count` gives the ratio, and the pair's allowance below as the intercept. The PR reports the fit and its spread. A provider that can't be probed this way gets an uncalibrated estimate, labelled so, and its runs can't flip the default (B6).
+- **Framing** (ratified in B5a, synaps-cards #14): a probe pair differs by a call **and its result**, since a call can't be sent without one, so the pair's allowance holds two wrappers. They are counted apart:
+  - **The call's framing** (its name, id and wrapper, as the model writes them) is block-call output: one fixed allowance per call, calibrated once, against reported **output**. An output control makes the model call `block` with a known input and nothing else (the provider's forced tool choice), a few calls of the calibration set's; a call's framing is its reported output minus its arguments' own count, and the allowance is their median.
+  - **The result's framing** (the pair's allowance less the call's) is input overhead: counted like the result input below, on its own line, and never attributed to block-call output.
+  - **The pair's allowance:** with an endpoint, a probe message with one block call, minus the same message without it, minus the arguments' own count. Without one, the fit's intercept above, less the receipt.
+  - So the per-round gate's 65 compares what §2.7 budgets on output: the calls' arguments and their own wrappers ("7 calls × ~8"), not their results' wrappers, which §2.7 puts in history as input ("7 results × ~25"). A counter with no output control can't flip the default.
+- **Result input:** each result's tokens, counted the same way, times the rounds left in the turn that re-read it; the result's framing the same way, reported apart.
 - **The definition:** a fixed-prefix control, never the on − off workload delta, since the histories diverge. The same system prompt, tools and first message are counted with `block` declared and without it.
 
 **Also reported, with no gate:**
-- closing rounds' input, and the result input;
+- closing rounds' input, the result input, and the result framing input;
 - ops on dismissed blocks, by count and attributed tokens: the unseen patches (§3.5);
 - refusals, repairs (a refusal followed by a corrected call), and `put` on a live id;
 - skipped ops by reason, and notices delivered;
