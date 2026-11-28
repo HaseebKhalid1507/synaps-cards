@@ -7,14 +7,14 @@ exact rules are in its module's docs, and its tests pin them.
 
 | Part | Where | Tests |
 |---|---|---|
-| The frozen task set: 20 coding tasks of 6+ rounds, 10 short, 5 with no tool call, 8 where the user answers a card (5) or hands back an edit (3, "needs D8, not run" until B5b) | `tasks/set.json`, the workspaces, checks and reference solutions; `b5/taskset.py`; its digest in `tasks/set.sha256` | `tests/test_taskset.py`: the shape is §2.8's, the digest holds, every check fails at the start and passes with its reference solution |
+| The frozen task set: 22 coding tasks (§2.8's 20 long ones of 6+ rounds and 2 spares, each real multi-file work), 10 short, 5 with no tool call, 8 where the user answers a card (5) or hands back an edit (3, both arms frozen, "needs D8, not run" until D8 lands) | `tasks/set.json`, the workspaces, checks and reference solutions; `b5/taskset.py`; its digest in `tasks/set.sha256` | `tests/test_taskset.py`: the shape is §2.8's, the digest holds, every check fails at the start and passes with its reference solution |
 | A turn (`TurnStarted` to `Idle`, steers included, user-initiated only) and a round (one provider response: one usage) | `b5/turns.py` | `tests/test_classify.py` |
 | The closing-round classifier | `b5/classify.py` | `tests/test_classify.py` |
 | Counting: the token-count endpoint where there is one, else the proxy calibrated against reported usage (≥ 200 probe pairs), the framing allowance per call, result input, the definition's fixed-prefix control | `b5/count.py`, `b5/calibrate.py`, `b5/proxy.py`, `calibration.jsonl` (288 valid calls, 34–8,104 bytes of compact JSON) | `tests/test_count.py` |
 | The runs: blocks on/off × 3 repeats, interleaved, against an isolated daemon (as `scripts/smoke.py` isolates one) | `b5/harness.py`, `b5/daemon.py`, `run.py` | `tests/test_harness.py`; the dry run |
 | The desk seam: D6b's dismiss notices (and D8's hand-backs) come from synaps-desk over `b5-desk/1`, never typed in | `b5/desk.py` | `tests/test_harness.py` (`Seam`) |
 | Providers, the tap, spend and the budget guard | `b5/providers.py`, `b5/spend.py`, `b5/estimate.py` | `tests/test_harness.py` |
-| The report: the gate's rows (pooled **and** 2 of 3 repeats), the rows reported with no gate, and the set's shape as the run played it (coding ≥ 6 rounds, short 1–2, no tool call, the card answered; blocks off). The gate passes only if the shape holds | `b5/report.py` | `tests/test_harness.py` (`Gate`, `SetShape`) |
+| The report: the gate's rows (pooled **and** 2 of 3 repeats), the rows reported with no gate, and the set's shape as the run played it (coding ≥ 6 rounds, short 1–2, no tool call, the card answered; blocks off). The gate passes only if the shape holds. A coding task under 6 rounds blocks off is reported apart, never as long, and every row is reported per bucket | `b5/report.py` | `tests/test_harness.py` (`Gate`, `SetShape`) |
 
 ## Running it
 
@@ -49,8 +49,13 @@ of the user's home, plugins or daemons is read or touched.
 - **Haseeb's approval** of the model and the budget (`--approved`).
 - For a provider with no token-count endpoint: `tiktoken`, for the proxy.
 
-## Changing the set
+## The set is frozen at B5a
 
-The set is frozen (§2.8: "Tuning the description never changes them"). A
-deliberate change, made before B5b's first run and said in its PR, updates
-`tasks/set.sha256`; `tests/test_taskset.py` fails until it does.
+The set and its prompts are frozen when B5a lands (§2.8: "committed before
+the first run", and "Tuning the description never changes them"), and B5b
+reuses them unchanged: `tasks/set.sha256` is its digest, and
+`tests/test_taskset.py` fails if a byte of it changes. There is no change
+to make after B5a. What the frozen rules don't cover is reported, not
+fixed: a coding task that runs under 6 rounds is reported apart, and the
+set holds spares for it. A changed set would be a new experiment, said so,
+and not comparable with this one.

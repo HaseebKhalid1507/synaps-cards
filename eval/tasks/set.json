@@ -3,52 +3,6 @@
   "version": 1,
   "tasks": [
     {
-      "id": "ledger-parens",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "ledger",
-      "needs": [],
-      "seed": [
-        {
-          "path": "ledger/money.py",
-          "old": "        negative, s = True, s[1:-1].strip()",
-          "new": "        negative, s = False, s[1:-1].strip()"
-        }
-      ],
-      "turns": [
-        {
-          "say": "Amounts in parentheses, like `(12.50)` on our bank statements, are negative, but `money.parse` reads them as positive. Fix it, and add a test that covers it."
-        }
-      ],
-      "check": {
-        "tests": "checks/ledger-parens.py"
-      },
-      "solution": "solutions/ledger-parens.json"
-    },
-    {
-      "id": "ledger-cent",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "ledger",
-      "needs": [],
-      "seed": [
-        {
-          "path": "ledger/journal.py",
-          "old": "        if entry.total() != 0:",
-          "new": "        if abs(entry.total()) > 1:"
-        }
-      ],
-      "turns": [
-        {
-          "say": "The journal accepted an entry whose lines were off by one cent. `Journal.post` must refuse any entry that doesn't balance exactly. Fix it and add a test."
-        }
-      ],
-      "check": {
-        "tests": "checks/ledger-cent.py"
-      },
-      "solution": "solutions/ledger-cent.json"
-    },
-    {
       "id": "ledger-since",
       "category": "coding",
       "kind": "feature",
@@ -91,29 +45,6 @@
       "solution": "solutions/ledger-semicolon.json"
     },
     {
-      "id": "ledger-tb-order",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "ledger",
-      "needs": [],
-      "seed": [
-        {
-          "path": "ledger/report.py",
-          "old": "    for account in sorted(journal.chart, key=lambda a: a.code):",
-          "new": "    for account in sorted(journal.chart, key=lambda a: a.name):"
-        }
-      ],
-      "turns": [
-        {
-          "say": "The trial balance lists accounts alphabetically by name, but it should list them by account code, as the chart does. Fix it, and add a test that would have caught it."
-        }
-      ],
-      "check": {
-        "tests": "checks/ledger-tb-order.py"
-      },
-      "solution": "solutions/ledger-tb-order.json"
-    },
-    {
       "id": "ledger-allocate",
       "category": "coding",
       "kind": "feature",
@@ -146,29 +77,6 @@
         "tests": "checks/ledger-monthly.py"
       },
       "solution": "solutions/ledger-monthly.json"
-    },
-    {
-      "id": "ledger-format-neg",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "ledger",
-      "needs": [],
-      "seed": [
-        {
-          "path": "ledger/money.py",
-          "old": "    whole, frac = divmod(abs(cents), 100)",
-          "new": "    whole, frac = divmod(cents, 100)"
-        }
-      ],
-      "turns": [
-        {
-          "say": "`money.format(-5)` prints `--1.95` instead of `-0.05`. Fix how `money.format` prints negative amounts, and add tests."
-        }
-      ],
-      "check": {
-        "tests": "checks/ledger-format-neg.py"
-      },
-      "solution": "solutions/ledger-format-neg.json"
     },
     {
       "id": "ledger-close",
@@ -213,29 +121,6 @@
       "solution": "solutions/ledger-dupes.json"
     },
     {
-      "id": "shelf-due",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "shelf",
-      "needs": [],
-      "seed": [
-        {
-          "path": "shelf/loans.py",
-          "old": "today + datetime.timedelta(days=LOAN_DAYS))",
-          "new": "today + datetime.timedelta(days=LOAN_DAYS - 1))"
-        }
-      ],
-      "turns": [
-        {
-          "say": "Loans come back due a day early: a book lent on March 1 should be due March 22, three weeks later. Find the cause and fix it."
-        }
-      ],
-      "check": {
-        "tests": "checks/shelf-due.py"
-      },
-      "solution": "solutions/shelf-due.json"
-    },
-    {
       "id": "shelf-fines",
       "category": "coding",
       "kind": "feature",
@@ -251,29 +136,6 @@
         "tests": "checks/shelf-fines.py"
       },
       "solution": "solutions/shelf-fines.json"
-    },
-    {
-      "id": "shelf-accents",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "shelf",
-      "needs": [],
-      "seed": [
-        {
-          "path": "shelf/text.py",
-          "old": "    decomposed = unicodedata.normalize(\"NFKD\", text)\n    return \"\".join(c for c in decomposed if not unicodedata.combining(c)).lower()",
-          "new": "    return text.lower()"
-        }
-      ],
-      "turns": [
-        {
-          "say": "Searching for `emile` no longer finds \"Émile and the Quiet Sea\". Make search ignore accents again, as well as case."
-        }
-      ],
-      "check": {
-        "tests": "checks/shelf-accents.py"
-      },
-      "solution": "solutions/shelf-accents.json"
     },
     {
       "id": "shelf-reserve",
@@ -299,29 +161,6 @@
         "tests": "checks/shelf-reserve.py"
       },
       "solution": "solutions/shelf-reserve.json"
-    },
-    {
-      "id": "shelf-year",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "shelf",
-      "needs": [],
-      "seed": [
-        {
-          "path": "shelf/store.py",
-          "old": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", [])), b.get(\"year\")))",
-          "new": "catalog.add(Book(b[\"isbn\"], b[\"title\"], list(b.get(\"authors\", []))))"
-        }
-      ],
-      "turns": [
-        {
-          "say": "After saving and loading the library, every book's year is gone. Fix the round trip, and add a test."
-        }
-      ],
-      "check": {
-        "tests": "checks/shelf-year.py"
-      },
-      "solution": "solutions/shelf-year.json"
     },
     {
       "id": "shelf-overdue-cli",
@@ -366,29 +205,6 @@
       "solution": "solutions/shelf-isbn.json"
     },
     {
-      "id": "shelf-limit",
-      "category": "coding",
-      "kind": "bug",
-      "workspace": "shelf",
-      "needs": [],
-      "seed": [
-        {
-          "path": "shelf/loans.py",
-          "old": "        return [l for l in self.loans if l.member == member and l.returned is None]",
-          "new": "        return [l for l in self.loans if l.member == member]"
-        }
-      ],
-      "turns": [
-        {
-          "say": "A member who returned their only book still can't borrow another one: Grace's limit is 1, she gave her book back, and `lend` says she has 1 book already. Fix it and add a test."
-        }
-      ],
-      "check": {
-        "tests": "checks/shelf-limit.py"
-      },
-      "solution": "solutions/shelf-limit.json"
-    },
-    {
       "id": "shelf-phrase",
       "category": "coding",
       "kind": "feature",
@@ -421,6 +237,176 @@
         "tests": "checks/shelf-export.py"
       },
       "solution": "solutions/shelf-export.json"
+    },
+    {
+      "id": "ledger-currency",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Entries can be in other currencies now. Add an optional `currency` column to the CSV importer: a missing column or an empty cell means `USD`, and a code is three capital letters (anything else is a ValueError). Every line of an entry is in one currency: `Line` gets a `currency` field after `cents` (default `\"USD\"`), and `Journal.post` refuses an entry whose lines mix currencies. `Journal.balance(account, until=None, currency=\"USD\")` and `report.trial_balance(journal, currency=\"USD\")` count only that currency's lines, and the CLI's `balance` command takes `--currency CODE` (default `USD`). Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-currency.py"
+      },
+      "solution": "solutions/ledger-currency.json"
+    },
+    {
+      "id": "ledger-export",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add `ledger/exporter.py` with `write_csv(journal)`: the journal as CSV text in the importer's format, header `entry,date,memo,account,amount`, one row per line, the entries numbered from 1 in posting order and the amounts as `money.format` prints them, so that importing the text into an empty journal gives back the same entries. Add an `export FILE OUT` command to the CLI that writes it to OUT, and tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-export.py"
+      },
+      "solution": "solutions/ledger-export.json"
+    },
+    {
+      "id": "ledger-budget",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add budgets. A new `ledger/budget.py` with `load_csv(text)`: rows `account,month,amount` (the month as `YYYY-MM`, the amount as `money.parse` reads it) into a dict `{(account, month): cents}`; a missing column, a malformed month or the same account and month twice is a ValueError. Then `report.variance(journal, budget, month)`: one row `(code, name, planned, actual, actual - planned)` per account the budget plans for in that month, by code, where `actual` is the account's net change in that month, signed like `statement`. Add a `variance FILE BUDGET --month YYYY-MM` command to the CLI that prints the rows as `report.render` prints rows, and tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-budget.py"
+      },
+      "solution": "solutions/ledger-budget.json"
+    },
+    {
+      "id": "ledger-chart",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "The chart of accounts is built in (`accounts.default_chart`). Let it come from a file too: `accounts.load_chart(text)` reads CSV rows `code,name,kind` into a `Chart`, with `Account`'s own checks; a missing column or a code twice is a ValueError. Every CLI command takes `--chart FILE` after the command (default: the built-in chart), and a new `chart` command prints the chart, one `CODE  NAME  KIND` line per account, by code. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-chart.py"
+      },
+      "solution": "solutions/ledger-chart.json"
+    },
+    {
+      "id": "ledger-aging",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "ledger",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add a receivables aging report: `report.aging(journal, today, code=\"1100\")` sorts the account's open debits by age, the days from the debit's entry date to `today`, into rows `(\"0-30\", cents)`, `(\"31-60\", cents)`, `(\"61-90\", cents)` and `(\"90+\", cents)`, every bucket listed, in that order. The account's credits pay off its oldest debits first, and a debit's open part is what is left of it. Add an `aging FILE --today YYYY-MM-DD` command to the CLI that prints the rows as `report.render` prints rows, and tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/ledger-aging.py"
+      },
+      "solution": "solutions/ledger-aging.json"
+    },
+    {
+      "id": "shelf-renew",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Let members renew loans. `Loan` gets a `renewals` count (default 0), and `Loans.renew(isbn, today)` moves the loan's due date `LOAN_DAYS` days past its current due date and counts the renewal, returning the loan: the book must be on loan, the loan not overdue on `today`, and a loan is renewed at most `MAX_RENEWALS = 2` times; each is a ValueError. The store keeps the count, and a file saved before this loads with 0. Add a `renew FILE ISBN --today YYYY-MM-DD` command to the CLI that renews, saves the file and prints `ISBN  due YYYY-MM-DD`. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-renew.py"
+      },
+      "solution": "solutions/shelf-renew.json"
+    },
+    {
+      "id": "shelf-import",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add a book import. `store.import_books(loans, text)` reads CSV rows `isbn,title,authors,year` into the catalog: the authors separated by `;` (spaces around them dropped, an empty cell no authors), the year an integer or empty for none. A row whose ISBN the catalog already has is skipped, not changed; a missing column or a year that isn't a number is a ValueError and adds nothing at all. It returns `(added, skipped)`. Add an `import FILE CSV` command to the CLI that imports, saves the library and prints `added N, skipped M`. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-import.py"
+      },
+      "solution": "solutions/shelf-import.json"
+    },
+    {
+      "id": "shelf-subjects",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Add subjects to books. `Book` gets a `subjects` list (default empty) that the store keeps; a file saved before this loads with none. `Catalog.by_subject(subject)` is the books with that subject, compared as search compares words (case and accents ignored), by title. In `Catalog.search`, a `subject:WORD` term in the query keeps only the books with that subject, and the other words rank as they do now; a query of only subject terms gives every book of those subjects, by title. Add a `subjects FILE` command to the CLI that prints each subject with how many books have it, `SUBJECT  N`, by subject. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-subjects.py"
+      },
+      "solution": "solutions/shelf-subjects.json"
+    },
+    {
+      "id": "shelf-expiry",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Memberships expire now. `Member` gets an `expires` date (default `None`, never), after `limit`, and the store keeps it as an ISO date or null; a file saved before this loads with none. `Loans.lend` refuses a member whose membership expired before `today` with a ValueError, and `Loans.expired(today)` lists those members, by id. Add a `members FILE --today YYYY-MM-DD` command to the CLI that prints every member, by id, as `ID  NAME  expires YYYY-MM-DD` or `ID  NAME  never`, with `  (expired)` at the end of a line whose membership expired before `today`. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-expiry.py"
+      },
+      "solution": "solutions/shelf-expiry.json"
+    },
+    {
+      "id": "shelf-fees",
+      "category": "coding",
+      "kind": "feature",
+      "workspace": "shelf",
+      "needs": [],
+      "seed": [],
+      "turns": [
+        {
+          "say": "Keep track of what members owe. `Loans.give_back` records the fine on the loan (`Loan.fine`, in cents, default 0) as well as returning it. `Loans.pay(member, cents)` records a payment (a positive amount; anything else is a ValueError), and `Loans.owed(member)` is the member's recorded fines minus their payments. `Loans.lend` refuses a member who owes more than `MAX_OWED = 500` cents. The store keeps the fines and the payments (`\"payments\"`, a list of `{\"member\", \"cents\"}`); a file saved before this loads with none. Add two CLI commands: `pay FILE MEMBER AMOUNT` (an amount like `2.50`) records a payment and saves the file, and `owed FILE` prints every member who owes anything, by id, as `ID  NAME  2.50`. Add tests."
+        }
+      ],
+      "check": {
+        "tests": "checks/shelf-fees.py"
+      },
+      "solution": "solutions/shelf-fees.json"
     },
     {
       "id": "ledger-q-kinds",

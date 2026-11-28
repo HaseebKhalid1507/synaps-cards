@@ -373,7 +373,7 @@ class Spend(unittest.TestCase):
     def test_the_estimate_counts_the_runnable_set(self):
         t = estimate.table(TASKS)
         e = t["rows"]["expected"]
-        self.assertEqual((e["tasks"], e["runs"], e["turns"]), (40, 240, 270))
+        self.assertEqual((e["tasks"], e["runs"], e["turns"]), (42, 252, 282))
         for m in spend.CANDIDATES:
             self.assertLess(e["usd"][m], t["rows"]["high"]["usd"][m])
 
@@ -758,7 +758,7 @@ class Eligibility(unittest.TestCase):
         self.assertFalse(rep["gate_pass"], "one repeat with an uncalibrated counter is no licence")
         self.assertEqual(rep["verdict"], "not eligible")
         why = " / ".join(rep["not_eligible_because"])
-        for part in ("uncalibrated", "1 repeats", "240 runs missing"):
+        for part in ("uncalibrated", "1 repeats", "252 runs missing"):
             self.assertIn(part, why)
 
     def test_three_repeats_with_an_uncalibrated_counter_are_not_eligible(self):
@@ -781,10 +781,10 @@ class Eligibility(unittest.TestCase):
         rep = self.build(self.records(repeats=(1, 2)))
         self.assertTrue(all(g["repeats_passing"] == [1, 2] for g in rep["gate"].values()))
         self.assertFalse(rep["gate_pass"])
-        self.assertIn("80 of the plan's 240 runs missing (an interrupted run is incomplete)", rep["not_eligible_because"])
+        self.assertIn("84 of the plan's 252 runs missing (an interrupted run is incomplete)", rep["not_eligible_because"])
         rep = self.build(self.records(drop=5))
         self.assertFalse(rep["gate_pass"])
-        self.assertIn("5 of the plan's 240 runs missing", " / ".join(rep["not_eligible_because"]))
+        self.assertIn("5 of the plan's 252 runs missing", " / ".join(rep["not_eligible_because"]))
         rep = self.build(self.records()[:-1] + [dict(self.records()[-1], stopped="over budget")])
         self.assertFalse(rep["gate_pass"])
         self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
@@ -861,6 +861,34 @@ class SetShape(unittest.TestCase):
     def test_a_coding_task_of_5_rounds_in_2_of_3_off_runs_falls_short(self):
         s = report.set_shape(*self.run_of(off={("coding-3", 1): {"rounds": 5}, ("coding-3", 3): {"rounds": 5}}))
         self.assertEqual((s["coding"]["held"], s["coding"]["short_of"], s["holds"]), (19, ["coding-3"], False))
+
+    def test_a_coding_task_under_6_rounds_is_reported_apart_and_not_as_long(self):
+        # Frozen at B5a (review #14, P1 4): long only if its blocks-off runs
+        # reached 6 rounds; the rest are reported apart, with their rounds.
+        s = report.set_shape(*self.run_of(off={("coding-3", 1): {"rounds": 5}, ("coding-3", 3): {"rounds": 4}}))
+        self.assertEqual(s["coding"]["apart"], [{"task": "coding-3", "rounds": [5, 6, 4]}])
+        self.assertNotIn("coding-3", s["coding"]["held_tasks"])
+        self.assertEqual(report.set_shape(*self.run_of())["coding"]["apart"], [])
+
+    def test_every_row_is_reported_per_bucket_with_the_short_coding_tasks_apart(self):
+        recs, rows = self.run_of(off={("coding-3", rp): {"rounds": 5} for rp in (1, 2, 3)})
+        by = {}
+        for r in rows:
+            by.setdefault((r["task"], r["arm"], r["repeat"]), []).append(r)
+        orig = report.per_turn
+        report.per_turn = lambda rec, counter: (by[(rec["task"], rec["arm"], rec["repeat"])], [])
+        try:
+            rep = report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], _Counter(), 900, [], {"mode": "test"})
+        finally:
+            report.per_turn = orig
+        b = rep["also"]["by_bucket"]
+        self.assertEqual(list(b), ["long", "coding_under_6", "short", "no_tool", "interactive"])
+        self.assertEqual(b["coding_under_6"]["tasks"], ["coding-3"])
+        self.assertEqual(len(b["long"]["tasks"]), 19)
+        self.assertNotIn("coding-3", b["long"]["tasks"])
+        self.assertEqual(b["coding_under_6"]["rows"]["output_on_minus_off"]["tasks"], 1)
+        self.assertNotIn("pass", b["long"]["rows"]["closing_rounds"])
+        self.assertIn("`coding-3` (5, 5, 5)", report.markdown(rep))
 
     def test_one_short_off_run_of_3_still_holds(self):
         s = report.set_shape(*self.run_of(off={("coding-3", 2): {"rounds": 5}}))

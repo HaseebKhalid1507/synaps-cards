@@ -9,7 +9,8 @@ it. B5b reuses the set unchanged: a run of a set with another digest isn't
 B5's.
 
 **A task** runs in a fresh copy of its workspace (`prepare`): the
-workspace, then the task's seed edits (a bug put in on purpose). Its
+workspace, then the task's seed edits (a bug put in on purpose; the
+frozen set has none since its one-line repairs gave way to long tasks). Its
 `turns` are the user's side, in order:
 - `say`: a message, sent when the session is idle: it starts a turn;
 - `steer`: a message sent while the turn runs, once the turn has had
@@ -80,6 +81,12 @@ TASKS = Path(__file__).resolve().parent.parent / "tasks"
 SET = TASKS / "set.json"
 FROZEN = TASKS / "set.sha256"
 CATEGORIES = {"coding": 20, "short": 10, "no_tool": 5, "interactive": 5}  # §2.8's minimums
+# Long tasks above §2.8's 20, for the ones whose blocks-off runs don't reach
+# 6 rounds (report.py's "Long tasks"): the set holds them, the gate doesn't.
+SPARES = {"coding": 2}
+# A coding task's reference solution is real work, not a one-line repair
+# (review #14, P1 4): at least this many lines written.
+LONG_WORK_LINES = 5
 STEPS = ("say", "steer", "dismiss", "answer", "hand_back")
 NEEDS = ("D8",)
 CHECK_NAME = "test_b5_check.py"
@@ -117,8 +124,8 @@ def problems(tasks, root=TASKS):
         out.append("task ids repeat")
     for cat, n in CATEGORIES.items():
         have = sum(t["category"] == cat for t in tasks)
-        if have < n:
-            out.append(f"{have} {cat} tasks: §2.8 asks at least {n}")
+        if have < n + SPARES.get(cat, 0):
+            out.append(f"{have} {cat} tasks: §2.8 asks at least {n}" + (f", and the set keeps {SPARES[cat]} spares" if cat in SPARES else ""))
     for t in tasks:
         where = t["id"]
         if t["category"] not in CATEGORIES:
@@ -151,6 +158,11 @@ def problems(tasks, root=TASKS):
             out.append(f"{where}: an expect has {', '.join(sorted(EXPECT))}, a reference and wrong answers")
         if t["category"] == "coding" and "tests" not in c:
             out.append(f"{where}: a coding task is judged by tests")
+        if t["category"] == "coding" and (t.get("solution") and (root / t["solution"]).is_file()):
+            edits = json.loads((root / t["solution"]).read_text())
+            written = sum(len((e.get("new") or e.get("content") or "").splitlines()) for e in edits)
+            if written < LONG_WORK_LINES:
+                out.append(f"{where}: its reference solution writes {written} line(s): a coding task is ≥ {LONG_WORK_LINES} lines of work")
     return out
 
 

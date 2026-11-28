@@ -1,0 +1,21 @@
+[
+  {
+    "path": "ledger/report.py",
+    "old": "def render(rows):",
+    "new": "AGES = ((\"0-30\", 30), (\"31-60\", 60), (\"61-90\", 90), (\"90+\", None))\n\n\ndef aging(journal, today, code=\"1100\"):\n    \"\"\"`code`'s open debits by age on `today` (days since the entry): rows\n    of (bucket, cents), every bucket, the credits paying the oldest debits\n    first.\"\"\"\n    debits, paid = [], 0\n    for entry, line in journal.lines(code):\n        if line.cents > 0:\n            debits.append([entry.date, line.cents])\n        else:\n            paid -= line.cents\n    for debit in debits:\n        take = min(paid, debit[1])\n        debit[1] -= take\n        paid -= take\n    out = {name: 0 for name, _ in AGES}\n    for date, cents in debits:\n        days = (today - date).days\n        name = next(n for n, top in AGES if top is None or days <= top)\n        out[name] += cents\n    return list(out.items())\n\n\ndef render(rows):"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "import argparse\nimport sys\n",
+    "new": "import argparse\nimport datetime\nimport sys\n"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    s.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"balance\":",
+    "new": "    s.add_argument(\"file\")\n    g = sub.add_parser(\"aging\", help=\"receivables by age\")\n    g.add_argument(\"file\")\n    g.add_argument(\"--today\", required=True, type=datetime.date.fromisoformat)\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"aging\":\n        print(report.render(report.aging(journal, a.today)), file=out)\n    elif a.cmd == \"balance\":"
+  },
+  {
+    "path": "tests/test_aging.py",
+    "content": "import unittest\n\nfrom ledger import report\nfrom tests.helpers import d, journal\n\n\nclass Aging(unittest.TestCase):\n    def test_an_open_invoice_ages(self):\n        j = journal((\"2026-01-01\", \"Invoice\", [(\"1100\", 5000), (\"4000\", -5000)]))\n        self.assertEqual(report.aging(j, d(\"2026-02-15\")), [(\"0-30\", 0), (\"31-60\", 5000), (\"61-90\", 0), (\"90+\", 0)])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

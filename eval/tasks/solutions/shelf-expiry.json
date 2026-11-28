@@ -1,0 +1,46 @@
+[
+  {
+    "path": "shelf/models.py",
+    "old": "\"\"\"Books and members.\"\"\"\n\nfrom dataclasses import dataclass, field\n",
+    "new": "\"\"\"Books and members.\"\"\"\n\nimport datetime\nfrom dataclasses import dataclass, field\n"
+  },
+  {
+    "path": "shelf/models.py",
+    "old": "    limit: int = 3  # books on loan at once\n",
+    "new": "    limit: int = 3  # books on loan at once\n    expires: datetime.date | None = None  # None: never\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "        m = self.members[member]\n        if self.on_loan(isbn):",
+    "new": "        m = self.members[member]\n        if m.expires is not None and m.expires < today:\n            raise ValueError(f\"{m.name}'s membership expired on {m.expires.isoformat()}\")\n        if self.on_loan(isbn):"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "    def overdue(self, today):",
+    "new": "    def expired(self, today):\n        \"\"\"The members whose membership expired before `today`, by id.\"\"\"\n        return [m for _, m in sorted(self.members.items()) if m.expires is not None and m.expires < today]\n\n    def overdue(self, today):"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "        \"members\": [vars(m) for m in loans.members.values()],",
+    "new": "        \"members\": [{**vars(m), \"expires\": m.expires.isoformat() if m.expires else None} for m in loans.members.values()],"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "    members = [Member(m[\"id\"], m[\"name\"], m.get(\"limit\", 3)) for m in data.get(\"members\", [])]",
+    "new": "    members = [Member(m[\"id\"], m[\"name\"], m.get(\"limit\", 3), datetime.date.fromisoformat(m[\"expires\"]) if m.get(\"expires\") else None)\n               for m in data.get(\"members\", [])]"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "import argparse\nimport sys\n",
+    "new": "import argparse\nimport datetime\nimport sys\n"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"search\":",
+    "new": "    l.add_argument(\"file\")\n    m = sub.add_parser(\"members\", help=\"members and their memberships\")\n    m.add_argument(\"file\")\n    m.add_argument(\"--today\", required=True, type=datetime.date.fromisoformat)\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"members\":\n        for _, member in sorted(loans.members.items()):\n            when = f\"expires {member.expires.isoformat()}\" if member.expires else \"never\"\n            late = \"  (expired)\" if member.expires and member.expires < a.today else \"\"\n            print(f\"{member.id}  {member.name}  {when}{late}\", file=out)\n    elif a.cmd == \"search\":"
+  },
+  {
+    "path": "tests/test_expiry.py",
+    "content": "import unittest\n\nfrom tests.helpers import BOOKS, d, library\n\n\nclass Expiry(unittest.TestCase):\n    def test_an_expired_member_cant_borrow(self):\n        lib = library()\n        lib.members[\"m1\"].expires = d(\"2026-01-31\")\n        lib.lend(BOOKS[0].isbn, \"m1\", d(\"2026-01-31\"))\n        with self.assertRaises(ValueError):\n            lib.lend(BOOKS[1].isbn, \"m1\", d(\"2026-02-01\"))\n        self.assertEqual([m.id for m in lib.expired(d(\"2026-02-01\"))], [\"m1\"])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

@@ -1,7 +1,0 @@
-[
-  {
-    "path": "ledger/money.py",
-    "old": "    whole, frac = divmod(cents, 100)",
-    "new": "    whole, frac = divmod(abs(cents), 100)"
-  }
-]

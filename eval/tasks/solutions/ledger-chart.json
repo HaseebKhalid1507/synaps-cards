@@ -1,0 +1,26 @@
+[
+  {
+    "path": "ledger/accounts.py",
+    "old": "\"\"\"The chart of accounts.\"\"\"\n\nfrom dataclasses import dataclass\n",
+    "new": "\"\"\"The chart of accounts.\"\"\"\n\nimport csv\nimport io\nfrom dataclasses import dataclass\n"
+  },
+  {
+    "path": "ledger/accounts.py",
+    "old": "def default_chart():",
+    "new": "def load_chart(text):\n    \"\"\"A `Chart` from CSV rows `code,name,kind`.\"\"\"\n    rows = csv.DictReader(io.StringIO(text))\n    missing = [c for c in (\"code\", \"name\", \"kind\") if c not in (rows.fieldnames or [])]\n    if missing:\n        raise ValueError(f\"missing columns: {', '.join(missing)}\")\n    chart = Chart()\n    for row in rows:\n        if any((v or \"\").strip() for v in row.values()):\n            chart.add(Account(row[\"code\"].strip(), row[\"name\"].strip(), row[\"kind\"].strip()))\n    return chart\n\n\ndef default_chart():"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "from . import report\nfrom .accounts import default_chart\nfrom .importer import import_into\nfrom .journal import Journal\n\n\ndef load(path):\n    journal = Journal(default_chart())",
+    "new": "from . import report\nfrom .accounts import default_chart, load_chart\nfrom .importer import import_into\nfrom .journal import Journal\n\n\ndef chart_of(path):\n    if path is None:\n        return default_chart()\n    with open(path, encoding=\"utf-8\") as f:\n        return load_chart(f.read())\n\n\ndef load(path, chart=None):\n    journal = Journal(chart or default_chart())"
+  },
+  {
+    "path": "ledger/cli.py",
+    "old": "    b.add_argument(\"file\")\n    s = sub.add_parser(\"statement\", help=\"one account's statement\")\n    s.add_argument(\"code\")\n    s.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    journal = load(a.file)\n    if a.cmd == \"balance\":",
+    "new": "    b.add_argument(\"file\")\n    s = sub.add_parser(\"statement\", help=\"one account's statement\")\n    s.add_argument(\"code\")\n    s.add_argument(\"file\")\n    c = sub.add_parser(\"chart\", help=\"the chart of accounts\")\n    for p in (b, s, c):\n        p.add_argument(\"--chart\", help=\"a chart CSV (code,name,kind); default: the built-in one\")\n    a = ap.parse_args(argv)\n    chart = chart_of(a.chart)\n    if a.cmd == \"chart\":\n        for account in chart:\n            print(f\"{account.code}  {account.name}  {account.kind}\", file=out)\n        return 0\n    journal = load(a.file, chart)\n    if a.cmd == \"balance\":"
+  },
+  {
+    "path": "tests/test_chart.py",
+    "content": "import unittest\n\nfrom ledger.accounts import load_chart\n\n\nclass Chart(unittest.TestCase):\n    def test_a_chart_file_by_code(self):\n        c = load_chart(\"code,name,kind\\n2000,Payables,liability\\n1000,Cash,asset\\n\")\n        self.assertEqual([a.code for a in c], [\"1000\", \"2000\"])\n\n    def test_a_code_twice_is_refused(self):\n        with self.assertRaises(ValueError):\n            load_chart(\"code,name,kind\\n1000,Cash,asset\\n1000,Bank,asset\\n\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

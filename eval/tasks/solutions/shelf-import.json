@@ -1,0 +1,21 @@
+[
+  {
+    "path": "shelf/store.py",
+    "old": "import datetime\nimport json\n",
+    "new": "import csv\nimport datetime\nimport io\nimport json\n"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "def save(path, loans):",
+    "new": "def import_books(loans, text):\n    \"\"\"Add the books of CSV `text` (isbn,title,authors,year) to `loans`'s\n    catalog, the ones it has skipped: (added, skipped). A bad row adds\n    nothing.\"\"\"\n    rows = csv.DictReader(io.StringIO(text))\n    missing = [c for c in (\"isbn\", \"title\", \"authors\", \"year\") if c not in (rows.fieldnames or [])]\n    if missing:\n        raise ValueError(f\"missing columns: {', '.join(missing)}\")\n    books = []\n    for row in rows:\n        if not any((v or \"\").strip() for v in row.values()):\n            continue\n        year = (row[\"year\"] or \"\").strip()\n        if year and not year.isdigit():\n            raise ValueError(f\"not a year: {year!r}\")\n        authors = [a.strip() for a in (row[\"authors\"] or \"\").split(\";\") if a.strip()]\n        books.append(Book(row[\"isbn\"].strip(), row[\"title\"].strip(), authors, int(year) if year else None))\n    added = skipped = 0\n    for book in books:\n        if book.isbn in loans.catalog.books:\n            skipped += 1\n        else:\n            loans.catalog.add(book)\n            added += 1\n    return added, skipped\n\n\ndef save(path, loans):"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"search\":",
+    "new": "    l.add_argument(\"file\")\n    i = sub.add_parser(\"import\", help=\"import books from CSV\")\n    i.add_argument(\"file\")\n    i.add_argument(\"csv\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"import\":\n        with open(a.csv, encoding=\"utf-8\") as f:\n            added, skipped = store.import_books(loans, f.read())\n        store.save(a.file, loans)\n        print(f\"added {added}, skipped {skipped}\", file=out)\n    elif a.cmd == \"search\":"
+  },
+  {
+    "path": "tests/test_import.py",
+    "content": "import unittest\n\nfrom shelf import store\nfrom tests.helpers import BOOKS, library\n\n\nclass Import(unittest.TestCase):\n    def test_new_books_and_known_ones(self):\n        lib = library()\n        text = f\"isbn,title,authors,year\\n9780000000001,Salt,A;B,2001\\n{BOOKS[0].isbn},Again,,\\n\"\n        self.assertEqual(store.import_books(lib, text), (1, 1))\n        self.assertEqual(lib.catalog.get(\"9780000000001\").authors, [\"A\", \"B\"])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

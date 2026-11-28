@@ -2,6 +2,7 @@
 names, and every check is a real one: it fails on the task's start and
 passes with the reference solution."""
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,29 @@ class Shape(unittest.TestCase):
                 self.assertIn(f"{hb['block']['kind']} block", say)
                 self.assertNotIn("block", off)
                 self.assertIn("check", t)
+
+    def test_the_long_tasks_are_real_work_with_spares(self):
+        # Review #14, P1 4: no one-line repairs among the long tasks, and 2
+        # spares above §2.8's 20 for the ones that run under 6 rounds.
+        coding = [t for t in TASKS if t["category"] == "coding"]
+        self.assertGreaterEqual(len(coding), taskset.CATEGORIES["coding"] + 2)
+        self.assertEqual(taskset.SPARES, {"coding": 2})
+        one_line = dict(coding[0], solution="solutions/one-line.json")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for sub in ("solutions", "checks", "workspaces"):
+                (root / sub).mkdir()
+            (root / "workspaces" / one_line["workspace"]).mkdir()
+            (root / one_line["check"]["tests"]).write_text("")
+            (root / "solutions/one-line.json").write_text('[{"path": "a.py", "old": "x - 1", "new": "x"}]')
+            self.assertTrue(any("1 line(s)" in p for p in taskset.problems([one_line], root)))
+        multi = sum(len({e["path"] for e in json.loads((taskset.TASKS / t["solution"]).read_text())}) >= 3 for t in coding)
+        self.assertGreaterEqual(multi, 10, "the new long tasks touch 3 files or more")
+
+    def test_the_readme_freezes_the_set_at_b5a(self):
+        readme = (taskset.TASKS.parent / "README.md").read_text()
+        self.assertIn("## The set is frozen at B5a", readme)
+        self.assertNotIn("before B5b's first run", readme)
 
     def test_the_set_is_frozen(self):
         self.assertEqual(taskset.digest(), taskset.FROZEN.read_text().split()[0],

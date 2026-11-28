@@ -1,0 +1,36 @@
+[
+  {
+    "path": "shelf/loans.py",
+    "old": "LOAN_DAYS = 21\nFINE_PER_DAY = 25  # cents\n",
+    "new": "LOAN_DAYS = 21\nFINE_PER_DAY = 25  # cents\nMAX_RENEWALS = 2\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "    returned: datetime.date | None = None\n",
+    "new": "    returned: datetime.date | None = None\n    renewals: int = 0\n"
+  },
+  {
+    "path": "shelf/loans.py",
+    "old": "    def overdue(self, today):",
+    "new": "    def renew(self, isbn, today):\n        \"\"\"Renew `isbn`'s loan: due LOAN_DAYS days past its due date.\"\"\"\n        loan = self.on_loan(isbn)\n        if loan is None:\n            raise ValueError(f\"{isbn} isn't on loan\")\n        if loan.due < today:\n            raise ValueError(f\"{isbn} is overdue\")\n        if loan.renewals >= MAX_RENEWALS:\n            raise ValueError(f\"{isbn} was renewed {MAX_RENEWALS} times\")\n        loan.due += datetime.timedelta(days=LOAN_DAYS)\n        loan.renewals += 1\n        return loan\n\n    def overdue(self, today):"
+  },
+  {
+    "path": "shelf/store.py",
+    "old": "                                datetime.date.fromisoformat(l[\"due\"]), returned))",
+    "new": "                                datetime.date.fromisoformat(l[\"due\"]), returned, l.get(\"renewals\", 0)))"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "import argparse\nimport sys\n",
+    "new": "import argparse\nimport datetime\nimport sys\n"
+  },
+  {
+    "path": "shelf/cli.py",
+    "old": "    l.add_argument(\"file\")\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"search\":",
+    "new": "    l.add_argument(\"file\")\n    r = sub.add_parser(\"renew\", help=\"renew a loan\")\n    r.add_argument(\"file\")\n    r.add_argument(\"isbn\")\n    r.add_argument(\"--today\", required=True, type=datetime.date.fromisoformat)\n    a = ap.parse_args(argv)\n    loans = store.load(a.file)\n    if a.cmd == \"renew\":\n        loan = loans.renew(a.isbn, a.today)\n        store.save(a.file, loans)\n        print(f\"{loan.isbn}  due {loan.due.isoformat()}\", file=out)\n    elif a.cmd == \"search\":"
+  },
+  {
+    "path": "tests/test_renew.py",
+    "content": "import unittest\n\nfrom tests.helpers import BOOKS, d, library\n\n\nclass Renew(unittest.TestCase):\n    def test_a_renewal_and_its_limit(self):\n        lib = library()\n        lib.lend(BOOKS[0].isbn, \"m1\", d(\"2026-03-01\"))\n        self.assertEqual(lib.renew(BOOKS[0].isbn, d(\"2026-03-02\")).due, d(\"2026-04-12\"))\n        lib.renew(BOOKS[0].isbn, d(\"2026-03-03\"))\n        with self.assertRaises(ValueError):\n            lib.renew(BOOKS[0].isbn, d(\"2026-03-04\"))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+  }
+]

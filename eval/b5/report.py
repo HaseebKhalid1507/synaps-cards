@@ -56,6 +56,15 @@ holding theirs (`taskset.CATEGORIES`), and **the gate passes only if the
 shape holds**: a run that didn't play §2.8's set didn't measure it. Every
 task short of its shape is named.
 
+**Long tasks** (frozen here, before any data): a coding task counts as long
+only if its blocks-off runs reached 6 rounds, as above; the set keeps
+spares for the ones that don't (taskset.py's `SPARES`). The rest are
+reported apart, each with its off-runs' rounds by repeat
+(`set_shape.coding.apart`), never in the long count. The gate's rows are
+§2.8's, over every turn; `also.by_bucket` gives the same rows over each
+bucket (the long tasks, coding under 6 rounds, short, no tool,
+interactive), reported with no gate.
+
 **The verdict** keeps what the rows say apart from what they license:
 - `rows_pass`: every gate row passes (pooled and 2 of 3). Descriptive.
 - *Notice probes*: each task with a dismissal is its probe of the unseen
@@ -255,7 +264,10 @@ def set_shape(records, turn_rows):
         held = sorted(t for t, oks in runs.items() if sum(oks) >= 2)
         need = taskset.CATEGORIES[cat]
         out[cat] = {"plays": says, "tasks": len(runs), "held": len(held), "need": need,
-                    "short_of": sorted(set(runs) - set(held))}
+                    "short_of": sorted(set(runs) - set(held)), "held_tasks": held}
+        if cat == "coding":
+            rounds = {(t, rp): sum(r["rounds"] for r in rows) for (t, rp), rows in rows_of_run.items()}
+            out[cat]["apart"] = [{"task": t, "rounds": [rounds.get((t, rp)) for rp in REPEATS]} for t in out[cat]["short_of"]]
         holds = holds and len(held) >= need
     out["holds"] = holds
     return out
@@ -370,6 +382,7 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
     }
     shape = set_shape(records, turn_rows)
+    also["by_bucket"] = by_bucket(records, turn_rows, judged, definition, shape)
     rows_pass = all(g["pass"] for g in gate.values())
     why_not = eligibility(records, turn_rows, counter, not_run, meta, plan, shape)
     verdict = "not eligible" if why_not else ("passes" if rows_pass else "fails")
@@ -383,6 +396,26 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "outcomes": judged,
         "turn_rows": turn_rows,
     }
+
+
+BUCKETS = ("long", "coding_under_6", "short", "no_tool", "interactive")
+
+
+def by_bucket(records, turn_rows, judged, definition, shape):
+    """The gate's rows over each bucket (module docs, "Long tasks"):
+    reported, with no gate."""
+    cat = {rec["task"]: rec.get("category") for rec in records}
+    long = set(shape["coding"]["held_tasks"])
+    def bucket(task):
+        c = cat.get(task)
+        return ("long" if task in long else "coding_under_6") if c == "coding" else c
+    out = {}
+    for b in BUCKETS:
+        tasks = sorted(t for t in cat if bucket(t) == b)
+        rows = rows_of([r for r in turn_rows if bucket(r["task"]) == b], [j for j in judged if bucket(j["task"]) == b], definition)
+        out[b] = {"tasks": tasks, "rows": {k: {x: y for x, y in v.items() if x not in ("pass", "per_task", "run_totals")}
+                                           for k, v in rows.items() if k != "definition"}}
+    return out
 
 
 def _merge(dicts):
@@ -409,8 +442,12 @@ def markdown(rep):
     cats = ", ".join(f"{c} {s[c]['held']} of {s[c]['tasks']} ({s[c]['plays']}; ≥ {s[c]['need']})"
                      + (f", short: {', '.join(f'`{t}`' for t in s[c]['short_of'])}" if s[c]["short_of"] else "")
                      for c in SHAPE)
-    lines += ["", f"The set's shape, blocks off: {'holds' if s['holds'] else '**does not hold**'}: {cats}.",
-              f"Gate rows: {'every row passes' if rep['rows_pass'] else '**not every row passes**'} (pooled and in 2 of 3 repeats).",
+    apart = s["coding"].get("apart") or []
+    lines += ["", f"The set's shape, blocks off: {'holds' if s['holds'] else '**does not hold**'}: {cats}."]
+    if apart:
+        lines.append("Coding tasks under 6 rounds blocks off, reported apart, not long: "
+                     + ", ".join(f"`{a['task']}` ({', '.join('-' if x is None else str(x) for x in a['rounds'])})" for a in apart) + ".")
+    lines += [f"Gate rows: {'every row passes' if rep['rows_pass'] else '**not every row passes**'} (pooled and in 2 of 3 repeats).",
               "Eligible for B6: " + ("yes" if rep["eligible_for_b6"] else "**no**: " + "; ".join(rep["not_eligible_because"])) + ".",
               f"Gate: {rep['verdict'] if rep['verdict'] == 'passes' else '**' + rep['verdict'] + '**'}."]
     lines += ["", f"Also reported: `{json.dumps({k: v for k, v in rep['also'].items() if k != 'reported_per_arm'}, sort_keys=True)}`", ""]

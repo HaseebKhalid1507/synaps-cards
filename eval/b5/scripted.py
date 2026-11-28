@@ -15,8 +15,10 @@ blocks off, as the set's coding tasks are (§2.8; report.py's shape).
 With blocks on it also keeps a plan: a `put` riding the first read, ticks
 riding real calls, and one closing tick alone in its own round. A few
 tasks add what the report must catch: a refused call and its repair
-(`ledger-parens`), a `put` on a live id (`shelf-due`), and in the tasks
-with a dismissal, the ticks that come after the notice (unseen patches).
+(`ledger-allocate`), a `put` on a live id (`shelf-isbn`), a coding task
+played in 5 rounds, under the long tasks' 6 (`shelf-phrase`: no README, no
+first test run), and in the tasks with a dismissal, the ticks that come
+after the notice (unseen patches).
 
 **Its usage** is the stand-in tokenizer's: ⌈bytes / 4⌉ of the request's
 messages and tools (input), of what it streams (output, plus 4 per call),
@@ -40,6 +42,7 @@ CARDS = {
     "shelf-card-prefix": {"question": "How should search match?", "options": ["Whole words only", "Word prefixes too"]},
     "ledger-card-zero": {"question": "Leave zero-balance accounts out of the trial balance?", "options": ["Show them", "Hide them"]},
 }
+FAST = {"shelf-phrase"}  # a coding task played under 6 rounds (module docs)
 SHORT_READ = {"ledger": "ledger/accounts.py", "shelf": "shelf/loans.py"}
 PROPOSAL = {  # a hand-back task's proposal, blocks on (`--d8-stand-in`)
     "plan": {"op": "put", "id": "proposal", "kind": "plan", "title": "The plan", "body": {"steps": [{"id": "s1", "label": "Do it"}]}},
@@ -77,9 +80,11 @@ def tick(**states):
 def coding_rounds(task, ws, on, first):
     """The rounds of a coding turn (module docs)."""
     edits = json.loads((taskset.TASKS / task["solution"]).read_text())
-    files = list(dict.fromkeys(e["path"] for e in edits))
+    files = list(dict.fromkeys(e["path"] for e in edits if "old" in e)) or ["README.md"]  # a file there is to read
     test = ("bash", {"command": "python3 -m unittest -q 2>&1 | tail -3"})
     rounds = [[("read", {"path": str(Path(ws) / "README.md")})], [("read", {"path": str(Path(ws) / files[0])})], [test]]
+    if task["id"] in FAST:
+        rounds = [rounds[1]]
     for e in edits:
         p = str(Path(ws) / e["path"])
         rounds.append([("write", {"path": p, "content": e["content"]}) if "content" in e else
@@ -89,10 +94,10 @@ def coding_rounds(task, ws, on, first):
         return rounds
     rounds[0].append(("cards_block", plan_ops(["look", "fix", "test"]) if first else tick(look="doing")))
     rounds[1].append(("cards_block", tick(look="done", fix="doing")))
-    if task["id"] == "ledger-parens":  # a refusal, then its repair
+    if task["id"] == "ledger-allocate":  # a refusal, then its repair
         rounds[1][-1] = ("cards_block", tick(look="finished"))
         rounds[2].append(("cards_block", tick(look="done", fix="doing")))
-    if task["id"] == "shelf-due":  # a put on a live id
+    if task["id"] == "shelf-isbn":  # a put on a live id
         rounds[2].append(("cards_block", plan_ops(["look", "fix", "test"])))
     rounds[-1].append(("cards_block", tick(fix="done", test="doing")))
     rounds.append([("cards_block", tick(test="done"))])  # the closing call, alone

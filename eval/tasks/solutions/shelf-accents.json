@@ -1,7 +1,0 @@
-[
-  {
-    "path": "shelf/text.py",
-    "old": "    return text.lower()",
-    "new": "    decomposed = unicodedata.normalize(\"NFKD\", text)\n    return \"\".join(c for c in decomposed if not unicodedata.combining(c)).lower()"
-  }
-]
