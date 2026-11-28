@@ -76,6 +76,21 @@ before it not included).
 
 **The verdict** keeps what the rows say apart from what they license:
 - `rows_pass`: every gate row passes (pooled and 2 of 3). Descriptive.
+- *Interaction coverage* (review #14 round 2, R2-1): a task's card
+  answers and hand-backs are what it measures, so each must happen as the
+  task says, in every on-run. An on-run's card answer happened if its step
+  wasn't skipped (no card showing, or none to answer: an interaction
+  failure) and the answer reached the agent: the message the harness sent
+  is in the session's history, the agent's received input. Its hand-back
+  happened if it travelled **as a block** (the desk took the agent's block
+  and handed it back: D8), not as the task's plain message, and that
+  message reached the agent the same way. The plain message is the
+  fallback the task freezes when there is no block to take: it keeps the
+  run's outcome observable, and it is reported as a fallback, never as a
+  hand-back. A fallback, a refusal, a skip, or a message with no sign of
+  receipt leaves the run ineligible, each named (`interactions`). Off-runs
+  are held by the set's shape (an off-run plays `interactive` if its
+  answer or hand-back was sent).
 - *Notice probes*: each task with a dismissal is its probe of the unseen
   patches (§3.5). An on-run delivered it if the desk accepted the click and
   a message the agent then got carried the notice. The desk refusing one is
@@ -97,8 +112,9 @@ before it not included).
   judged (one pass or fail each: a run with no judgment is missing
   evidence, never a pass); every user-initiated turn of every run measured
   (turns.py: its `idle`, at least one response, every response's usage);
-  the set's shape; no dismissal refused, and every notice probe delivered
-  in 2 of 3.
+  the set's shape; every on-run's card answers and hand-backs happened
+  (above); no dismissal refused, and every notice probe delivered in 2 of
+  3.
 - `verdict`: `not eligible` unless it is eligible, whatever the rows say;
   then `passes` or `fails`. `gate_pass` is the verdict `passes`.
 """
@@ -348,6 +364,9 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
         out.append(f"{len(bad)} runs with a turn not measured (no idle, an error, aborted, no response, or a response with no usage)")
     if not shape["holds"]:
         out.append("the set's shape doesn't hold")
+    missed = [f"{x['task']} r{x['repeat']}: {w}" for x in interactions(records, tasks) for w in x["missed"]]
+    if missed:
+        out.append(f"{len(missed)} on-run card answers or hand-backs didn't happen as the task says: " + "; ".join(missed))
     probes = notice_probes(records)
     refused = sum(p["refused"] for p in probes.values())
     if refused:
@@ -356,6 +375,58 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
     short = sorted(t for t in ran & dismissing if probes.get(t, {}).get("delivered", 0) < 2)
     if short:
         out.append(f"the notice probe didn't reach the agent in 2 of 3 on-runs: {', '.join(short)}")
+    return out
+
+
+def received(history, text):
+    """Whether `text` reached the agent: a user message of `history` (the
+    session's, as the daemon holds it) is it, whole or as one of its text
+    parts."""
+    want = (text or "").strip()
+    for m in history or []:
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        parts = [c] if isinstance(c, str) else [p.get("text", "") for p in c or [] if isinstance(p, dict) and p.get("type") == "text"]
+        if want and (want in {x.strip() for x in parts} or "".join(parts).strip() == want):
+            return True
+    return False
+
+
+def interactions(records, tasks=None):
+    """Each on-run of a task with a card answer or a hand-back (module docs,
+    "Interaction coverage"): how many of each the task has, how many
+    happened, and what didn't, each named."""
+    by = {t["id"]: t for t in (taskset.load() if tasks is None else tasks)}
+    out = []
+    for rec in records:
+        task = by.get(rec["task"])
+        if task is None or rec["arm"] != "on":
+            continue
+        want = {k: sum(1 for s in task["turns"] if k in s) for k in ("answer", "hand_back")}
+        if not any(want.values()):
+            continue
+        steps, sent, history = rec.get("steps", []), rec.get("sent", []), rec.get("history")
+        missed, done = [], {"answer": 0, "hand_back": 0}
+        for s in steps:
+            if s.get("step") == "answer":
+                if s.get("skipped"):
+                    missed.append(f"card answer skipped ({s['skipped']})")
+            elif s.get("step") == "hand_back":
+                if s.get("skipped"):
+                    missed.append(f"hand-back {s['skipped']}")
+                elif s.get("as") != "block":
+                    missed.append("hand-back sent as the plain message, a fallback" + (f" ({s['said_instead']})" if s.get("said_instead") else ""))
+        for carry, kind in (("answer", "answer"), ("hand_back", "hand_back")):
+            msgs = [m for m in sent if m.get("carry") == carry]
+            got = [m for m in msgs if received(history, m.get("text"))]
+            done[kind] = len(got)
+            if len(got) < len(msgs):
+                missed.append(f"{len(msgs) - len(got)} {kind.replace('_', '-')} message(s) not in the agent's history")
+        for kind, n in want.items():
+            if done[kind] < n and not missed:
+                missed.append(f"{n - done[kind]} of {n} {kind.replace('_', '-')}(s) never sent")
+        out.append({"task": rec["task"], "repeat": rec["repeat"], "want": want, "happened": done, "missed": missed})
     return out
 
 
@@ -416,6 +487,7 @@ def build(records, counter, definition, not_run, meta, plan=None):
         "notice_probes": notice_probes(records),
         "interaction_failures": [{"task": rec["task"], "arm": rec["arm"], "repeat": rec["repeat"], "why": s["skipped"]}
                                  for rec in records for s in rec.get("steps", []) if s.get("interaction")],
+        "interactions": interactions(records),
         "wire_interval_per_round": {arm: {"median": median(lat), "p90": p90(lat), "rounds": len(lat)}
                                     for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
         "request_latency_per_round": request_latency(records),

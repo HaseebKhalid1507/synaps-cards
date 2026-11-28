@@ -995,6 +995,51 @@ class Eligibility(unittest.TestCase):
         self.assertEqual(rep["not_eligible_because"], [f"the notice probe didn't reach the agent in 2 of 3 on-runs: {dismissing[0]}"])
         self.assertTrue(self.build(self.records(probe=lambda task, r: not (task == dismissing[0] and r == 3)))["gate_pass"])
 
+    def change(self, recs, kind, fn):
+        """`recs` with each on-run of a task with a `kind` step changed by `fn`."""
+        by = {x["id"]: x for x in TASKS}
+        return [fn(dict(r), by[r["task"]]) if r["arm"] == "on" and any(kind in s for s in by[r["task"]]["turns"]) else r for r in recs]
+
+    def test_on_run_hand_backs_must_travel_as_blocks(self):
+        # Review #14 round 2, R2-1. Shady's: all nine on-arm hand-backs fell
+        # back to the plain message (no live block), and the run passed.
+        def fallback(r, task):
+            (hb,) = [s["hand_back"] for s in task["turns"] if "hand_back" in s]
+            r["steps"] = [{"step": "hand_back", "as": "message", "said_instead": "no live plan block"}]
+            r["sent"] = [r["sent"][0], {"carry": "submit", "text": hb["message"], "notices": []}]
+            r["history"] = [{"role": "user", "content": m["text"]} for m in r["sent"]]
+            return r
+        rep = self.build(self.change(self.records(), "hand_back", fallback))
+        self.assertTrue(rep["rows_pass"])
+        self.assertEqual(rep["verdict"], "not eligible")
+        (why,) = rep["not_eligible_because"]
+        self.assertTrue(why.startswith("9 on-run card answers or hand-backs didn't happen as the task says: "), why)
+        self.assertIn("r1: hand-back sent as the plain message, a fallback (no live plan block)", why)
+        # A refused hand-back: the desk wouldn't take the block, nothing went.
+        one = self.records()
+        i = next(k for k, r in enumerate(one) if r["arm"] == "on" and r["task"] == "shelf-handback-plan" and r["repeat"] == 2)
+        one[i] = dict(one[i], steps=[{"step": "hand_back", "skipped": "the desk refused: no such block", "block": "plan"}], sent=one[i]["sent"][:1])
+        self.assertEqual(self.build(one)["not_eligible_because"],
+                         ["1 on-run card answers or hand-backs didn't happen as the task says: "
+                          "shelf-handback-plan r2: hand-back the desk refused: no such block"])
+
+    def test_every_on_run_card_answer_must_happen(self):
+        # Shady's: all fifteen on-arm answers skipped as interaction
+        # failures, every code check passing, and the run passed.
+        def skipped(r, task):
+            r["steps"] = [{"step": "answer", "skipped": "no option labelled A", "interaction": True}]
+            r["sent"] = r["sent"][:1]
+            r["history"] = r["history"][:2]
+            return r
+        rep = self.build(self.change(self.records(), "answer", skipped))
+        self.assertTrue(rep["rows_pass"])
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertIn("15 on-run card answers or hand-backs didn't happen", rep["not_eligible_because"][0])
+        self.assertEqual(len(rep["also"]["interaction_failures"]), 15)
+        # Sent, but not in the agent's received input: no sign it got there.
+        lost = self.change(self.records(), "answer", lambda r, task: dict(r, history=r["history"][:2]) if r["repeat"] == 3 else r)
+        self.assertIn("ledger-card-negative r3: 1 answer message(s) not in the agent's history", self.build(lost)["not_eligible_because"][0])
+
     def test_a_dry_run_and_another_task_set_are_never_eligible(self):
         recs = self.records()
         self.assertIn("a dry run, never data", self.build(recs, mode="dry")["not_eligible_because"])
