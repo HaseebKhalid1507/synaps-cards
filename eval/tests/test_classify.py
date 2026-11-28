@@ -274,6 +274,15 @@ class Authority(unittest.TestCase):
         self.assertIn("A steer the engine queued past the turn's end starts its own turn, which is user-initiated", self.DOC)
         self.assertIn("**It is a tail metric.**", self.DOC)
 
+    def test_2_8_makes_b5_single_agent(self):
+        # Review #14 round 4, R4-1: delegation is off, the pilot's too, and
+        # a worker's usage is never a round.
+        self.assertIn("- **Single-agent** (ratified in B5a, synaps-cards #14). The agent works alone, in the experiment and in the depth pilot.",
+                      self.DOC)
+        self.assertIn("starts with the engine's delegation tools disabled, so none is offered", self.DOC)
+        self.assertIn("So a worker's usage is never a round.", self.DOC)
+        self.assertIn("a paid request has no usage on the session's stream. A report with such a run is not eligible.", self.DOC)
+
     def test_2_8_states_the_two_framings(self):
         self.assertIn("**The result's framing** (the pair's allowance less the call's) is input overhead", self.DOC)
         self.assertIn("never attributed to block-call output", self.DOC)

@@ -27,7 +27,12 @@ are a stand-in's and say so; they are never data.
 - the provider's credential in the environment (`ANTHROPIC_API_KEY`), never
   on the command line.
 Its daemon's provider is reached through the tap (b5/providers.py), so the
-first requests and the latencies are recorded as sent. Every paid request
+first requests and the latencies are recorded as sent, each with its
+status. **Single-agent**, the pilot too (review #14 round 4, R4-1): the
+daemon is started with its delegation tools disabled (b5/daemon.py), and
+every run's requests are checked for them: a run whose requests offered
+one stops the run there, its record kept, since the config didn't take.
+Every paid request
 is charged against the budget and written to `paid.jsonl` as it comes, the
 probes of a provider with no token-count endpoint included (spend.py). A
 run the budget stops (a soft stop: spend.py) still writes its report, of
@@ -93,7 +98,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from b5 import calibrate, count, daemon, desk, harness, providers, proxy, report, scripted, spend, taskset  # noqa: E402
+from b5 import calibrate, count, daemon, desk, harness, providers, proxy, report, scripted, spend, taskset, turns  # noqa: E402
 from b5.estimate import table  # noqa: E402
 
 
@@ -360,7 +365,8 @@ def run_all(a, tasks, iso, model_id, the_desk, work, records, *, stamp, model=No
         order, _ = harness.plan(tasks, a.repeats)
     if tap is not None:
         def take():
-            return [{"t_sent": r["t_sent"], "t_done": r.get("t_done"), "request": r["request"]} for r in tap.take()]
+            return [{"t_sent": r["t_sent"], "t_done": r.get("t_done"), "path": r.get("path"), "status": r.get("status"),
+                     "request": r["request"]} for r in tap.take()]
         to_neutral = providers.from_anthropic if a.provider == "anthropic" else providers.from_chat
     else:
         def take():
@@ -395,6 +401,10 @@ def run_all(a, tasks, iso, model_id, the_desk, work, records, *, stamp, model=No
             if first is not None:
                 firsts.setdefault(arm, to_neutral(first))
             keep(rec)
+            delegation = [x for x in rec["offered"] if x in turns.DELEGATION_TOOLS]
+            if delegation:  # the daemon's config didn't take (daemon.py's "Single-agent"): nothing more is spent
+                raise SystemExit(f"run {n} ({task['id']} {arm}): the isolated daemon offered delegation ({', '.join(delegation)}); "
+                                 "B5 is single-agent. Its record is kept; nothing more runs.")
             print(f"{n + 1}/{len(order)} {task['id']} {arm} r{r + 1}: {'pass' if rec['judge']['pass'] else 'FAIL'}", flush=True)
     finally:
         out.close()

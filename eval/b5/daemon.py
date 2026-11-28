@@ -17,6 +17,17 @@ The plugin is installed as a user installs it: this checkout cloned into
 helper, `cards-eval`, is built in the same clone. Blocks go on and off as
 §1.1 says: `extension.cards.blocks` in the home's config, then
 `synaps daemon reload-extension cards`.
+
+**Single-agent** (turns.py's "Single-agent"; review #14 round 4, R4-1):
+the home's config, before the daemon starts, has `disabled_tools` list
+the engine's delegation tools (`single_agent`). The engine reads it at
+boot (SynapsCLI `0a71ea0d`, `core/config.rs` 2414-2416, a comma list
+trimmed, 1773-1778) and removes them from the shared registry before any
+plugin or MCP server registers (`host.rs` 176-180), and from every
+worker's (440-465), so no session is offered them. Every arm's config
+keeps the line. A config that has a `disabled_tools` already is refused,
+not merged. That they're not offered is checked on every request the
+provider gets (run.py's `run_all`), not taken from the config.
 """
 
 import hashlib
@@ -31,6 +42,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
+
+from .turns import DELEGATION_TOOLS
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL = 3  # the daemon's session wire (SynapsCLI `session/wire.rs`, PROTOCOL_VERSION)
@@ -50,6 +63,13 @@ def lines_of(stream):
     threading.Thread(target=pump, daemon=True).start()
     return q
 
+
+
+def single_agent(config):
+    """A home's config with the delegation tools disabled (module docs)."""
+    if any(line.split("=", 1)[0].strip() == "disabled_tools" for line in config.splitlines()):
+        raise RuntimeError("the eval's home config already has disabled_tools: B5's own is the delegation tools, not merged")
+    return config + ("\n" if config and not config.endswith("\n") else "") + f"disabled_tools = {', '.join(DELEGATION_TOOLS)}\n"
 
 
 def binary_digest(path):
@@ -102,6 +122,9 @@ class Isolated:
         self.cards_eval = str(plugin / "target" / "release" / "cards-eval")
         self.config = self.base / "config"
         self.config_was = self.config.read_text() if self.config.exists() else ""
+        self.config_base = single_agent(self.config_was)  # every arm's (module docs, "Single-agent")
+        self.config.write_text(self.config_base)
+        self.record["disabled_tools"] = list(DELEGATION_TOOLS)
         return self
 
     def env(self):
@@ -131,7 +154,7 @@ class Isolated:
     def blocks(self, on):
         """Turn blocks on or off (§1.1): the config, then the reload. The
         extension's tools as the reload reports them."""
-        self.config.write_text(self.config_was + ("\nextension.cards.blocks = true\n" if on else ""))
+        self.config.write_text(self.config_base + ("\nextension.cards.blocks = true\n" if on else ""))
         r = subprocess.run([self.synaps, "daemon", "reload-extension", "cards", "--json"], env=self.env(), cwd=self.cwd,
                            capture_output=True, text=True, timeout=120)
         try:

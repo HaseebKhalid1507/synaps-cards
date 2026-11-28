@@ -1080,6 +1080,18 @@ def _called(output, call_input):
 
 
 EXPERIMENT = "e" * 32  # the fixtures' experiment (run.py's `stamp`)
+EVAL_TOOLS = ("bash", "read", "cards_ui")  # a single-agent run's tools (turns.py's "Single-agent"), cards_block on the on-arm
+
+
+def requests_of(events, arm, tools=None, extra=0):
+    """The provider requests a run's `events` came from, as the tap records
+    them: a paid request a usage (and `extra` more), each offering `tools`
+    (the eval's, single-agent) in the chat form."""
+    names = tools or EVAL_TOOLS + (("cards_block",) if arm == "on" else ())
+    n = sum(1 for _, e in events if e.get("ev") == "stream" and (e.get("event") or {}).get("session") == "usage") + extra
+    body = {"messages": [{"role": "user", "content": "…"}], "tools": [{"type": "function", "function": {"name": x}} for x in names],
+            "stream": True}
+    return [{"t_sent": float(k), "t_done": k + 0.5, "path": "/v1/chat/completions", "status": 200, "request": body} for k in range(n)]
 
 
 def frozen_meta(**kw):
@@ -1165,7 +1177,7 @@ class Eligibility(unittest.TestCase):
             history = [m for x in sent for m in ({"role": "user", "content": x["text"]}, {"role": "assistant", "content": "…"})]
             recs.append({"task": t["id"], "category": t["category"], "arm": arm, "repeat": r + 1, "events": events,
                          "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent, "history": history,
-                         "mode": "real", "experiment": EXPERIMENT})
+                         "requests": requests_of(events, arm), "mode": "real", "experiment": EXPERIMENT})
         return recs[:len(recs) - drop]
 
     WHOLE = [(t["id"], arm, r + 1) for r, t, arm in harness.plan([dict(x, needs=[]) for x in TASKS], 3)[0]]
@@ -1376,6 +1388,228 @@ class Eligibility(unittest.TestCase):
         self.assertIn("3 repeats", str(e.exception))
 
 
+COLLECTED = json.dumps({"archiveError": None, "handle_id": "w1", "status": "completed", "output": "Found it.", "model": "m",
+                        "terminal_cause": "completed", "authorization": None, "collected": False,
+                        "usage": {"requests": 7, "input_tokens": 500_000, "output_tokens": 100_000}})  # `collect.rs` 194-202
+
+
+def one_shot(w, out=100_000):
+    """A one-shot worker on the session's stream (`oneshot.rs` 136, 470-486):
+    its start, its one aggregate usage, its done."""
+    w.stream("agent", "subagent_start", subagent_id=1, agent_name="worker", task_preview="Look into it.")
+    w.usage(inp=500_000, out=out)
+    return w.stream("agent", "subagent_done", subagent_id=1, agent_name="worker", result_preview="Found it.", duration_secs=9.0)
+
+
+class SingleAgent(unittest.TestCase):
+    """B5 is single-agent, the pilot too (review #14 round 4, R4-1; turns.py's
+    "Single-agent"): the daemon offers no delegation tool, a worker's usage
+    is never a round, and a run that delegated, or has a paid request
+    with no usage on the session's stream, is never eligible. Shady's two
+    wire shapes, on the qualifying whole matrix (Eligibility's)."""
+
+    fx = Eligibility()
+
+    def qualifying(self):
+        recs = self.fx.records()
+        rep = self.fx.build(recs)
+        self.assertEqual(rep["verdict"], "passes")
+        self.assertEqual(rep["also"]["tools_offered"], {"on": sorted(EVAL_TOOLS + ("cards_block",)), "off": sorted(EVAL_TOOLS)}, "per arm")
+        return recs
+
+    def why(self, recs):
+        rep = self.fx.build(recs)
+        self.assertEqual(rep["verdict"], "not eligible")
+        return " / ".join(rep["not_eligible_because"])
+
+    @staticmethod
+    def coding_on(recs):
+        return next(r for r in recs if r["category"] == "coding" and r["arm"] == "on")
+
+    def test_the_daemon_starts_with_every_delegation_tool_disabled_in_both_arms(self):
+        self.assertEqual(len(turns.DELEGATION_TOOLS), 8)
+        line = daemon.single_agent("")
+        key, val = line.split("=", 1)
+        self.assertEqual(key.strip(), "disabled_tools")
+        self.assertEqual([x.strip() for x in val.split(",") if x.strip()], list(turns.DELEGATION_TOOLS), "as the engine parses it")
+        self.assertEqual(daemon.single_agent("model = m"), "model = m\n" + line)
+        with self.assertRaises(RuntimeError):
+            daemon.single_agent("disabled_tools = bash\n")
+        # install writes it before the daemon boots, and each arm keeps it.
+        reload = {"tools": []}
+        saved = daemon.subprocess.run
+
+        def fake(cmd, **k):
+            out = json.dumps({"ok": True, "report": reload}) if "reload-extension" in cmd else "abc\n"
+            return type("R", (), {"returncode": 0, "stdout": out, "stderr": ""})()
+        daemon.subprocess.run = fake
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                synaps = Path(tmp, "synaps")
+                synaps.write_text("")
+                iso = daemon.Isolated(synaps, tmp)
+                iso.install()
+                self.assertEqual(iso.config.read_text(), line, "the config the daemon boots from")
+                self.assertEqual(iso.record["disabled_tools"], list(turns.DELEGATION_TOOLS))
+                for on in (True, False):
+                    reload["tools"] = ["cards:block", "cards:ui"] if on else ["cards:ui"]
+                    iso.blocks(on)
+                    self.assertTrue(iso.config.read_text().startswith(line), f"blocks {'on' if on else 'off'}")
+        finally:
+            daemon.subprocess.run = saved
+
+    def test_shadys_reactive_worker_with_100k_output_isnt_eligible(self):
+        # Shady's first: a coding/on tool result turned into the engine's
+        # terminal subagent_collect JSON, 7 requests, 500,000 input and
+        # 100,000 output tokens, and no worker usage on the stream. At
+        # f5a0027 the report said `passes`, the on-arm's output unchanged.
+        recs = self.qualifying()
+        rec = self.coding_on(recs)
+        i = next(k for k, (_, e) in enumerate(rec["events"]) if (e.get("event") or {}).get("llm") == "tool_result")
+        rec["events"][i] = (rec["events"][i][0], {**rec["events"][i][1], "event": {**rec["events"][i][1]["event"], "result": COLLECTED}})
+        self.assertIn(f"{rec['task']} on r{rec['repeat']}: a worker's report in a tool result (bash)", self.why(recs))
+
+    def test_a_worker_as_the_engine_runs_it_is_named_by_every_sign(self):
+        # The reactive path as the wire has it: subagent_start then
+        # subagent_collect, offered by the requests, and the worker's own 7
+        # requests in the tap, never on the session's stream.
+        recs = self.qualifying()
+        rec = self.coding_on(recs)
+        w = Wire().start(rec["sent"][0]["text"])
+        w.results(w.round([("subagent_start", {"task": "Look into it."})]), '{"handle_id": "w1", "status": "running"}')
+        w.results(w.round([("subagent_collect", {"handle_id": "w1"})]), COLLECTED)
+        for k in range(4):
+            w.results(w.round([("bash", {"k": k})]))
+        w.round(text="Done.")
+        rec["events"] = w.done().events
+        rec["requests"] = requests_of(rec["events"], "on", tools=EVAL_TOOLS + ("cards_block", "subagent_start", "subagent_collect"), extra=7)
+        why = self.why(recs)
+        for part in ("delegation offered: subagent_collect, subagent_start", "delegation called: subagent_collect ×1, subagent_start ×1",
+                     "a worker's report in a tool result (subagent_collect)",
+                     "14 paid provider requests, 7 usages on the session's stream: not every request is measured"):
+            self.assertIn(part, why)
+
+    def test_each_sign_alone_leaves_it_not_eligible(self):
+        u = len(self.coding_on(self.fx.records())["requests"])  # its usages: a paid request each
+        for name, change, part in [
+            ("offered", lambda r: r.update(requests=requests_of(r["events"], "on", tools=EVAL_TOOLS + ("subagent",))), "delegation offered: subagent"),
+            ("its requests", lambda r: r.update(requests=requests_of(r["events"], "on", extra=7)), f"{u + 7} paid provider requests, {u} usages"),
+            ("a usage the tap never saw", lambda r: r.update(requests=r["requests"][1:]), f"{u - 1} paid provider requests, {u} usages"),
+            ("not recorded", lambda r: r.pop("requests"), "its provider requests weren't recorded"),
+            ("rows", lambda r: r["events"].append((99.0, {"ev": "subagent_rows", "rows": [{"id": 1}]})), "a worker's events: subagent_rows ×1"),
+            ("the harness found it", lambda r: r.update(not_single_agent=["delegation called: subagent ×1"]), "delegation called: subagent ×1"),
+        ]:
+            with self.subTest(name):
+                recs = self.qualifying()
+                change(self.coding_on(recs))
+                self.assertIn(part, self.why(recs))
+
+    def test_a_retried_request_or_a_get_is_no_paid_request(self):
+        w = Wire().start("Q?")
+        w.round(text="A.")
+        events = w.done().events
+        reqs = requests_of(events, "off")
+        self.assertEqual(turns.not_single_agent(events, reqs), [])
+        overloaded = [dict(reqs[0], status=529)] + reqs + [{"path": "/v1/models", "status": 200, "request": None}]
+        self.assertEqual(turns.not_single_agent(events, overloaded), [], "a 529 isn't paid, a GET has no messages")
+        in_flight = reqs + [dict(reqs[0], status=None)]
+        self.assertEqual(turns.not_single_agent(events, in_flight),
+                         ["2 paid provider requests, 1 usages on the session's stream: not every request is measured"])
+
+    def test_shadys_one_shot_aggregate_is_never_a_round(self):
+        # Shady's second: every coding/off run cut to five responses, so the
+        # set's shape fails; then a one-shot worker's start, aggregate usage
+        # and done before an ordinary tool result. At f5a0027 the parser
+        # made the aggregate a sixth round, 22 coding tasks held, and the
+        # report said `passes`. The tap's count balances here (a worker of
+        # one response): the parser and the worker's events still say so.
+        def five(say, worker):
+            w = Wire().start(say)
+            for k in range(4):
+                ids = w.round([("bash", {"k": k})])
+                if worker and k == 0:
+                    one_shot(w)
+                w.results(ids)
+            w.round(text="Done.")
+            return w.done().events
+
+        off = {}
+        for worker in (True, False):
+            recs = self.fx.records()
+            for r in recs:
+                if r["category"] == "coding" and r["arm"] == "off":
+                    r["events"] = five(r["sent"][0]["text"], worker)
+                    r["requests"] = requests_of(r["events"], "off")
+            rep = self.fx.build(recs)
+            off[worker] = rep["also"]["reported_per_arm"]["off"]["output_tokens"]
+            ts = turns.turns(next(r for r in recs if r["category"] == "coding" and r["arm"] == "off")["events"])
+            self.assertEqual([len(x.rounds) for x in ts], [5], "never six")
+            self.assertEqual([[u["output_tokens"] for u in x.worker_usage] for x in ts], [[100_000] if worker else []])
+            self.assertEqual(rep["set_shape"]["coding"]["held"], 0)
+            self.assertEqual(rep["verdict"], "not eligible")
+            why = " / ".join(rep["not_eligible_because"])
+            self.assertIn("the set's shape doesn't hold", why)
+            self.assertEqual("not single-agent" in why, worker)
+            if worker:
+                self.assertIn("a worker's events: subagent_done ×1, subagent_start ×1, a worker's usage on the stream, never a round: "
+                              "1, 100000 output tokens", why)
+                self.assertEqual(rep["also"]["worker_usage_per_arm"]["off"]["output_tokens"], 66 * 100_000, "reported apart")
+        self.assertEqual(off[True], off[False], "never the rounds'")
+
+    def test_a_silent_response_is_still_its_own_round_outside_a_worker(self):
+        # Not "fixed" by dropping every usage with no response begun: a
+        # request that streamed nothing is a round, and a failed one-shot
+        # (no usage at all, `oneshot.rs` 503-530) is still a worker.
+        w = Wire().start("Q?")
+        w.usage(out=3)
+        ids = w.round([("bash", {})])
+        w.stream("agent", "subagent_start", subagent_id=2, agent_name="w", task_preview="p")
+        w.stream("agent", "subagent_done", subagent_id=2, agent_name="w", result_preview="failed", duration_secs=1.0)
+        w.results(ids)
+        w.round(text="A.")
+        ts = turns.turns(w.done().events)
+        self.assertEqual(([r.output for r in ts[0].rounds], ts[0].worker_usage), ([3, 50, 50], []))
+        self.assertIn("a worker's events: subagent_done ×1, subagent_start ×1", turns.not_single_agent(w.events, requests_of(w.events, "off")))
+
+    def test_the_runner_records_it_and_a_run_offered_delegation_stops_the_experiment(self):
+        task = next(t for t in TASKS if t["id"] == "shelf-q-days")
+        req = {"t_sent": 0.0, "t_done": 1.0, "path": "/v1/messages", "status": 200,
+               "request": {"messages": [{"role": "user", "content": "Q?"}], "tools": [{"name": "read"}, {"name": "subagent"}]}}
+        grace, helper = harness.QUEUED_GRACE, harness.helper
+        harness.QUEUED_GRACE, harness.helper = 0, lambda *a: {"lines": []}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                records = []
+                with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
+                    run.run_all(argparse.Namespace(repeats=1, provider="anthropic"), [task], _Iso([1000, 1000]), "claude-haiku-4-5",
+                                desk.StandIn(), Path(tmp), records, tap=type("Tap", (), {"take": lambda self: [req]})(), stamp=run.stamp("real"))
+                written = [json.loads(x) for x in Path(tmp, "records.jsonl").read_text().splitlines()]
+        finally:
+            harness.QUEUED_GRACE, harness.helper = grace, helper
+        self.assertIn("the isolated daemon offered delegation (subagent); B5 is single-agent", str(e.exception))
+        self.assertEqual(len(written), 1, "its record kept, nothing more ran")
+        self.assertEqual((written[0]["offered"], written[0]["not_single_agent"]), (["read", "subagent"], ["delegation offered: subagent"]))
+        self.assertEqual((written[0]["requests"][0]["status"], written[0]["requests"][0]["path"]), (200, "/v1/messages"), "as the tap had it")
+
+    def test_a_pilot_run_that_delegated_isnt_its_tasks_depth(self):
+        coding = [t for t in TASKS if t["category"] == "coding"][:2]
+        recs = []
+        for i, t in enumerate(coding):
+            w = Wire().start("Do it.")
+            for k in range(5):
+                ids = w.round([("bash", {"k": k})])
+                if i == 1 and k == 0:
+                    one_shot(w)
+                w.results(ids)
+            w.round(text="Done.")
+            recs.append({"task": t["id"], "category": "coding", "arm": "off", "repeat": 1, "events": w.done().events, "judge": {"pass": True},
+                         "fold": {"lines": []}, "steps": [], "sent": [], "requests": requests_of(w.events, "off")})
+        rep = report.pilot(recs, {"mode": "pilot", "model": "m", "head": "abc1234", "taskset": "f" * 64})
+        self.assertEqual([(r["rounds"], r["measured"]) for r in rep["tasks"]], [(6, True), (6, False)])
+        self.assertEqual((rep["summary"]["at_depth"], rep["summary"]["not_single_agent"]), (1, [coding[1]["id"]]))
+        self.assertIn(f"(not single-agent: `{coding[1]['id']}`)", report.pilot_markdown(rep))
+
+
 class Pilot(unittest.TestCase):
     """The depth pilot (run.py's `--pilot`): the coding tasks, blocks off,
     once, on the intended model; never B6 data, and no way round the
@@ -1416,7 +1650,7 @@ class Pilot(unittest.TestCase):
                 w.results(w.round([("bash", {"k": k})]))
             w.round(text="Done.")
             recs.append({"task": t["id"], "category": "coding", "arm": "off", "repeat": 1, "events": w.done().events,
-                         "judge": {"pass": i % 7 != 0}, "fold": {"lines": []}, "steps": [], "sent": []})
+                         "judge": {"pass": i % 7 != 0}, "fold": {"lines": []}, "steps": [], "sent": [], "requests": requests_of(w.events, "off")})
         rep = report.pilot(recs, {"mode": "pilot", "model": "claude-sonnet-5-5", "head": "abc1234", "taskset": "f" * 64})
         s = rep["summary"]
         self.assertEqual((rep["eligible_for_b6"], rep["verdict"], s["tasks"], s["of"], s["missing"]), (False, "pilot", 21, 22, [coding[-1]["id"]]))
@@ -1614,7 +1848,8 @@ class SetShape(unittest.TestCase):
         # This set is the frozen one here: eligibility's matrix is the set's.
         taskset.load = lambda *a: [{"id": t, "needs": [], "turns": []} for t in dict.fromkeys(r["task"] for r in recs)]
         try:
-            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}, mode="real", experiment=EXPERIMENT) for r in recs],
+            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}, mode="real", experiment=EXPERIMENT, events=[], requests=[])
+                                 for r in recs],
                                 qualifying(), 900, [], frozen_meta(),
                                 plan=[(r["task"], r["arm"], r["repeat"]) for r in recs])
         finally:

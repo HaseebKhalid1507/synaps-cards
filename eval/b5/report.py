@@ -126,7 +126,15 @@ before it not included).
   judged (one pass or fail each: a run with no judgment is missing
   evidence, never a pass); every user-initiated turn of every run measured
   (turns.py: its `idle`, at least one response, every response's usage);
-  the set's shape; every on-run's card answers and hand-backs happened
+  **every run single-agent with every paid request measured** (review #14
+  round 4, R4-1; turns.py's "Single-agent"), by the record's own events
+  and requests, read again here, and by what the harness found then
+  (`not_single_agent`): no delegation tool offered or called, no worker's
+  event, usage or report, and as many paid requests as usages on the
+  session's stream; a record with no requests is named too. A worker's
+  usage is never a round: it is reported apart (`worker_usage_per_arm`),
+  and the tools the runs' requests offered are reported per arm
+  (`tools_offered`). Then the set's shape; every on-run's card answers and hand-backs happened
   (above); no dismissal refused, and every notice probe delivered in 2 of
   3.
 - `verdict`: `not eligible` unless it is eligible, whatever the rows say;
@@ -207,6 +215,7 @@ def per_turn(rec, counter):
             "input_side": sum(r.input_side for r in t.rounds),
             "usage": {k: sum((r.usage or {}).get(k, 0) for r in t.rounds)
                       for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")},
+            "worker_usage": {k: sum(u.get(k, 0) for u in t.worker_usage) for k in turns.USAGE},  # never a round's
             "closing": {"k": c.k, "rounds": c.closing_rounds, "input": c.closing_input, "complete": c.complete},
             "attributed": a,
             "refusals": ref, "repairs": rep,
@@ -390,6 +399,11 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
            or not all(measured[(rec["task"], rec["arm"], rec["repeat"])])]
     if bad:
         out.append(f"{len(bad)} runs with a turn not measured (no idle, an error, aborted, no response, or a response with no usage)")
+    multi = [(rec, w) for rec in records for w in [single_agent(rec)] if w]
+    if multi:
+        out.append(f"{len(multi)} runs not single-agent, or with a paid request not on the session's stream: "
+                   + "; ".join(f"{rec['task']} {rec['arm']} r{rec['repeat']}: {', '.join(w)}" for rec, w in multi[:5])
+                   + (f"; and {len(multi) - 5} more" if len(multi) > 5 else ""))
     if not shape["holds"]:
         out.append("the set's shape doesn't hold")
     missed = [f"{x['task']} r{x['repeat']}: {w}" for x in interactions(records, tasks) for w in x["missed"]]
@@ -404,6 +418,14 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
     if short:
         out.append(f"the notice probe didn't reach the agent in 2 of 3 on-runs: {', '.join(short)}")
     return out
+
+
+def single_agent(rec):
+    """Why one run isn't single-agent with every paid request measured
+    (module docs, "The verdict"): what the harness found, and what its
+    record's events and requests say now. Empty when it is."""
+    return list(dict.fromkeys(list(rec.get("not_single_agent") or [])
+                              + turns.not_single_agent(rec.get("events") or [], rec.get("requests"))))
 
 
 def interactions(records, tasks=None):
@@ -537,6 +559,9 @@ def build(records, counter, definition, not_run, meta, plan=None):
                                     for arm in ("on", "off") for lat in [[x for r in turn_rows if r["arm"] == arm for x in r["latency"]]]},
         "request_latency_per_round": request_latency(records),
         "reported_per_arm": {arm: _merge([r["usage"] for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
+        "worker_usage_per_arm": {arm: _merge([r.get("worker_usage") or {} for r in turn_rows if r["arm"] == arm]) for arm in ("on", "off")},
+        "tools_offered": {arm: sorted({n for rec in records if rec["arm"] == arm for n in turns.offered(rec.get("requests"))})
+                          for arm in ("on", "off")},
     }
     shape = set_shape(records, turn_rows)
     also["by_bucket"] = by_bucket(records, turn_rows, judged, definition, shape)
@@ -564,14 +589,16 @@ def pilot(records, meta):
     whether it was measured and judged. A screen for the set's long tasks
     before the set is frozen: never B6 data, never eligible, whatever its
     numbers, and one off-run is not the two of three the experiment holds a
-    task to (`set_shape`)."""
+    task to (`set_shape`). A run that isn't single-agent with every paid
+    request measured (`single_agent`; review #14 round 4, R4-1) isn't
+    measured: its rounds aren't the task's depth."""
     rows = []
     for rec in records:
         ts = [x for x in turns.turns(rec["events"]) if x.user_initiated]
-        rounds = sum(len(x.rounds) for x in ts)
+        rounds, why = sum(len(x.rounds) for x in ts), single_agent(rec)
         rows.append({"task": rec["task"], "arm": rec["arm"], "rounds": rounds, "margin": rounds - PILOT_DEPTH, "turns": len(ts),
-                     "measured": bool(ts) and all(x.measured for x in ts), "pass": (rec.get("judge") or {}).get("pass"),
-                     "stopped": rec.get("stopped")})
+                     "measured": bool(ts) and all(x.measured for x in ts) and not why, "not_single_agent": why,
+                     "pass": (rec.get("judge") or {}).get("pass"), "stopped": rec.get("stopped")})
     coding = [x["id"] for x in taskset.load() if x["category"] == "coding"]
     ok = [r for r in rows if r["measured"] and not r["stopped"]]
     return {
@@ -582,6 +609,7 @@ def pilot(records, meta):
                     "at_depth": sum(r["rounds"] >= PILOT_DEPTH for r in ok), "need": taskset.CATEGORIES["coding"],
                     "spares": taskset.SPARES["coding"], "under_depth": sorted(r["task"] for r in ok if r["rounds"] < PILOT_DEPTH),
                     "margins": sorted(r["margin"] for r in ok), "unmeasured": sorted(r["task"] for r in rows if r not in ok),
+                    "not_single_agent": sorted(r["task"] for r in rows if r["not_single_agent"]),
                     "not_off": sorted(r["task"] for r in rows if r["arm"] != "off")},
     }
 
@@ -594,7 +622,8 @@ def pilot_markdown(rep):
              + (f", **stopped: {m['stopped']}**" if m.get("stopped") else "") + ".", "",
              f"{s['at_depth']} of {s['of']} coding tasks reached {PILOT_DEPTH} rounds (the set needs {s['need']}, with "
              f"{s['spares']} spares). Under: {', '.join(f'`{x}`' for x in s['under_depth']) or 'none'}. "
-             f"Not measured: {', '.join(f'`{x}`' for x in s['unmeasured']) or 'none'}. "
+             f"Not measured: {', '.join(f'`{x}`' for x in s['unmeasured']) or 'none'}"
+             + (f" (not single-agent: {', '.join(f'`{x}`' for x in s['not_single_agent'])})" if s["not_single_agent"] else "") + ". "
              f"Not run: {', '.join(f'`{x}`' for x in s['missing']) or 'none'}. "
              "One off-run a task: a screen, not the experiment's two of three.", "",
              "| Task | Rounds | Over 6 | Turns | Measured | Judged |", "|---|---|---|---|---|---|"]

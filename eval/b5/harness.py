@@ -36,7 +36,10 @@ one it closed since.
 Then the run's record: the session's events, its history, the fold report
 (`cards-eval fold`), what the user sent, every prompt the daemon raised
 (each denied: nothing in the eval asks), the requests the provider got,
-and the judged outcome (taskset.py).
+the tools they offered (`offered`), why the run isn't single-agent with
+every paid request measured (`not_single_agent`, turns.py's
+"Single-agent": empty when it is; review #14 round 4, R4-1), and the
+judged outcome (taskset.py).
 
 **The budget** (real runs, spend.py): every usage is priced and written to
 the ledger exactly once, as the session records it (daemon.py's
@@ -166,6 +169,8 @@ class Runner:
         rec["fold"] = (helper(self.iso.cards_eval, "fold", json.dumps(rec["history"], ensure_ascii=False))
                        if rec.get("history") is not None else {"lines": []})
         rec["requests"] = self.requests() if self.requests else []
+        rec["offered"] = turns.offered(rec["requests"])
+        rec["not_single_agent"] = turns.not_single_agent(rec["events"], rec["requests"])
         rec["judge"] = None if stop else taskset.judge(task, ws, text=final_text(rec["events"]))
         rec["t1"] = time.time()
         if stop is not None:
