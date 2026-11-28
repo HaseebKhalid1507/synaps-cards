@@ -4,6 +4,8 @@ providers' request shapes and the tap, spend and the budget guard, and the
 report's gate (pooled and 2 of 3 repeats)."""
 
 import argparse
+import contextlib
+import io
 import json
 import tempfile
 import threading
@@ -834,18 +836,20 @@ class BudgetStop(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             b = spend.Budget(0.7, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
             records = []
+            st = run.stamp("real")
             with self.assertRaises(spend.OverBudget):
                 # Run 1: $0.20. Run 2's one response, $0.60, passes $0.70: cancelled, stopped.
                 run.run_all(argparse.Namespace(repeats=1, provider="anthropic"), [task], _Iso([40_000, 120_000]), "claude-haiku-4-5", desk.StandIn(),
-                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b)
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b, stamp=st)
             written = [json.loads(x) for x in Path(tmp, "records.jsonl").read_text().splitlines()]
             paid = Path(tmp, "paid.jsonl").read_text().splitlines()
         self.assertEqual([r.get("stopped") for r in records], [None, "over budget"])
         self.assertEqual([r["n"] for r in written], [0, 1], "the stopped run is written too")
+        self.assertEqual([(r["mode"], r["experiment"]) for r in written], [("real", st["experiment"])] * 2, "and labelled (R3-2)")
         self.assertEqual((records[0]["judge"]["pass"], records[1]["judge"]), (True, None))
         self.assertEqual(len(paid), 2)
         self.assertAlmostEqual(b.spent, 0.8, places=9)
-        rep = report.build(records, qualifying(), 900, [], frozen_meta(stopped="over budget"),
+        rep = report.build(records, qualifying(), 900, [], frozen_meta(stopped="over budget", experiment=st["experiment"]),
                            plan=[(task["id"], a, r) for r in (1, 2, 3) for a in ("on", "off")])
         self.assertEqual(rep["verdict"], "not eligible")
         self.assertIn("1 runs stopped: over budget", rep["not_eligible_because"])
@@ -933,7 +937,7 @@ class BudgetStop(unittest.TestCase):
             with self.assertRaises(spend.OverBudget) as e:
                 # Run 1 cost $0.40: another as large could pass $0.70.
                 run.run_all(argparse.Namespace(repeats=1, provider="anthropic"), [task], _Iso([80_000, 1]), "claude-haiku-4-5", desk.StandIn(),
-                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b)
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b, stamp=run.stamp("real"))
         self.assertEqual(len(records), 1)
         self.assertIn("no room for run 1 of 2", str(e.exception))
 
@@ -1075,8 +1079,11 @@ def _called(output, call_input):
             "stop": "tool_use", "by_call": True}
 
 
+EXPERIMENT = "e" * 32  # the fixtures' experiment (run.py's `stamp`)
+
+
 def frozen_meta(**kw):
-    return {"mode": "real", "taskset": taskset.FROZEN.read_text().split()[0], "repeats": 3} | kw
+    return {"mode": "real", "experiment": EXPERIMENT, "taskset": taskset.FROZEN.read_text().split()[0], "repeats": 3} | kw
 
 
 class Eligibility(unittest.TestCase):
@@ -1157,7 +1164,8 @@ class Eligibility(unittest.TestCase):
                     steps.append({"step": "dismiss", "outcome": "skipped", "skipped": "no live block"})
             history = [m for x in sent for m in ({"role": "user", "content": x["text"]}, {"role": "assistant", "content": "…"})]
             recs.append({"task": t["id"], "category": t["category"], "arm": arm, "repeat": r + 1, "events": events,
-                         "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent, "history": history})
+                         "fold": {"lines": lines}, "judge": {"pass": True}, "steps": steps, "sent": sent, "history": history,
+                         "mode": "real", "experiment": EXPERIMENT})
         return recs[:len(recs) - drop]
 
     WHOLE = [(t["id"], arm, r + 1) for r, t, arm in harness.plan([dict(x, needs=[]) for x in TASKS], 3)[0]]
@@ -1320,6 +1328,31 @@ class Eligibility(unittest.TestCase):
         self.assertEqual(rep["also"]["notice_probes"][dismissing[1]], {"runs": 3, "clicked": 3, "sent": 3, "delivered": 1, "lost": 2,
                                                                        "refused": 0, "skipped": 0})
 
+    def test_pilot_records_never_qualify_whatever_the_meta_says(self):
+        # Review #14 round 3, R3-2. Shady's: the qualifying whole matrix,
+        # its 22 coding/off/repeat-1 runs a pilot's, under a real run's
+        # meta. At a29f248 it passed: the label was only the meta's.
+        recs = self.records()
+        pilot = [r for r in recs if r["category"] == "coding" and r["arm"] == "off" and r["repeat"] == 1]
+        self.assertEqual(len(pilot), 22)
+        for r in pilot:
+            r["mode"] = "pilot"
+        rep = self.build(recs)
+        self.assertEqual(rep["verdict"], "not eligible")
+        self.assertEqual(rep["not_eligible_because"], ["records not from a real run, never data: 22 pilot"])
+        # A record with no label, or of another experiment, is no better.
+        for r in pilot:
+            del r["mode"]
+        self.assertEqual(self.build(recs)["not_eligible_because"], ["records not from a real run, never data: 22 with no mode"])
+        for r in pilot:
+            r["mode"], r["experiment"] = "real", "p" * 32
+        self.assertEqual(self.build(recs)["not_eligible_because"], [f"records of another experiment than this run's {EXPERIMENT[:12]}: 22"])
+        for r in pilot:
+            r["experiment"] = EXPERIMENT
+        self.assertEqual(self.build(recs)["not_eligible_because"], [])
+        self.assertIn("the run names no experiment", " / ".join(self.build(recs, experiment=None)["not_eligible_because"]))
+        self.assertIn("a pilot's configuration, never data", self.build(recs, config={"pilot": "the coding tasks"})["not_eligible_because"])
+
     def test_a_dry_run_and_another_task_set_are_never_eligible(self):
         recs = self.records()
         self.assertIn("a dry run, never data", self.build(recs, mode="dry")["not_eligible_because"])
@@ -1404,13 +1437,58 @@ class Pilot(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 b = spend.Budget(5, "claude-haiku-4-5", ledger=Path(tmp) / "paid.jsonl")
                 records = []
+                st = run.stamp("pilot")
                 run.run_all(argparse.Namespace(repeats=3, provider="anthropic"), [task], _Iso([1000]), "claude-haiku-4-5", desk.StandIn(),
-                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b, order=[(0, task, "off")])
+                            Path(tmp), records, tap=type("Tap", (), {"take": lambda self: []})(), budget=b, order=[(0, task, "off")],
+                            stamp=st)
                 paid = Path(tmp, "paid.jsonl").read_text().splitlines()
+                written = [json.loads(x) for x in Path(tmp, "records.jsonl").read_text().splitlines()]
         finally:
             harness.QUEUED_GRACE, harness.helper = grace, helper
         self.assertEqual([(r["task"], r["arm"], r["repeat"]) for r in records], [("shelf-q-days", "off", 1)])
         self.assertEqual(len(paid), 1)
+        # Review #14 round 3, R3-2: the raw records say what they are, not
+        # only the pilot's report, and no report makes them eligible.
+        self.assertEqual([(r["mode"], r["experiment"]) for r in written], [("pilot", st["experiment"])])
+        why = report.build(written, qualifying(), 900, [], frozen_meta(experiment=st["experiment"]))["not_eligible_because"]
+        self.assertIn("records not from a real run, never data: 1 pilot", why)
+
+    def test_what_it_writes_says_pilot_and_no_report_makes_it_data(self):
+        # Review #14 round 3, R3-2: run.pilot end to end (its provider and
+        # daemon offline), read back from what it wrote: records.jsonl's
+        # every line is the pilot's, and a report that says it is real
+        # still can't use them.
+        task = next(t for t in TASKS if t["category"] == "coding" and len(t["turns"]) == 1 and set(t["turns"][0]) <= {"say", "say_off"})
+
+        class Iso(_Iso):
+            def install(self):
+                pass
+
+            def start(self):
+                pass
+
+            def stop(self):
+                return {"head": "abc1234", "daemon_exit": 0, "runtime_dir_left": False}
+
+        prov = type("Prov", (), {"has_endpoint": True, "base": "http://x", "model": "claude-haiku-4-5"})()
+        tap = type("Tap", (), {"take": lambda self: [], "close": lambda self: None})()
+        saved = (run.upstream, run.daemon.Isolated, harness.QUEUED_GRACE, harness.helper)
+        run.upstream, run.daemon.Isolated = (lambda a, budget: (prov, tap, {}, a.model)), (lambda *a, **k: Iso([1000]))
+        harness.QUEUED_GRACE, harness.helper = 0, lambda *a: {"lines": []}
+        try:
+            with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+                a = argparse.Namespace(repeats=3, tasks=None, desk=None, d8_stand_in=False, model="claude-haiku-4-5", budget_usd=1.0,
+                                       approved="pilot:claude-haiku-4-5@1", work=tmp, synaps="/x", provider="anthropic", pilot=True,
+                                       dry_run=False, base_url=None)
+                self.assertEqual(run.pilot(a, [task], "f" * 64), 0)
+                written = [json.loads(x) for x in Path(tmp, "records.jsonl").read_text().splitlines()]
+                meta = json.loads(Path(tmp, "pilot.json").read_text())["meta"]
+        finally:
+            run.upstream, run.daemon.Isolated, harness.QUEUED_GRACE, harness.helper = saved
+        self.assertEqual([(r["task"], r["arm"], r["mode"]) for r in written], [(task["id"], "off", "pilot")])
+        self.assertEqual((meta["mode"], meta["experiment"]), ("pilot", written[0]["experiment"]))
+        why = report.build(written, qualifying(), 900, [], frozen_meta(experiment=meta["experiment"]))["not_eligible_because"]
+        self.assertIn("records not from a real run, never data: 1 pilot", why)
 
     def test_its_estimate_and_budget(self):
         t = estimate.table(TASKS)
@@ -1536,7 +1614,8 @@ class SetShape(unittest.TestCase):
         # This set is the frozen one here: eligibility's matrix is the set's.
         taskset.load = lambda *a: [{"id": t, "needs": [], "turns": []} for t in dict.fromkeys(r["task"] for r in recs)]
         try:
-            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}) for r in recs], qualifying(), 900, [], frozen_meta(),
+            return report.build([dict(r, fold={"lines": []}, judge={"pass": True}, mode="real", experiment=EXPERIMENT) for r in recs],
+                                qualifying(), 900, [], frozen_meta(),
                                 plan=[(r["task"], r["arm"], r["repeat"]) for r in recs])
         finally:
             report.per_turn, report.rows_of, taskset.load = orig

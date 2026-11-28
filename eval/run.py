@@ -48,12 +48,21 @@ the other way round), and a budget. No desk (blocks off: nothing rides a
 message, so the stand-in passes the text through), no calibration, no
 output or definition control, no counter: it measures rounds, nothing
 attributed. It never relaxes the experiment's rules: `--repeats`,
-`--tasks`, `--desk` and `--d8-stand-in` are refused, and its records are
-`mode: pilot`, which the report never makes eligible. It writes
+`--tasks`, `--desk` and `--d8-stand-in` are refused, and every record it
+writes is `mode: pilot`, which the report never makes eligible, whatever
+the report it lands in says of itself (below). It writes
 `pilot.json` and `pilot.md` (report.py's `pilot`): each task's rounds and
 their margin over 6, and the head, tree and task-set digest it ran.
 One off-run per task is a screen, not the two-of-three the experiment
 holds a task to.
+
+**Every record says what made it** (`stamp`; review #14 round 3, R3-2):
+`records.jsonl`'s every line, a run the budget stopped included, carries
+the invocation's `mode` (`dry`, `real` or `pilot`) and `experiment`, an
+id fresh for each invocation, and so does `meta`. A report is eligible
+only if every one of its records is a real run's of its own experiment
+(report.py's "The verdict"), so a pilot's or a dry run's records can't
+be reused in one, whatever its `meta` says.
 
 **The run's record** (`report.json`'s `meta`) is what B5b needs to say it ran
 the same harness: the head and whether its tree was clean, the task set's
@@ -77,6 +86,7 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -146,7 +156,7 @@ def dry(a, tasks, frozen):
     iso = daemon.Isolated(a.synaps, work, env={"LOCAL_ENDPOINT": model.url})
     d = desk.StandIn()
     d.hello()
-    started = time.time()
+    started, st = time.time(), stamp("dry")
     try:
         iso.install()
         iso.start()
@@ -163,11 +173,11 @@ def dry(a, tasks, frozen):
         model.requests.clear()
         records = []
         definition = run_all(a, tasks, iso, "local/stub", d, work, records, model=model, dry=True,
-                             count_request=lambda body: prov.count(body))
+                             count_request=lambda body: prov.count(body), stamp=st)
     finally:
         rec = iso.stop()
         model.close()
-    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "dry", "local/stub (scripted)",
+    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, st, "local/stub (scripted)",
                   config(a, prov, d, endpoint=False))
 
 
@@ -193,7 +203,7 @@ def real(a, tasks, frozen):
     prov, tap, env, model_id = upstream(a, budget)
     iso = daemon.Isolated(a.synaps, work, env=env)
     started = time.time()
-    records, definition, stopped = [], None, None
+    records, definition, stopped, st = [], None, None, stamp("real")
     counter = count.NoCounter("the run stopped before its calibration finished")
     try:
         iso.install()
@@ -219,7 +229,7 @@ def real(a, tasks, frozen):
                                                            **body}, indent=1))
         tap.take()
         definition = run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget,
-                             count_request=prov.count)
+                             count_request=prov.count, stamp=st)
     except spend.OverBudget as e:
         stopped = f"over budget: {e}"
         print(f"stopped: {e}", file=sys.stderr)
@@ -228,7 +238,7 @@ def real(a, tasks, frozen):
         tap.close()
         the_desk.close()
     rec["spent_usd"], rec["stopped"] = round(budget.spent, 4), stopped
-    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, "real", a.model,
+    return finish(a, work, records, counter, definition, tasks, frozen, rec, started, st, a.model,
                   config(a, prov, the_desk, endpoint=prov.has_endpoint))
 
 
@@ -267,12 +277,12 @@ def pilot(a, tasks, frozen):
     the_desk.hello()
     prov, tap, env, model_id = upstream(a, budget)
     iso = daemon.Isolated(a.synaps, work, env=env)
-    started, records, stopped = time.time(), [], None
+    started, records, stopped, st = time.time(), [], None, stamp("pilot")
     try:
         iso.install()
         iso.start()
         tap.take()
-        run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget, order=harness.pilot_plan(tasks))
+        run_all(a, tasks, iso, model_id, the_desk, work, records, tap=tap, budget=budget, order=harness.pilot_plan(tasks), stamp=st)
     except spend.OverBudget as e:
         stopped = f"over budget: {e}"
         print(f"stopped: {e}", file=sys.stderr)
@@ -280,7 +290,7 @@ def pilot(a, tasks, frozen):
         rec = iso.stop()
         tap.close()
     rec["spent_usd"], rec["stopped"] = round(budget.spent, 4), stopped
-    meta = {"mode": "pilot", "model": a.model, "head": rec.get("head"), "head_dirty": rec.get("head_dirty"), "taskset": frozen,
+    meta = {"mode": st["mode"], "experiment": st["experiment"], "model": a.model, "head": rec.get("head"), "head_dirty": rec.get("head_dirty"), "taskset": frozen,
             "synaps": rec.get("synaps_version"), "synaps_sha256": rec.get("synaps_sha256"), "daemon": rec,
             "config": config(a, prov, the_desk, endpoint=prov.has_endpoint), "secs": round(time.time() - started, 1),
             "stopped": stopped, "spent_usd": rec["spent_usd"]}
@@ -327,12 +337,23 @@ def _block_tools(iso):
              "input_schema": json.loads((plugin / "crates/cards-spec/schema-blocks.json").read_text())}]
 
 
-def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=None, budget=None, dry=False, count_request=None,
-            order=None):
+MODES = ("dry", "real", "pilot")
+
+
+def stamp(mode):
+    """What every record of an invocation carries (module docs, "Every
+    record says what made it"): its mode, and an experiment id of its own."""
+    if mode not in MODES:
+        raise ValueError(f"mode {mode!r}, not one of {MODES}")
+    return {"mode": mode, "experiment": uuid.uuid4().hex}
+
+
+def run_all(a, tasks, iso, model_id, the_desk, work, records, *, stamp, model=None, tap=None, budget=None, dry=False,
+            count_request=None, order=None):
     """Every run of the plan (or of `order`, the pilot's), each record
-    appended to `records` and to `records.jsonl` as it finishes, a run the
-    budget stopped included (it raises on, its record kept): the
-    definition control's count."""
+    stamped (`stamp`, module docs) and appended to `records` and to
+    `records.jsonl` as it finishes, a run the budget stopped included (it
+    raises on, its record kept): the definition control's count."""
     if order is None:
         order, _ = harness.plan(tasks, a.repeats)
     if tap is not None:
@@ -350,6 +371,7 @@ def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=No
     firsts = {}
 
     def keep(rec):
+        rec.update(stamp)
         out.write(json.dumps(rec, ensure_ascii=False) + "\n")
         out.flush()
         records.append(rec)
@@ -383,10 +405,10 @@ def run_all(a, tasks, iso, model_id, the_desk, work, records, model=None, tap=No
     return definition
 
 
-def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, mode, model, cfg=None):
+def finish(a, work, records, counter, definition, tasks, frozen, daemon_rec, started, st, model, cfg=None):
     # Eligibility checks the runs against the prescribed plan: three repeats, whatever --repeats was.
     order, not_run = harness.plan(tasks, len(report.REPEATS))
-    meta = {"mode": mode, "model": model, "head": daemon_rec.get("head"), "taskset": frozen, "repeats": a.repeats,
+    meta = {"mode": st["mode"], "experiment": st["experiment"], "model": model, "head": daemon_rec.get("head"), "taskset": frozen, "repeats": a.repeats,
             "synaps": daemon_rec.get("synaps_version"), "synaps_sha256": daemon_rec.get("synaps_sha256"),
             "head_dirty": daemon_rec.get("head_dirty"), "daemon": daemon_rec, "config": cfg or {},
             "secs": round(time.time() - started, 1), "stopped": daemon_rec.get("stopped")}

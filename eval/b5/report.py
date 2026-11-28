@@ -106,8 +106,14 @@ before it not included).
   exercised.
 - `eligible_for_b6`: the run is the experiment §2.8 prescribes, so its rows
   can flip the default. Every condition is checked and each one missing is
-  named (`not_eligible_because`): a real run (a dry run is never data); a
-  counter that can flip the default (the endpoint, or a fitted proxy:
+  named (`not_eligible_because`): a real run (a dry run is never data,
+  nor a pilot, nor a run with a pilot's configuration), and **each record
+  a real run's of this experiment**, by its own label, never only the
+  meta's (review #14 round 3, R3-2; run.py's "Every record says what made
+  it"): a record whose `mode` isn't `real`, or that has none, or whose
+  `experiment` isn't the meta's, is named, and so is a meta with no
+  experiment, so a pilot's records can't be reused in a report that says
+  it is real; a counter that can flip the default (the endpoint, or a fitted proxy:
   count.py); the frozen task set (its digest); exactly three repeats;
   **the frozen set's whole matrix** (`required`): every task of the set,
   the D8 hand-backs included, × both arms × repeats 1–3, each run there
@@ -327,6 +333,19 @@ def eligibility(records, turn_rows, counter, meta, plan, shape):
     out = []
     if meta.get("mode") != "real":
         out.append(f"a {meta.get('mode')} run, never data")
+    if (meta.get("config") or {}).get("pilot"):
+        out.append("a pilot's configuration, never data")
+    labels = collections.Counter(r.get("mode") for r in records if r.get("mode") != "real")
+    if labels:
+        out.append("records not from a real run, never data: "
+                   + ", ".join(f"{n} {m}" if m else f"{n} with no mode" for m, n in sorted(labels.items(), key=lambda x: str(x[0]))))
+    exp = meta.get("experiment")
+    if not exp:
+        out.append("the run names no experiment: its records' provenance is unknown")
+    else:
+        others = sum(r.get("experiment") != exp for r in records)
+        if others:
+            out.append(f"records of another experiment than this run's {exp[:12]}: {others}")
     c = counter.describe()
     if not c.get("can_flip_default"):
         out.append(f"the counter is {c.get('kind')}, which can't flip the default" + (f": {c['why_not']}" if c.get("why_not") else ""))
