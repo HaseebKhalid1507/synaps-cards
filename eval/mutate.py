@@ -157,8 +157,9 @@ MUTATIONS = [
     ("judge: numbers in any order and amount (P2 8)", X, 'if "numbers" in e and numbers(text) != [float(x) for x in e["numbers"]]:',
      'if "numbers" in e and not set(float(x) for x in e["numbers"]) <= set(numbers(text) or []):'),
     ("judge: items matched loosely, extra items allowed (P2 8)", X,
-     "            ok = len(got) == len(pats) and all(sum(bool(p.fullmatch(g)) for g in got) == 1 for p in pats) \\\n",
-     "            ok = all(any(p.search(g) for g in got) for p in pats) or \\\n"),
+     "            ok = len(got) == len(pats) and all(sum(bool(p.fullmatch(g)) for g in got) == 1 for p in pats) \\\n"
+     "                and all(sum(bool(p.fullmatch(g)) for p in pats) == 1 for g in got)\n",
+     "            ok = all(any(p.search(g) for g in got or []) for p in pats)\n"),
     ("hand-back: off, the opening asks for a block too (P1 3)", H,
      'starter["say_off"] if self.arm == "off" and "say_off" in starter else starter["say"]', 'starter["say"]'),
     ("hand-back: off, the desk is asked for a block (P1 3)", H, '            if self.arm == "on":\n                block = live_block(',
